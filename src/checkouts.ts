@@ -31,8 +31,8 @@ export interface CheckoutStatus {
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
-/** Drop URL userinfo so a credential-bearing remote never reaches output. */
-function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1"); }
+/** Drop URL userinfo, query, and fragment so a credential-bearing remote never reaches output. */
+function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, ""); }
 
 function verifyCheckout(directory: string, repo: string, url: string): void {
   const top = git(directory, ["rev-parse", "--show-toplevel"]);

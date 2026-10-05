@@ -50,6 +50,7 @@ describe("repository helpers", () => {
     }
     expect(parseGitHubRepo("https://gitlab.com/a2f0/nc.git")).toBeUndefined();
     expect(parseGitHubRepo("/tmp/remote.git")).toBeUndefined();
+    expect(parseGitHubRepo("https://github.com/a2f0/nc.git?access_token=secret")).toBeUndefined();
   });
 
   test("selects repositories by full or checkout name", () => {

@@ -73,7 +73,7 @@ export function cloneUrl(repo: string, protocol: Manifest["protocol"]): string {
 
 /** Normalize the GitHub remote URL forms Git accepts to owner/name. */
 export function parseGitHubRepo(url: string): string | undefined {
-  const match = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/(?:[^@/]+@)?github\.com\/)([^/]+\/[^/]+?)(?:\.git)?\/?$/i.exec(url);
+  const match = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/(?:[^@/]+@)?github\.com\/)([A-Za-z0-9-]+\/[A-Za-z0-9._-]+?)(?:\.git)?\/?$/i.exec(url);
   return match?.[1];
 }
 

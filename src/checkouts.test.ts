@@ -95,6 +95,8 @@ describe("syncRepo", () => {
     expect(syncRepo(root, REPO, remote)).toMatchObject({ reason: "origin is a2f0/other, expected a2f0/demo" });
     run(checkout, "remote", "set-url", "origin", "https://user:secret@example.com/demo.git");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ error: "origin is https://example.com/demo.git, expected a2f0/demo" });
+    run(checkout, "remote", "set-url", "origin", "https://github.com/a2f0/other.git?access_token=secret#secret");
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ error: "origin is https://github.com/a2f0/other.git, expected a2f0/demo" });
   });
 
   test("refuses to overwrite ignored local files that upstream starts tracking", () => {
