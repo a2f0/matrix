@@ -2,9 +2,12 @@ import { spawnSync } from "node:child_process";
 
 interface GitResult { readonly status: number | null; readonly stdout: string; readonly stderr: string }
 
-/** Run Git without checkout hooks or credential prompts; workspace upkeep never runs repository code. */
+/**
+ * Run Git without hooks, fsmonitor, or credential prompts. Configured filter
+ * drivers such as Git LFS still run, as they must for a correct checkout.
+ */
 export function git(cwd: string, args: string[]): GitResult {
-  const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", ...args], {
+  const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },

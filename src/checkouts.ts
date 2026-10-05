@@ -54,7 +54,7 @@ function currentBranch(directory: string): string | null {
 }
 
 function changeCount(directory: string): number {
-  const status = gitOutput(directory, ["status", "--porcelain"]);
+  const status = gitOutput(directory, ["status", "--porcelain", "--untracked-files=normal"]);
   return status ? status.split("\n").length : 0;
 }
 
@@ -89,7 +89,8 @@ export function syncRepo(root: string, repo: string, url: string): SyncResult {
       const ahead = gitSucceeds(directory, ["merge-base", "--is-ancestor", remote, "HEAD"]);
       return { ...state, action: "skipped", reason: `local ${state.branch} ${ahead ? "has unpushed commits" : "has diverged from origin"}` };
     }
-    gitOutput(directory, ["merge", "--quiet", "--ff-only", remote]);
+    // Git otherwise replaces ignored local files, such as .env, that upstream starts tracking.
+    gitOutput(directory, ["merge", "--quiet", "--ff-only", "--no-overwrite-ignore", remote]);
     return { ...state, action: "updated", head: remote };
   } catch (error) {
     return { ...base, action: "error", reason: message(error) };

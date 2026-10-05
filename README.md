@@ -38,8 +38,9 @@ and exits non-zero when any repository errors.
 that `origin` is the managed repository, fetches, and refreshes `origin/HEAD`.
 It fast-forwards only when the default branch is checked out with no local
 changes. A dirty checkout, another branch, a detached HEAD, or unpushed local
-commits are reported as `skipped`. Git hooks are disabled for these operations,
-so upkeep never runs repository code.
+commits are reported as `skipped`, and a fast-forward that would overwrite
+ignored local files fails instead. Git hooks and fsmonitor are disabled for
+these operations; configured filter drivers such as Git LFS still run.
 
 `status` reads local state only. A checkout is `ready` when it is on origin's
 default branch at its last fetched commit with no local changes; `ahead` and

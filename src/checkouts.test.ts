@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
@@ -89,6 +89,42 @@ describe("syncRepo", () => {
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error", reason: "origin is git@github.com:a2f0/other.git, expected a2f0/demo" });
   });
 
+  test("refuses to overwrite ignored local files that upstream starts tracking", () => {
+    commit(seed, ".gitignore", "local.env\n");
+    run(seed, "push", "-q", remote, "HEAD");
+    syncRepo(root, REPO, remote);
+    writeFileSync(path.join(checkout, "local.env"), "secret\n");
+    const head = run(checkout, "rev-parse", "HEAD");
+    writeFileSync(path.join(seed, "local.env"), "upstream\n");
+    run(seed, "add", "-f", "local.env");
+    run(seed, "commit", "-q", "-m", "track local.env");
+    run(seed, "push", "-q", remote, "HEAD");
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error" });
+    expect(readFileSync(path.join(checkout, "local.env"), "utf8")).toBe("secret\n");
+    expect(run(checkout, "rev-parse", "HEAD")).toBe(head);
+  });
+
+  test("runs no checkout hooks or fsmonitor that plain Git would run", () => {
+    syncRepo(root, REPO, remote);
+    const marker = path.join(temporary, "ran.log");
+    mkdirSync(path.join(checkout, ".git", "hooks"), { recursive: true });
+    writeFileSync(path.join(checkout, ".git", "hooks", "post-merge"), `#!/bin/sh\necho post-merge >> "${marker}"\n`, { mode: 0o755 });
+    const fsmonitor = path.join(temporary, "fsmonitor");
+    writeFileSync(fsmonitor, `#!/bin/sh\necho fsmonitor >> "${marker}"\nexit 1\n`, { mode: 0o755 });
+    run(checkout, "config", "core.fsmonitor", fsmonitor);
+    publish("two\n");
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "updated" });
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: true });
+    expect(existsSync(marker)).toBe(false);
+
+    publish("three\n");
+    run(checkout, "fetch", "-q", "origin");
+    run(checkout, "merge", "-q", "--ff-only", "origin/main");
+    run(checkout, "status", "--porcelain");
+    expect(readFileSync(marker, "utf8")).toContain("post-merge");
+    expect(readFileSync(marker, "utf8")).toContain("fsmonitor");
+  });
+
   test("reports a clone failure as an error", () => {
     expect(syncRepo(root, REPO, path.join(temporary, "missing.git"))).toMatchObject({ action: "error" });
   });
@@ -123,6 +159,15 @@ describe("checkoutStatus", () => {
     publish("two\n");
     run(checkout, "fetch", "-q", "origin");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, behind: 1 });
+  });
+
+  test("counts untracked files even when Git is configured to hide them", () => {
+    syncRepo(root, REPO, remote);
+    run(checkout, "config", "status.showUntrackedFiles", "no");
+    writeFileSync(path.join(checkout, "draft.txt"), "draft\n");
+    expect(run(checkout, "status", "--porcelain")).toBe("");
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "uncommitted changes" });
   });
 
   test("lists unmanaged checkout entries without touching them", () => {
