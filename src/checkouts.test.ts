@@ -206,6 +206,15 @@ describe("syncRepo", () => {
     expect(run(checkout, "rev-parse", "origin/main")).toBe(head);
   });
 
+  test("keeps local-only tags when fetch.pruneTags is configured", () => {
+    syncRepo(root, REPO, remote);
+    run(checkout, "config", "fetch.pruneTags", "true");
+    run(checkout, "tag", "local-only");
+    publish("two\n");
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "updated" });
+    expect(run(checkout, "tag", "--list", "local-only")).toBe("local-only");
+  });
+
   test("ignores inherited Git repository variables such as those set inside hooks", () => {
     syncRepo(root, REPO, remote);
     const external = path.join(temporary, "external");

@@ -44,7 +44,10 @@ these operations; configured filter drivers such as Git LFS still run.
 
 `status` reads local state only. A checkout is `ready` when it is on origin's
 default branch at its last fetched commit with no local changes; `ahead` and
-`behind` compare HEAD with that branch. Entries under `checkouts/` that the
+`behind` compare HEAD with that branch. Checkouts must be standalone, full
+clones: symlinks, worktrees, and linked Git directories are rejected, and any
+assume-unchanged or skip-worktree entry (including a sparse checkout) counts as
+a local change that needs attention. Entries under `checkouts/` that the
 manifest does not manage are listed as `unmanaged` and left alone.
 
 ## Managed repositories
