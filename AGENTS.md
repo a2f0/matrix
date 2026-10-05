@@ -23,7 +23,9 @@ and resolve only fully addressed findings.
 
 ## Sweeps across checkouts
 
-A sweep applies one requested change to many checkouts.
+A sweep applies one requested change to many checkouts. Coordinate it from a
+session started in this directory; checkouts outside a session's working
+directories can make delegated agents stop for permission prompts.
 
 1. Run `bun run sync`, then `bun run status`. Change only checkouts whose
    status is `ready`. Report the rest (local changes, another branch, diverged,
@@ -37,18 +39,25 @@ A sweep applies one requested change to many checkouts.
 3. Inspect before editing; the same request often needs different edits per
    repository. When the change does not apply or is already true, record that
    and leave the checkout untouched.
-4. Use one branch name for the whole sweep, such as `sweep/<topic>`, created
-   from the synced default branch. Run the checkout's documented setup before
-   committing so its hooks run. Commit only the sweep's change.
+4. Use one branch name for the whole sweep in the `<type>/<topic>` form with a
+   Conventional Commits type, such as `chore/<topic>`; several repositories
+   reject other branch names. Create it from the synced default branch with
+   `git switch --no-track -c <branch>`, and push with an explicit remote, as in
+   `git push -u origin HEAD`, so user Git settings cannot point the branch at a
+   local upstream. Run the checkout's documented setup before committing so its
+   hooks run. Commit only the sweep's change.
 5. Ship each checkout independently with the `ship-pr` workflow. Use the
    checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
    `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.
    Every checkout needs its own validation and independent review.
 6. Stop once each PR is open unless the request explicitly authorizes merging.
    When merging is authorized, follow each repository's CI, merge, and
-   deployment policy. Never weaken a repository's policy to make a sweep uniform.
+   deployment policy; some merges deploy sites or publish packages. Never weaken
+   a repository's policy to make a sweep uniform.
 7. When the harness supports subagents, delegate one checkout per subagent with
    its checkout path and these rules; do not edit a delegated checkout yourself.
+   Run at most four at a time: concurrent validation suites saturate the machine
+   and cause timing failures.
    Keep a ledger per repository: branch, commit, validation, review verdict, PR,
    merge, or the reason it was skipped or failed. Finish with that ledger.
 8. After the PRs merge, use the `reset` skill in each checkout, then run

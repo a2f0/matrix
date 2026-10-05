@@ -73,20 +73,22 @@ unmanaged until you delete it.
 
 ## Sweeps
 
-Start a harness at the workspace root and describe the change:
+Start a harness at the workspace root, so every checkout is inside its working
+directory, and describe the change:
 
 > Make sure every repository's package manifests declare `"license": "UNLICENSED"`.
 > Open a PR per repository; do not merge.
 
 `AGENTS.md` defines the procedure: sync and check status, read each checkout's
-own guidance, use one branch name per sweep, validate and independently review
-each repository, stop at open PRs unless merging is authorized, and report a
-per-repository ledger. Each repository ships under its own policy and pinned
+own guidance, use one `<type>/<topic>` branch per sweep, delegate at most four
+repositories at a time, validate and independently review each repository,
+stop at open PRs unless merging is authorized, and report a per-repository
+ledger. Each repository ships under its own policy and pinned
 agent-tool; matrix never overrides a repository's rules.
 
-The shared skills come from the pinned
-[agent-tool](https://github.com/a2f0/agent-tool) dependency. After changing the
-pin, run `bun run agents:sync` and commit the updated skills.
+The shared skills come from the exact-pinned
+[`@a2f0/agent-tool`](https://www.npmjs.com/package/@a2f0/agent-tool) package.
+After changing the pin, run `bun run agents:sync` and commit the updated skills.
 
 ## Development
 
