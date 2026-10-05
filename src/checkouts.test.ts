@@ -159,6 +159,38 @@ describe("syncRepo", () => {
     expect(run(external, "rev-parse", "HEAD")).toBe(head);
   });
 
+  test("refuses worktrees and linked Git directories of clones outside the workspace", () => {
+    const external = path.join(temporary, "external");
+    run(temporary, "clone", "-q", remote, external);
+    const head = run(external, "rev-parse", "HEAD");
+    publish("two\n");
+    const refused = { action: "error", reason: "not a standalone clone with its own .git directory" };
+
+    run(external, "worktree", "add", "-q", "--detach", checkout);
+    expect(syncRepo(root, REPO, remote)).toMatchObject(refused);
+    run(external, "worktree", "remove", "--force", checkout);
+
+    mkdirSync(checkout, { recursive: true });
+    symlinkSync(path.join(external, ".git"), path.join(checkout, ".git"));
+    expect(syncRepo(root, REPO, remote)).toMatchObject(refused);
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, error: refused.reason });
+    expect(run(external, "rev-parse", "main")).toBe(head);
+    expect(run(external, "rev-parse", "origin/main")).toBe(head);
+  });
+
+  test("names the remote origin regardless of clone.defaultRemoteName", () => {
+    const saved = { ...process.env };
+    Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "clone.defaultRemoteName", GIT_CONFIG_VALUE_0: "upstream" });
+    try {
+      expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "cloned", defaultBranch: "main" });
+    } finally {
+      for (const key of ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]) {
+        if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+      }
+    }
+    expect(run(checkout, "remote")).toBe("origin");
+  });
+
   test("reports a clone failure as an error", () => {
     expect(syncRepo(root, REPO, path.join(temporary, "missing.git"))).toMatchObject({ action: "error" });
   });

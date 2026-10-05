@@ -45,9 +45,19 @@ function rejectSymlinks(root: string, directory: string): void {
   }
 }
 
+function isDirectory(file: string): boolean {
+  try { return lstatSync(file).isDirectory(); } catch { return false; }
+}
+
 function verifyCheckout(directory: string, repo: string, url: string): void {
   const top = git(directory, ["rev-parse", "--show-toplevel"]);
   if (top.status !== 0 || top.stdout !== realpathSync(directory)) throw new Error("not a separate Git checkout");
+  // A worktree, gitfile, or symlinked .git would let sync move another clone's refs.
+  const gitDirectory = path.join(directory, ".git");
+  const common = gitOutput(directory, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (!isDirectory(gitDirectory) || realpathSync(common) !== realpathSync(gitDirectory)) {
+    throw new Error("not a standalone clone with its own .git directory");
+  }
   const origin = git(directory, ["remote", "get-url", "origin"]);
   if (origin.status !== 0) throw new Error("has no origin remote");
   const actual = parseGitHubRepo(origin.stdout);
@@ -88,7 +98,7 @@ export function syncRepo(root: string, repo: string, url: string): SyncResult {
     rejectSymlinks(root, directory);
     if (!existsSync(directory)) {
       mkdirSync(path.dirname(directory), { recursive: true });
-      gitOutput(root, ["clone", "--quiet", url, directory]);
+      gitOutput(root, ["clone", "--quiet", "--origin", "origin", url, directory]);
       return { ...base, action: "cloned", ...snapshot(directory) };
     }
     verifyCheckout(directory, repo, url);
