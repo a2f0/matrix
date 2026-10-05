@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { git, gitOutput, gitSucceeds } from "./git";
 import { CHECKOUTS, checkoutPath, parseGitHubRepo, repoName } from "./manifest";
@@ -33,6 +33,17 @@ function message(error: unknown): string { return error instanceof Error ? error
 
 /** Drop URL userinfo, query, and fragment so a credential-bearing remote never reaches output. */
 function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, ""); }
+
+function isSymlink(file: string): boolean {
+  try { return lstatSync(file).isSymbolicLink(); } catch { return false; }
+}
+
+/** Keep every Git operation inside the workspace; a symlink could reach a day-to-day clone. */
+function rejectSymlinks(root: string, directory: string): void {
+  for (const entry of [path.join(root, CHECKOUTS), directory]) {
+    if (isSymlink(entry)) throw new Error(`${path.relative(root, entry)} is a symlink; checkouts must be clones inside the workspace`);
+  }
+}
 
 function verifyCheckout(directory: string, repo: string, url: string): void {
   const top = git(directory, ["rev-parse", "--show-toplevel"]);
@@ -74,6 +85,7 @@ export function syncRepo(root: string, repo: string, url: string): SyncResult {
   const directory = checkoutPath(root, repo);
   const base = { repo, path: path.relative(root, directory) };
   try {
+    rejectSymlinks(root, directory);
     if (!existsSync(directory)) {
       mkdirSync(path.dirname(directory), { recursive: true });
       gitOutput(root, ["clone", "--quiet", url, directory]);
@@ -104,8 +116,9 @@ export function syncRepo(root: string, repo: string, url: string): SyncResult {
 export function checkoutStatus(root: string, repo: string, url: string): CheckoutStatus {
   const directory = checkoutPath(root, repo);
   const base = { repo, path: path.relative(root, directory) };
-  if (!existsSync(directory)) return { ...base, present: false, ready: false };
   try {
+    rejectSymlinks(root, directory);
+    if (!existsSync(directory)) return { ...base, present: false, ready: false };
     verifyCheckout(directory, repo, url);
     const state = snapshot(directory);
     const changes = changeCount(directory);
@@ -124,7 +137,7 @@ export function unmanagedCheckouts(root: string, repos: string[]): string[] {
   if (!existsSync(directory)) return [];
   const managed = new Set(repos.map(repo => repoName(repo).toLowerCase()));
   return readdirSync(directory)
-    .filter(name => !name.startsWith(".") && !managed.has(name.toLowerCase()))
+    .filter(name => name !== ".DS_Store" && !managed.has(name.toLowerCase()))
     .sort()
     .map(name => path.join(CHECKOUTS, name));
 }

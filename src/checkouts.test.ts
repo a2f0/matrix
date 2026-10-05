@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
@@ -135,6 +135,30 @@ describe("syncRepo", () => {
     expect(readFileSync(marker, "utf8")).toContain("fsmonitor");
   });
 
+  test("refuses symlinked checkouts that could reach clones outside the workspace", () => {
+    const external = path.join(temporary, "external");
+    run(temporary, "clone", "-q", remote, external);
+    const head = run(external, "rev-parse", "HEAD");
+    publish("two\n");
+    const refused = { action: "error", reason: "checkouts/demo is a symlink; checkouts must be clones inside the workspace" };
+
+    mkdirSync(path.join(root, "checkouts"));
+    symlinkSync(external, checkout);
+    expect(syncRepo(root, REPO, remote)).toMatchObject(refused);
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ present: true, ready: false, error: refused.reason });
+    rmSync(checkout);
+    symlinkSync(path.join(temporary, "missing"), checkout);
+    expect(syncRepo(root, REPO, remote)).toMatchObject(refused);
+    rmSync(checkout);
+
+    rmSync(path.join(root, "checkouts"), { recursive: true });
+    mkdirSync(path.join(temporary, "elsewhere"));
+    symlinkSync(external, path.join(temporary, "elsewhere", "demo"));
+    symlinkSync(path.join(temporary, "elsewhere"), path.join(root, "checkouts"));
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error", reason: "checkouts is a symlink; checkouts must be clones inside the workspace" });
+    expect(run(external, "rev-parse", "HEAD")).toBe(head);
+  });
+
   test("reports a clone failure as an error", () => {
     expect(syncRepo(root, REPO, path.join(temporary, "missing.git"))).toMatchObject({ action: "error" });
   });
@@ -199,7 +223,8 @@ describe("checkoutStatus", () => {
   test("lists unmanaged checkout entries without touching them", () => {
     syncRepo(root, REPO, remote);
     mkdirSync(path.join(root, "checkouts", "old-clone"));
+    mkdirSync(path.join(root, "checkouts", ".github"));
     writeFileSync(path.join(root, "checkouts", ".DS_Store"), "");
-    expect(unmanagedCheckouts(root, [REPO, "a2f0/missing"])).toEqual(["checkouts/old-clone"]);
+    expect(unmanagedCheckouts(root, [REPO, "a2f0/missing"])).toEqual(["checkouts/.github", "checkouts/old-clone"]);
   });
 });
