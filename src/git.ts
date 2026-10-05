@@ -27,6 +27,8 @@ export function git(cwd: string, args: string[]): GitResult {
     cwd,
     encoding: "utf8",
     env: environment(),
+    // Listings such as `ls-files -v` exceed the 1 MiB default in large repositories.
+    maxBuffer: 256 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (result.error) throw new Error(`Could not run git: ${result.error.message}`);
