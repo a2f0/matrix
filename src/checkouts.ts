@@ -22,6 +22,7 @@ export interface CheckoutStatus {
   readonly branch?: string | null;
   readonly defaultBranch?: string;
   readonly head?: string;
+  /** Local changes, including tracked files flagged assume-unchanged or skip-worktree. */
   readonly changes?: number;
   /** Commits on HEAD that origin's default branch lacks, and the reverse. */
   readonly ahead?: number;
@@ -77,9 +78,14 @@ function currentBranch(directory: string): string | null {
   return ref.status === 0 ? ref.stdout : null;
 }
 
+function lines(output: string): string[] { return output ? output.split("\n") : []; }
+
+/** Status entries plus index entries whose flags hide edits from status, counted as changes. */
 function changeCount(directory: string): number {
-  const status = gitOutput(directory, ["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"]);
-  return status ? status.split("\n").length : 0;
+  const status = lines(gitOutput(directory, ["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"]));
+  // `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree entries with S.
+  const hidden = lines(gitOutput(directory, ["ls-files", "-v"])).filter(line => /^[a-zS] /.test(line));
+  return status.length + hidden.length;
 }
 
 function snapshot(directory: string) {

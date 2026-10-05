@@ -268,6 +268,21 @@ describe("checkoutStatus", () => {
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "uncommitted changes" });
   });
 
+  test("counts tracked files whose index flags hide edits from status", () => {
+    syncRepo(root, REPO, remote);
+    for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
+      run(checkout, "update-index", flag, "README.md");
+      writeFileSync(path.join(checkout, "README.md"), "edited\n");
+      expect(run(checkout, "status", "--porcelain")).toBe("");
+      expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
+      publish(`${flag}\n`);
+      expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "uncommitted changes" });
+      expect(readFileSync(path.join(checkout, "README.md"), "utf8")).toBe("edited\n");
+      run(checkout, "update-index", flag.replace("--", "--no-"), "README.md");
+      run(checkout, "checkout", "-q", "--", "README.md");
+    }
+  });
+
   test("counts dirty submodules even when Git is configured to ignore them", () => {
     const library = path.join(temporary, "library");
     mkdirSync(library);
