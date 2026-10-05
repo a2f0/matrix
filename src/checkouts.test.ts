@@ -86,7 +86,15 @@ describe("syncRepo", () => {
     rmSync(checkout, { recursive: true });
     syncRepo(root, REPO, remote);
     run(checkout, "remote", "set-url", "origin", "git@github.com:a2f0/other.git");
-    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error", reason: "origin is git@github.com:a2f0/other.git, expected a2f0/demo" });
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error", reason: "origin is a2f0/other, expected a2f0/demo" });
+  });
+
+  test("never reports credentials embedded in a mismatched origin", () => {
+    syncRepo(root, REPO, remote);
+    run(checkout, "remote", "set-url", "origin", "https://user:secret@github.com/a2f0/other.git");
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ reason: "origin is a2f0/other, expected a2f0/demo" });
+    run(checkout, "remote", "set-url", "origin", "https://user:secret@example.com/demo.git");
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ error: "origin is https://example.com/demo.git, expected a2f0/demo" });
   });
 
   test("refuses to overwrite ignored local files that upstream starts tracking", () => {
@@ -168,6 +176,22 @@ describe("checkoutStatus", () => {
     expect(run(checkout, "status", "--porcelain")).toBe("");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "uncommitted changes" });
+  });
+
+  test("counts dirty submodules even when Git is configured to ignore them", () => {
+    const library = path.join(temporary, "library");
+    mkdirSync(library);
+    run(library, "init", "-q", "-b", "main");
+    commit(library, "lib.txt", "lib\n");
+    run(seed, "-c", "protocol.file.allow=always", "submodule", "add", "-q", library, "lib");
+    run(seed, "commit", "-q", "-m", "add submodule");
+    run(seed, "push", "-q", remote, "HEAD");
+    syncRepo(root, REPO, remote);
+    run(checkout, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init");
+    run(checkout, "config", "submodule.lib.ignore", "all");
+    writeFileSync(path.join(checkout, "lib", "lib.txt"), "edited\n");
+    expect(run(checkout, "status", "--porcelain")).toBe("");
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
   });
 
   test("lists unmanaged checkout entries without touching them", () => {

@@ -31,6 +31,9 @@ export interface CheckoutStatus {
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
+/** Drop URL userinfo so a credential-bearing remote never reaches output. */
+function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1"); }
+
 function verifyCheckout(directory: string, repo: string, url: string): void {
   const top = git(directory, ["rev-parse", "--show-toplevel"]);
   if (top.status !== 0 || top.stdout !== realpathSync(directory)) throw new Error("not a separate Git checkout");
@@ -38,7 +41,7 @@ function verifyCheckout(directory: string, repo: string, url: string): void {
   if (origin.status !== 0) throw new Error("has no origin remote");
   const actual = parseGitHubRepo(origin.stdout);
   if (actual ? actual.toLowerCase() !== repo.toLowerCase() : origin.stdout !== url) {
-    throw new Error(`origin is ${origin.stdout}, expected ${repo}`);
+    throw new Error(`origin is ${actual ?? redact(origin.stdout)}, expected ${repo}`);
   }
 }
 
@@ -54,7 +57,7 @@ function currentBranch(directory: string): string | null {
 }
 
 function changeCount(directory: string): number {
-  const status = gitOutput(directory, ["status", "--porcelain", "--untracked-files=normal"]);
+  const status = gitOutput(directory, ["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"]);
   return status ? status.split("\n").length : 0;
 }
 
