@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "merge": {
+    "requiredChecks": [{"name": "verify", "workflow": "CI"}]
+  }
+}

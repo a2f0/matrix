@@ -1,0 +1,3 @@
+[test]
+# Only matrix tests; a bare `bun test` must never discover the checkouts' suites.
+root = "src"

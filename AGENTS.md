@@ -1,0 +1,58 @@
+# Repository guidance
+
+This repository is a workspace for making one change across many repositories.
+`matrix.json` lists the managed repositories, and `bun run sync` clones each
+into `checkouts/<name>`. `checkouts/` is gitignored; never commit its contents
+here.
+
+Resolve GitHub identity with `gh repo view --json nameWithOwner` from the
+directory you are working in, never from a folder name. Work on feature
+branches, use conventional commits, and preserve unrelated edits. Do not
+force-push or add attribution footers. Do not create GitHub issues without an
+explicit request.
+
+## Changing matrix itself
+
+Validate with `bun run typecheck`, `bun test`, and `bun run agents:check`.
+Ship with the installed `ship-pr` skill; title and required CI policy is in
+`agent-tool.json`. After updating the agent-tool pin, run `bun run agents:sync`
+and commit the lockfile, skills, and `.agent-tool-skills.json` together. Do not
+edit managed skills. When handling review feedback, reply in its original review
+thread through `POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies`
+and resolve only fully addressed findings.
+
+## Sweeps across checkouts
+
+A sweep applies one requested change to many checkouts.
+
+1. Run `bun run sync`, then `bun run status`. Change only checkouts whose
+   status is `ready`. Report the rest (local changes, another branch, diverged,
+   errors) instead of resetting, stashing, or discarding their state. Without
+   named targets, a sweep covers every managed checkout where the change applies.
+2. Each checkout is its own repository, and this file stops at its boundary.
+   Before changing a checkout, read its `AGENTS.md`, `CLAUDE.md`, and README, and
+   follow them inside it: setup, hooks, validation, versioning, title policy,
+   review bots, and deployment. Run Git, `gh`, package, and test commands from the
+   checkout directory. Checkout-specific skills live in its own skill folders.
+3. Inspect before editing; the same request often needs different edits per
+   repository. When the change does not apply or is already true, record that
+   and leave the checkout untouched.
+4. Use one branch name for the whole sweep, such as `sweep/<topic>`, created
+   from the synced default branch. Run the checkout's documented setup before
+   committing so its hooks run. Commit only the sweep's change.
+5. Ship each checkout independently with the `ship-pr` workflow. Use the
+   checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
+   `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.
+   Every checkout needs its own validation and independent review.
+6. Stop once each PR is open unless the request explicitly authorizes merging.
+   When merging is authorized, follow each repository's CI, merge, and
+   deployment policy. Never weaken a repository's policy to make a sweep uniform.
+7. When the harness supports subagents, delegate one checkout per subagent with
+   its checkout path and these rules; do not edit a delegated checkout yourself.
+   Keep a ledger per repository: branch, commit, validation, review verdict, PR,
+   merge, or the reason it was skipped or failed. Finish with that ledger.
+8. After the PRs merge, use the `reset` skill in each checkout, then run
+   `bun run sync`.
+
+`.ignore` lets ripgrep-based search tools see checkouts from the workspace root;
+scope searches to `checkouts/<name>` when working on one repository.

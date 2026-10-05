@@ -1,0 +1,4 @@
+# Search tools (ripgrep and the agents built on it) honor .gitignore, which would
+# hide every checkout from searches run at the workspace root. Re-include them;
+# each checkout's own .gitignore still excludes its node_modules and builds.
+!/checkouts/
