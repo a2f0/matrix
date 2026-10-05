@@ -102,7 +102,8 @@ export function syncRepo(root: string, repo: string, url: string): SyncResult {
       return { ...base, action: "cloned", ...snapshot(directory) };
     }
     verifyCheckout(directory, repo, url);
-    gitOutput(directory, ["fetch", "--quiet", "--prune", "origin"]);
+    // An empty refmap ignores configured refspecs, which could force-update local branches.
+    gitOutput(directory, ["fetch", "--quiet", "--prune", "--refmap=", "origin", "+refs/heads/*:refs/remotes/origin/*"]);
     gitOutput(directory, ["remote", "set-head", "origin", "--auto"]);
     const state = { ...base, ...snapshot(directory) };
     if (state.branch === null) return { ...state, action: "skipped", reason: "detached HEAD" };

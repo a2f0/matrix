@@ -26,6 +26,16 @@ function publish(content: string): string {
   return head;
 }
 
+function withEnv<T>(values: Record<string, string>, action: () => T): T {
+  const saved = Object.entries(values).map(([key]) => [key, process.env[key]] as const);
+  Object.assign(process.env, values);
+  try {
+    return action();
+  } finally {
+    for (const [key, value] of saved) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+}
+
 function setup(branch: string): void {
   temporary = mkdtempSync(path.join(tmpdir(), "matrix-test-"));
   root = path.join(temporary, "matrix");
@@ -179,16 +189,38 @@ describe("syncRepo", () => {
   });
 
   test("names the remote origin regardless of clone.defaultRemoteName", () => {
-    const saved = { ...process.env };
-    Object.assign(process.env, { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "clone.defaultRemoteName", GIT_CONFIG_VALUE_0: "upstream" });
-    try {
-      expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "cloned", defaultBranch: "main" });
-    } finally {
-      for (const key of ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]) {
-        if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
-      }
-    }
+    const config = path.join(temporary, "gitconfig");
+    writeFileSync(config, "[clone]\n\tdefaultRemoteName = upstream\n");
+    expect(withEnv({ GIT_CONFIG_GLOBAL: config }, () => syncRepo(root, REPO, remote))).toMatchObject({ action: "cloned", defaultBranch: "main" });
     expect(run(checkout, "remote")).toBe("origin");
+  });
+
+  test("fetches only into remote-tracking refs whatever refspec is configured", () => {
+    syncRepo(root, REPO, remote);
+    const local = commit(checkout, "local.txt", "local\n");
+    run(checkout, "switch", "-q", "-c", "sweep/topic");
+    run(checkout, "config", "remote.origin.fetch", "+refs/heads/main:refs/heads/main");
+    const head = publish("two\n");
+    expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "on branch sweep/topic" });
+    expect(run(checkout, "rev-parse", "main")).toBe(local);
+    expect(run(checkout, "rev-parse", "origin/main")).toBe(head);
+  });
+
+  test("ignores inherited Git repository variables such as those set inside hooks", () => {
+    syncRepo(root, REPO, remote);
+    const external = path.join(temporary, "external");
+    run(temporary, "clone", "-q", remote, external);
+    const before = run(external, "rev-parse", "origin/main");
+    const head = publish("two\n");
+    const inherited = {
+      GIT_DIR: path.join(external, ".git"),
+      GIT_WORK_TREE: external,
+      GIT_INDEX_FILE: path.join(temporary, "index"),
+      GIT_OBJECT_DIRECTORY: path.join(external, ".git", "objects"),
+    };
+    expect(withEnv(inherited, () => syncRepo(root, REPO, remote))).toMatchObject({ action: "updated", head });
+    expect(withEnv(inherited, () => checkoutStatus(root, REPO, remote))).toMatchObject({ ready: true });
+    expect(run(external, "rev-parse", "origin/main")).toBe(before);
   });
 
   test("reports a clone failure as an error", () => {
