@@ -88,8 +88,10 @@ directories can make delegated agents stop for permission prompts.
    checkout's change needs a release that another checkout in the sweep will
    publish, ship them in order: merge the producer, confirm its publish run and
    the registry's version, then start that consumer against the exact version,
-   with the producer's API and migration notes in its brief. Changes that do not
-   depend on a new release still ship in parallel. Right after a PR opens,
+   with the producer's API and migration notes in its brief. If the producer's
+   publish fails after it merges, the consumer pins the first release that does
+   publish, once its tarball is confirmed to contain the change. Changes that do
+   not depend on a new release still ship in parallel. Right after a PR opens,
    `gh pr checks --watch` can exit successfully with no checks reported, and
    workflows triggered by both push and pull request list each check twice;
    wait until every entry has finished.
