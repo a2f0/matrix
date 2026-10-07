@@ -86,9 +86,9 @@ directory, and describe the change:
 `AGENTS.md` defines the procedure: sync and check status, read each checkout's
 own guidance, use one `<type>/<topic>` branch per sweep, delegate at most four
 repositories at a time, validate and independently review each repository,
-ship a published package before the repositories that consume it, stop at open
-PRs unless merging is authorized, and report a per-repository ledger, on a
-tracking issue when one is requested. Each repository ships under its own
+publish a package release before the repositories whose change needs it, stop
+at open PRs unless merging is authorized, and report a per-repository ledger,
+on a tracking issue when one is requested. Each repository ships under its own
 policy and pinned agent-tool; matrix never overrides a repository's rules.
 
 The shared skills come from the exact-pinned
