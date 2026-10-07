@@ -102,8 +102,10 @@ directories can make delegated agents stop for permission prompts.
    merge, publish or deploy, or the reason it was skipped or failed. Finish with
    that ledger.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
-   `bun run sync`. Several repositories keep merged branches; delete those with
-   `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`, because
+   `bun run sync`. Several repositories keep merged branches. When `reset`
+   removes one, which it does only without keep-branch and after confirming the
+   remote branch still points at the shipped commit, delete it with
+   `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`;
    `git push --delete` runs pre-push hooks, which in some checkouts are the full
    validation gate.
 
