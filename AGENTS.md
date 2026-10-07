@@ -63,8 +63,11 @@ directories can make delegated agents stop for permission prompts.
    commands from the checkout directory. Checkout-specific skills live in its
    own skill folders.
 3. Inspect before editing; the same request often needs different edits per
-   repository. When the change does not apply or is already true, record that
-   and leave the checkout untouched.
+   repository. Inventory every form of the target, not one literal spelling: a
+   route can appear with shell variables in place of placeholders, and
+   repository-owned skills carry copies that agent-tool does not manage. When
+   the change does not apply or is already true, record that and leave the
+   checkout untouched.
 4. Use one branch name for the whole sweep in the `<type>/<topic>` form with a
    Conventional Commits type, such as `chore/<topic>`; several repositories
    reject other branch names. Create it from the synced default branch with
