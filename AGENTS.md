@@ -18,8 +18,30 @@ Ship with the installed `ship-pr` skill; title and required CI policy is in
 `agent-tool.json`. After updating the agent-tool pin, run `bun run agents:sync`
 and commit the lockfile, skills, and `.agent-tool-skills.json` together. Do not
 edit managed skills. When handling review feedback, reply in its original review
-thread through `POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies`
+thread through
+`POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies`
 and resolve only fully addressed findings.
+
+## Onboarding a repository
+
+1. Add it with `bun run discover --apply`, or by editing `repos`, and ship that
+   manifest change here. Then run `bun run sync <name>` and `bun run status`.
+2. Adopting agent-tool in a checkout is a change to that repository: read its
+   guidance and ship it there. Pin `@a2f0/agent-tool` exactly, run
+   `agent-tool skills install --apply`, and run `agent-tool skills check` in a
+   CI job that branch protection already requires, so skill drift blocks merges
+   without changing repository settings.
+3. Write `agent-tool.json` from the repository's real workflow and job names
+   and its existing title rules. Read merge rules from both classic branch
+   protection (`gh api repos/{owner}/{repo}/branches/{branch}/protection`) and
+   rulesets (`gh api repos/{owner}/{repo}/rulesets`).
+   `merge.requireStrictBaseFreshness` recognizes only rulesets; leave it false
+   where protection is classic.
+4. Keep guidance in `AGENTS.md` so every reviewer harness reads it, with a
+   `CLAUDE.md` that imports it (`@AGENTS.md`). Under markdown lint, give that
+   file a heading. Run the checkout's own hooks and linters over the installed
+   skills before committing; managed skills cannot be edited, so exclude their
+   directories from a linter that rejects them.
 
 ## Sweeps across checkouts
 

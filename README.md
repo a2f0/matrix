@@ -66,10 +66,14 @@ manifest does not manage are listed as `unmanaged` and left alone.
 `protocol` selects SSH or HTTPS URLs for new clones; existing checkouts may use
 either. `discover` lists the owner's non-fork, unarchived repositories with the
 given visibility (`public`, `private`, or `all`) and adds new ones in name
-order. Managed repositories that discovery no longer finds are reported as
-`notDiscovered` but stay managed, so repositories added by hand are preserved.
+order. `--apply` rewrites `matrix.json` as two-space JSON with one array entry
+per line; keep the file in that form so an applied change shows only the added
+repositories. Managed repositories that discovery no longer finds are reported
+as `notDiscovered` but stay managed, so repositories added by hand are
+preserved.
 Remove a repository by editing `repos`; its checkout is then reported as
-unmanaged until you delete it.
+unmanaged until you delete it. `AGENTS.md` describes onboarding a repository,
+including adopting agent-tool in one that lacks it.
 
 ## Sweeps
 
