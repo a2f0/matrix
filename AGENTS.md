@@ -71,19 +71,32 @@ directories can make delegated agents stop for permission prompts.
 5. Ship each checkout independently with the `ship-pr` workflow. Use the
    checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
    `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.
-   Every checkout needs its own validation and independent review.
+   Every checkout needs its own validation and independent review. When a
+   checkout's change needs a release that another checkout in the sweep will
+   publish, ship them in order: merge the producer, confirm its publish run and
+   the registry's version, then start that consumer against the exact version,
+   with the producer's API and migration notes in its brief. Changes that do not
+   depend on a new release still ship in parallel.
 6. Stop once each PR is open unless the request explicitly authorizes merging.
    When merging is authorized, follow each repository's CI, merge, and
    deployment policy; some merges deploy sites or publish packages. Never weaken
-   a repository's policy to make a sweep uniform.
+   a repository's policy to make a sweep uniform. A consumer that needs an
+   unmerged producer release waits and is reported as blocked; never pin it to
+   an unpublished build.
 7. When the harness supports subagents, delegate one checkout per subagent with
    its checkout path and these rules; do not edit a delegated checkout yourself.
    Run at most four at a time: concurrent validation suites saturate the machine
    and cause timing failures.
    Keep a ledger per repository: branch, commit, validation, review verdict, PR,
-   merge, or the reason it was skipped or failed. Finish with that ledger.
+   merge, publish or deploy, or the reason it was skipped or failed. Finish with
+   that ledger.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
    `bun run sync`.
+
+When the request asks for an issue to track a sweep, open it in this workspace's
+repository. Each PR body references it as `Part of <owner>/<repo>#<number>`
+without a closing keyword, so one repository's merge does not close the sweep.
+Post each repository's ledger entry on the issue as it ships.
 
 `.ignore` lets ripgrep-based search tools see checkouts from the workspace root;
 scope searches to `checkouts/<name>` when working on one repository.
