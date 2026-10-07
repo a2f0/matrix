@@ -37,11 +37,14 @@ and resolve only fully addressed findings.
    rulesets (`gh api repos/{owner}/{repo}/rulesets`).
    `merge.requireStrictBaseFreshness` recognizes only rulesets; leave it false
    where protection is classic.
-4. Keep guidance in `AGENTS.md` so every reviewer harness reads it, with a
-   `CLAUDE.md` that imports it (`@AGENTS.md`). Under markdown lint, give that
-   file a heading. Run the checkout's own hooks and linters over the installed
-   skills before committing; managed skills cannot be edited, so exclude their
-   directories from a linter that rejects them.
+4. Keep guidance in `AGENTS.md` alone; managed repositories have no
+   `CLAUDE.md`. Codex and OpenCode read it, and so does Claude Code when no
+   `CLAUDE.md` exists: its `instructionFiles` setting defaults to
+   `claude-md-or-agents-md` (verified with 2.1.292). Reviewers may still ask to
+   restore a `CLAUDE.md` import; cite that default and decline the finding.
+   Run the checkout's own hooks and linters over the installed skills before
+   committing; managed skills cannot be edited, so exclude their directories
+   from a linter that rejects them.
 
 ## Sweeps across checkouts
 
@@ -54,10 +57,11 @@ directories can make delegated agents stop for permission prompts.
    errors) instead of resetting, stashing, or discarding their state. Without
    named targets, a sweep covers every managed checkout where the change applies.
 2. Each checkout is its own repository, and this file stops at its boundary.
-   Before changing a checkout, read its `AGENTS.md`, `CLAUDE.md`, and README, and
-   follow them inside it: setup, hooks, validation, versioning, title policy,
-   review bots, and deployment. Run Git, `gh`, package, and test commands from the
-   checkout directory. Checkout-specific skills live in its own skill folders.
+   Before changing a checkout, read its `AGENTS.md`, README, and the docs they
+   point to, and follow them inside it: setup, hooks, validation, versioning,
+   title policy, review bots, and deployment. Run Git, `gh`, package, and test
+   commands from the checkout directory. Checkout-specific skills live in its
+   own skill folders.
 3. Inspect before editing; the same request often needs different edits per
    repository. When the change does not apply or is already true, record that
    and leave the checkout untouched.
@@ -67,15 +71,23 @@ directories can make delegated agents stop for permission prompts.
    `git switch --no-track -c <branch>`, and push with an explicit remote, as in
    `git push -u origin HEAD`, so user Git settings cannot point the branch at a
    local upstream. Run the checkout's documented setup before committing so its
-   hooks run. Commit only the sweep's change.
+   hooks run. Agent shells do not activate mise's per-directory tools, so the
+   default Bun, Node, or Terraform can differ from a checkout's pins; put the
+   pinned versions under `~/.local/share/mise/installs` first on `PATH` instead
+   of running `mise trust`. Commit only the sweep's change.
 5. Ship each checkout independently with the `ship-pr` workflow. Use the
    checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
    `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.
-   Every checkout needs its own validation and independent review.
+   Every checkout needs its own validation and independent review. Right after
+   a PR opens, `gh pr checks --watch` can exit successfully with no checks
+   reported, and workflows triggered by both push and pull request list each
+   check twice; wait until every entry has finished.
 6. Stop once each PR is open unless the request explicitly authorizes merging.
    When merging is authorized, follow each repository's CI, merge, and
-   deployment policy; some merges deploy sites or publish packages. Never weaken
-   a repository's policy to make a sweep uniform.
+   deployment policy; some merges deploy sites or publish packages. npm can take
+   several minutes to list a version after its publish workflow succeeds, so
+   poll before reporting a failed publish. Never weaken a repository's policy to
+   make a sweep uniform.
 7. When the harness supports subagents, delegate one checkout per subagent with
    its checkout path and these rules; do not edit a delegated checkout yourself.
    Run at most four at a time: concurrent validation suites saturate the machine
@@ -83,7 +95,10 @@ directories can make delegated agents stop for permission prompts.
    Keep a ledger per repository: branch, commit, validation, review verdict, PR,
    merge, or the reason it was skipped or failed. Finish with that ledger.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
-   `bun run sync`.
+   `bun run sync`. Several repositories keep merged branches; delete those with
+   `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`, because
+   `git push --delete` runs pre-push hooks, which in some checkouts are the full
+   validation gate.
 
 `.ignore` lets ripgrep-based search tools see checkouts from the workspace root;
 scope searches to `checkouts/<name>` when working on one repository.
