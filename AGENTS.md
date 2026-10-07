@@ -71,11 +71,12 @@ directories can make delegated agents stop for permission prompts.
 5. Ship each checkout independently with the `ship-pr` workflow. Use the
    checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
    `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.
-   Every checkout needs its own validation and independent review. When one
-   checkout consumes a package another one publishes, ship them in order: merge
-   the producer, confirm its publish run and the registry's version, then start
-   each consumer against that exact version, with the producer's API and
-   migration notes in the consumer's brief.
+   Every checkout needs its own validation and independent review. When a
+   checkout's change needs a release that another checkout in the sweep will
+   publish, ship them in order: merge the producer, confirm its publish run and
+   the registry's version, then start that consumer against the exact version,
+   with the producer's API and migration notes in its brief. Changes that do not
+   depend on a new release still ship in parallel.
 6. Stop once each PR is open unless the request explicitly authorizes merging.
    When merging is authorized, follow each repository's CI, merge, and
    deployment policy; some merges deploy sites or publish packages. Never weaken
