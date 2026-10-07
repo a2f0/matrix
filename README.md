@@ -91,9 +91,26 @@ at open PRs unless merging is authorized, and report a per-repository ledger,
 on a tracking issue when one is requested. Each repository ships under its own
 policy and pinned agent-tool; matrix never overrides a repository's rules.
 
+For a dependency sweep, use the shared
+[`update-dependencies`](.agents/skills/update-dependencies/SKILL.md) skill. It
+inventories package and toolchain pins, follows upstream migrations, and checks
+compatibility groups before selecting versions. It requires a non-destructive
+preview before infrastructure applies or deployments, including effects from
+hooks and CI. Destructive, replacement, or unverifiable upgrade groups stay
+pinned and are reported in the per-repository ledger.
+
+The read-only `agent-tool dependencies check-terraform-plan <plan.json>` helper
+checks saved Terraform plan JSON for unsafe or incomplete actions. A successful
+check does not establish plan freshness, backend identity, or the safety of
+effects outside the plan. Keep plans and state private; the skill describes the
+remaining checks before any authorized apply.
+
 The shared skills come from the exact-pinned
 [`@a2f0/agent-tool`](https://www.npmjs.com/package/@a2f0/agent-tool) package.
-After changing the pin, run `bun run agents:sync` and commit the updated skills.
+After changing the pin, run `bun run agents:sync` and commit the updated skills,
+lockfile, and `.agent-tool-skills.json` together. The installer supplies matching
+copies for Claude in `.claude/skills` and Codex in `.agents/skills`; OpenCode
+discovers `.agents/skills` too. Do not edit managed copies.
 
 ## Development
 
