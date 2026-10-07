@@ -68,6 +68,9 @@ directories can make delegated agents stop for permission prompts.
    repository-owned skills carry copies that agent-tool does not manage. When
    the change does not apply or is already true, record that and leave the
    checkout untouched.
+   For dependency sweeps, use the shared `update-dependencies` skill and its
+   compatibility and infrastructure-preview gates. For checkouts with an older
+   pin or no local agent-tool, use the workspace's plan helper described in README.
 4. Use one branch name for the whole sweep in the `<type>/<topic>` form with a
    Conventional Commits type, such as `chore/<topic>`; several repositories
    reject other branch names. Create it from the synced default branch with
