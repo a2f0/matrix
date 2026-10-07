@@ -78,27 +78,39 @@ directories can make delegated agents stop for permission prompts.
 5. Ship each checkout independently with the `ship-pr` workflow. Use the
    checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
    `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.
-   Every checkout needs its own validation and independent review. Right after
-   a PR opens, `gh pr checks --watch` can exit successfully with no checks
-   reported, and workflows triggered by both push and pull request list each
-   check twice; wait until every entry has finished.
+   Every checkout needs its own validation and independent review. When a
+   checkout's change needs a release that another checkout in the sweep will
+   publish, ship them in order: merge the producer, confirm its publish run and
+   the registry's version, then start that consumer against the exact version,
+   with the producer's API and migration notes in its brief. Changes that do not
+   depend on a new release still ship in parallel. Right after a PR opens,
+   `gh pr checks --watch` can exit successfully with no checks reported, and
+   workflows triggered by both push and pull request list each check twice;
+   wait until every entry has finished.
 6. Stop once each PR is open unless the request explicitly authorizes merging.
    When merging is authorized, follow each repository's CI, merge, and
    deployment policy; some merges deploy sites or publish packages. npm can take
    several minutes to list a version after its publish workflow succeeds, so
    poll before reporting a failed publish. Never weaken a repository's policy to
-   make a sweep uniform.
+   make a sweep uniform. A consumer that needs an unmerged producer release
+   waits and is reported as blocked; never pin it to an unpublished build.
 7. When the harness supports subagents, delegate one checkout per subagent with
    its checkout path and these rules; do not edit a delegated checkout yourself.
    Run at most four at a time: concurrent validation suites saturate the machine
    and cause timing failures.
    Keep a ledger per repository: branch, commit, validation, review verdict, PR,
-   merge, or the reason it was skipped or failed. Finish with that ledger.
+   merge, publish or deploy, or the reason it was skipped or failed. Finish with
+   that ledger.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
    `bun run sync`. Several repositories keep merged branches; delete those with
    `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`, because
    `git push --delete` runs pre-push hooks, which in some checkouts are the full
    validation gate.
+
+When the request asks for an issue to track a sweep, open it in this workspace's
+repository. Each PR body references it as `Part of <owner>/<repo>#<number>`
+without a closing keyword, so one repository's merge does not close the sweep.
+Post each repository's ledger entry on the issue as it ships.
 
 `.ignore` lets ripgrep-based search tools see checkouts from the workspace root;
 scope searches to `checkouts/<name>` when working on one repository.
