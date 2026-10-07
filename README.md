@@ -104,6 +104,8 @@ checks saved Terraform plan JSON for unsafe or incomplete actions. A successful
 check does not establish plan freshness, backend identity, or the safety of
 effects outside the plan. Keep plans and state private; the skill describes the
 remaining checks before any authorized apply.
+If a checkout's agent-tool predates 0.1.8, run the helper from this workspace:
+`node_modules/.bin/agent-tool --repo checkouts/<name> dependencies check-terraform-plan <absolute-plan.json>`.
 
 The shared skills come from the exact-pinned
 [`@a2f0/agent-tool`](https://www.npmjs.com/package/@a2f0/agent-tool) package.
