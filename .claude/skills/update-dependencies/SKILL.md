@@ -158,6 +158,25 @@ programmatic API may break test/lint runners that import it even when `tsc` pass
 Action runtime upgrades can require newer self-hosted runners; preserve workflow
 permissions, action inputs/outputs, caching, artifact semantics, and job names.
 
+Check current advisories with read-only ecosystem audits against the baseline and
+proposed lockfiles, using the repository's configured registry/advisory sources.
+Do not send private dependency metadata to an unconfigured or unauthorized service;
+report the resulting coverage limit. Cover direct and resolved transitive dependencies,
+including native/platform-specific binaries. Latest direct packages can still
+pin vulnerable transitive versions. Trace each finding to its owning dependency,
+verify affected versions, runtime conditions, and remediation in the maintainer's
+advisory and fixed release. When the owner's range permits a fixed version, use a
+targeted refresh with the lockfile's owning manager and preserve unrelated
+resolutions; otherwise prefer a supported owner upgrade.
+If the owner still pins a vulnerable version, a narrowly scoped security patch
+override may be used only with API/ABI/runtime compatibility evidence and focused
+regression checks of the actual affected integration. Document its rationale and
+removal condition; a passing install or bundle alone is insufficient. Do not run
+blind audit fixes or use blanket overrides to bypass compatibility constraints.
+Report unresolved advisories and unavailable audit coverage accurately; current
+direct pins or a partial clean audit do not
+establish that the whole dependency graph is safe.
+
 ## Migrate and validate
 
 Capture relevant baseline checks and warnings first, after screening their side
@@ -170,6 +189,10 @@ Review intentional patches, overrides, and pins before removal; retain them unti
 upstream fixes and regression checks demonstrate they are unnecessary.
 Avoid unrelated global installations or environment changes. Use task-local or
 repository-scoped tools for testing changed runtime pins.
+For published packages, also validate tarballs and consumer installs with their
+documented supported package managers, including manifest/override syntax and
+runtime requirements. A successful owning-manager install does not prove that
+published metadata works for those consumers.
 
 Run the repository's setup/hooks, frozen installs, lint, typechecks, tests, builds,
 package/platform smoke checks, and relevant safe integration previews. Resolve
@@ -179,6 +202,7 @@ with evidence and keep a target pinned when migration cannot be completed.
 Add focused regression coverage when a migration changes behavior; avoid tests
 that merely assert version strings. Re-run checks after repairs. Report checks
 blocked by missing credentials, platforms, or external services accurately.
+Re-audit the final resolved graph after migrations and repairs.
 
 Confirm every inventory row is upgraded, already current, intentionally constrained,
 or skipped with a concrete reason. Do not present an unresolved group as complete.
@@ -195,7 +219,9 @@ changed HEAD. Check deployment safety again before its push/open/merge operation
 
 Keep a compact ledger of old/selected versions, completed migrations, validation
 and warning results, preview environment/commit/tool versions and safe action
-summary, and every skipped/constrained dependency with the reason. For shipping,
+summary, and every skipped/constrained dependency with the reason. Include baseline
+and final audit results, security overrides with their rationale and removal
+condition, unresolved advisories, and audit coverage limits. For shipping,
 include branch, reviewed commit/verdict, PR, merge, publish/deploy result, and final
 checkout state. For a repository sweep, keep one entry per repository, including
 unready or unchanged checkouts. Do not publish credentials, state, or plan contents.

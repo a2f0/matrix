@@ -94,7 +94,9 @@ policy and pinned agent-tool; matrix never overrides a repository's rules.
 For a dependency sweep, use the shared
 [`update-dependencies`](.agents/skills/update-dependencies/SKILL.md) skill. It
 inventories package and toolchain pins, follows upstream migrations, and checks
-compatibility groups before selecting versions. It requires a non-destructive
+compatibility groups and locked dependency advisories before selecting versions.
+It validates documented publish and consumer package managers as well as the
+manager that owns each lockfile. It requires a non-destructive
 preview before infrastructure applies or deployments, including effects from
 hooks and CI. Destructive, replacement, or unverifiable upgrade groups stay
 pinned and are reported in the per-repository ledger.
@@ -104,7 +106,8 @@ checks saved Terraform plan JSON for unsafe or incomplete actions. A successful
 check does not establish plan freshness, backend identity, or the safety of
 effects outside the plan. Keep plans and state private; the skill describes the
 remaining checks before any authorized apply.
-If a checkout's agent-tool predates 0.1.8, run the helper from this workspace:
+If a checkout's agent-tool is unavailable or predates 0.1.8, run the helper from
+this workspace:
 `node_modules/.bin/agent-tool --repo checkouts/<name> dependencies check-terraform-plan <absolute-plan.json>`.
 
 The shared skills come from the exact-pinned
