@@ -14,6 +14,13 @@ explicit request.
 ## Changing matrix itself
 
 Validate with `bun run typecheck`, `bun test`, and `bun run agents:check`.
+Capture noisy finite commands with the pinned harness, for example
+`bun run agent:run --label tests -- bun test`. It preserves exit status and full
+private logs while returning a compact receipt and a bounded failure excerpt.
+Use `bun run agent-tool logs <log-path>` or a targeted search for more evidence;
+inspect required warnings, timings, and artifacts before accepting a check.
+Keep review verdicts and structured decision output, including matrix sync/status
+results, visible. Do not wrap interactive tools or persistent servers.
 Ship with the installed `ship-pr` skill; title and required CI policy is in
 `agent-tool.json`. After updating the agent-tool pin, run `bun run agents:sync`
 and commit the lockfile, skills, and `.agent-tool-skills.json` together. Do not
