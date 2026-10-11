@@ -78,6 +78,13 @@ directories can make delegated agents stop for permission prompts.
    For dependency sweeps, use the shared `update-dependencies` skill and its
    compatibility and infrastructure-preview gates. For checkouts with an older
    pin or no local agent-tool, use the workspace's plan helper described in README.
+   Keep top-level READMEs focused on purpose, setup, and normal usage. Put reusable
+   upgrade procedures and active constraints in the checkout's existing dependency
+   maintenance doc, linked briefly from README and AGENTS.md; create a focused doc
+   only when there is durable content. Reconcile constraints in place and remove
+   resolved entries. Put run-specific inventories, audits, validation, previews,
+   and skipped-group evidence in the upgrade PR and any requested sweep issue,
+   not an accumulating repository journal. See `docs/dependency-upgrades.md`.
 4. Use one branch name for the whole sweep in the `<type>/<topic>` form with a
    Conventional Commits type, such as `chore/<topic>`; several repositories
    reject other branch names. Create it from the synced default branch with
