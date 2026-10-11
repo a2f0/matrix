@@ -16,11 +16,12 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "agent-tool": "agent-tool",
+    "agent:run": "agent-tool run",
     "agents:sync": "bun run agent-tool skills install --apply",
     "agents:check": "bun run agent-tool skills check"
   },
   "devDependencies": {
-    "@a2f0/agent-tool": "0.1.10",
+    "@a2f0/agent-tool": "0.1.11",
     "@types/bun": "1.4.2",
     "typescript": "7.0.2"
   }
