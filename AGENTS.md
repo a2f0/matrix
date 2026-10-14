@@ -37,11 +37,13 @@ and resolve only fully addressed findings.
    guidance and ship it there. Pin `@a2f0/agent-tool` exactly, run
    `agent-tool skills install --apply`, and run `agent-tool skills check` in a
    CI job that already gates merges, so skill drift blocks them without
-   changing repository settings: a check that branch protection or a ruleset
-   requires, or a job that one depends on. Several default branches have
-   neither, and there `agent-tool pr merge` is the only gate, so put the check
-   in a job that `merge.requiredChecks` names. Do not add protection while
-   onboarding.
+   changing repository settings. Use a check that branch protection or a
+   ruleset requires, or a dependency of a required aggregate job that runs
+   with `if: always()` and fails unless every dependency succeeded; a plain
+   `needs` is not enough, because GitHub accepts a skipped required check.
+   Several default branches have no protection or rulesets, and there
+   `agent-tool pr merge` is the only gate, so put the check in a job that
+   `merge.requiredChecks` names. Do not add protection while onboarding.
 3. Write `agent-tool.json` from the repository's real workflow and job names
    and its existing title rules. Read merge rules from both classic branch
    protection (`gh api repos/{owner}/{repo}/branches/{branch}/protection`) and
