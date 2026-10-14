@@ -36,12 +36,20 @@ and resolve only fully addressed findings.
 2. Adopting agent-tool in a checkout is a change to that repository: read its
    guidance and ship it there. Pin `@a2f0/agent-tool` exactly, run
    `agent-tool skills install --apply`, and run `agent-tool skills check` in a
-   CI job that branch protection already requires, so skill drift blocks merges
-   without changing repository settings.
+   CI job that already gates merges, so skill drift blocks them without
+   changing repository settings. Use a check that branch protection or a
+   ruleset requires, or a dependency of a required aggregate job that runs
+   with `if: always()` and fails unless every dependency succeeded; a plain
+   `needs` is not enough, because GitHub accepts a skipped required check.
+   Several default branches have no protection or rulesets, and there
+   `agent-tool pr merge` is the only gate, so put the check in a job that
+   `merge.requiredChecks` names. Do not add protection while onboarding.
 3. Write `agent-tool.json` from the repository's real workflow and job names
    and its existing title rules. Read merge rules from both classic branch
    protection (`gh api repos/{owner}/{repo}/branches/{branch}/protection`) and
-   rulesets (`gh api repos/{owner}/{repo}/rulesets`).
+   the branch's active ruleset rules
+   (`gh api repos/{owner}/{repo}/rules/branches/{branch}`); the ruleset list
+   also returns inactive rulesets and those targeting other branches.
    `merge.requireStrictBaseFreshness` recognizes only rulesets; leave it false
    where protection is classic.
 4. Keep guidance in `AGENTS.md` alone; managed repositories have no
