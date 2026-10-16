@@ -11,6 +11,7 @@
   "repos": [
     "a2f0/a2f0.net",
     "a2f0/agent-tool",
+    "a2f0/balebase",
     "a2f0/commandsnippets",
     "a2f0/continuity",
     "a2f0/devopsrockstars.com",
@@ -20,7 +21,6 @@
     "a2f0/openbsd",
     "a2f0/rn-sandbox",
     "a2f0/skyline",
-    "a2f0/stealth",
     "a2f0/tearleads"
   ]
 }
