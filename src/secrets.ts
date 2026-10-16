@@ -14,6 +14,8 @@ export interface CiFile {
   deploy: string[];
   /** Settings already on GitHub that this file does not name; left untouched. */
   unmanaged: string[];
+  /** Whether gh set this file's values during this run. */
+  applied: boolean;
 }
 
 export interface DeployResult {
@@ -23,7 +25,6 @@ export interface DeployResult {
   error?: string;
   secrets?: CiFile;
   variables?: CiFile;
-  applied: boolean;
 }
 
 /** The workspace's secrets folder: MATRIX_SECRETS_DIR, or matrix-secrets beside the matrix repository. */
@@ -91,20 +92,31 @@ function remoteNames(gh: Gh, kind: Kind, repo: string): string[] {
 /** Compare a repository's ci folder with GitHub; with apply, set every named value from its file. */
 export function deploySecrets(secrets: string, repo: string, apply: boolean, gh: Gh = runGh): DeployResult {
   const directory = path.join(secrets, repoName(repo), "ci");
-  if (!existsSync(directory)) return { repo, path: directory, skipped: "no ci folder", applied: false };
+  if (!existsSync(directory)) return { repo, path: directory, skipped: "no ci folder" };
   const files = (Object.keys(KINDS) as Kind[]).map(kind => {
     const file = path.join(directory, KINDS[kind]);
     const names = existsSync(file) ? dotenvNames(readFileSync(file, "utf8"), file) : [];
     const listed = new Set(names.map(name => name.toUpperCase()));
-    return { kind, file, plan: { deploy: names, unmanaged: remoteNames(gh, kind, repo).filter(name => !listed.has(name.toUpperCase())) } };
+    const unmanaged = remoteNames(gh, kind, repo).filter(name => !listed.has(name.toUpperCase()));
+    return { kind, file, plan: { deploy: names, unmanaged, applied: false } };
   });
-  if (apply) {
-    // gh reads the values from the file itself, so they never pass through this process.
-    for (const { kind, file, plan } of files) if (plan.deploy.length > 0) gh([kind, "set", "--repo", repo, "--env-file", file]);
-  }
   const [secret, variable] = files;
-  return { repo, path: directory, secrets: secret!.plan, variables: variable!.plan, applied: apply };
+  const result: DeployResult = { repo, path: directory, secrets: secret!.plan, variables: variable!.plan };
+  if (!apply) return result;
+  for (const { kind, file, plan } of files) {
+    if (plan.deploy.length === 0) continue;
+    try {
+      // gh reads the values from the file itself, so they never pass through this process.
+      gh([kind, "set", "--repo", repo, "--env-file", file]);
+      plan.applied = true;
+    } catch (error) {
+      return { ...result, error: message(error) };
+    }
+  }
+  return result;
 }
+
+function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 /** Deploy each repository in turn, recording a failure without hiding the others' results. */
 export function deployAll(secrets: string, repos: string[], apply: boolean, gh: Gh = runGh): { ok: boolean; results: DeployResult[] } {
@@ -112,7 +124,7 @@ export function deployAll(secrets: string, repos: string[], apply: boolean, gh: 
     try {
       return deploySecrets(secrets, repo, apply, gh);
     } catch (error) {
-      return { repo, error: error instanceof Error ? error.message : String(error), applied: false };
+      return { repo, error: message(error) };
     }
   });
   return { ok: results.every(result => result.error === undefined), results };

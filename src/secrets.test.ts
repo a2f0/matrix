@@ -67,9 +67,8 @@ test("plans without changing GitHub and reports settings the files do not name",
   expect(result).toEqual({
     repo: "a2f0/demo",
     path: path.join(secrets, "demo", "ci"),
-    secrets: { deploy: ["deploy_key", "NEW_TOKEN"], unmanaged: ["LEGACY_TOKEN"] },
-    variables: { deploy: [], unmanaged: [] },
-    applied: false,
+    secrets: { deploy: ["deploy_key", "NEW_TOKEN"], unmanaged: ["LEGACY_TOKEN"], applied: false },
+    variables: { deploy: [], unmanaged: [], applied: false },
   });
   expect(calls.every(args => args[1] === "list")).toBe(true);
 });
@@ -77,7 +76,8 @@ test("plans without changing GitHub and reports settings the files do not name",
 test("applies each non-empty file through gh without passing values or deleting anything", () => {
   const file = ci("secrets.env", "DEPLOY_KEY=sensitive-value\n");
   ci("variables.env", "# nothing yet\n");
-  deploySecrets(secrets, "a2f0/demo", true, gh);
+  const result = deploySecrets(secrets, "a2f0/demo", true, gh);
+  expect([result.secrets?.applied, result.variables?.applied]).toEqual([true, false]);
   const changes = calls.filter(args => args[1] !== "list");
   expect(changes).toEqual([["secret", "set", "--repo", "a2f0/demo", "--env-file", file]]);
   expect(JSON.stringify(calls)).not.toContain("sensitive-value");
@@ -87,13 +87,27 @@ test("records a failing repository and keeps the others' results", () => {
   ci("secrets.env", "BROKEN\n");
   const { ok, results } = deployAll(secrets, ["a2f0/demo", "a2f0/other"], false, gh);
   expect(ok).toBe(false);
-  expect(results[0]).toEqual({ repo: "a2f0/demo", error: `${path.join(secrets, "demo", "ci", "secrets.env")}:1 is not a NAME=value line.`, applied: false });
+  expect(results[0]).toEqual({ repo: "a2f0/demo", error: `${path.join(secrets, "demo", "ci", "secrets.env")}:1 is not a NAME=value line.` });
   expect(results[1]).toMatchObject({ repo: "a2f0/other", skipped: "no ci folder" });
+});
+
+test("reports what a partly failed apply already set", () => {
+  ci("secrets.env", "DEPLOY_KEY=value\n");
+  ci("variables.env", "REGION=value\n");
+  const failing: Gh = args => {
+    if (args[0] === "variable" && args[1] === "set") throw new Error("gh variable set failed (exit 1).");
+    return gh(args);
+  };
+  const result = deploySecrets(secrets, "a2f0/demo", true, failing);
+  expect(result.secrets?.applied).toBe(true);
+  expect(result.variables?.applied).toBe(false);
+  expect(result.error).toBe("gh variable set failed (exit 1).");
+  expect(deployAll(secrets, ["a2f0/demo"], true, failing).ok).toBe(false);
 });
 
 test("skips repositories without a ci folder", () => {
   expect(deploySecrets(secrets, "a2f0/other", true, gh)).toEqual({
-    repo: "a2f0/other", path: path.join(secrets, "other", "ci"), skipped: "no ci folder", applied: false,
+    repo: "a2f0/other", path: path.join(secrets, "other", "ci"), skipped: "no ci folder",
   });
   expect(calls).toEqual([]);
 });

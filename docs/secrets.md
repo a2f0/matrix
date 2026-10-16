@@ -75,8 +75,9 @@ GitHub Actions secrets and variables. It reports `deploy` (names the files set)
 and `unmanaged` (names on GitHub that the files do not mention). `--apply`
 passes each non-empty file to `gh secret set --env-file` or `gh variable set
 --env-file`, so values go from the file to GitHub without passing through
-matrix. Nothing is deleted. Only repository-level settings are managed;
-environment secrets stay manual.
+matrix, and marks each file `applied`. Nothing is deleted. A failure is recorded
+on its repository, the others still run, and the command exits non-zero. Only
+repository-level settings are managed; environment secrets stay manual.
 
 GitHub cannot return a secret's value. An `unmanaged` secret has to be refilled
 from its source before the file can own it.
