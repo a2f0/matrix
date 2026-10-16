@@ -82,6 +82,11 @@ repository-level settings are managed; environment secrets stay manual.
 GitHub cannot return a secret's value. An `unmanaged` secret has to be refilled
 from its source before the file can own it.
 
+## Terraform state
+
+Each project's Terraform state bucket key (`TF_STATE_*`) lives in its tier
+`app.env`; see [terraform-state.md](terraform-state.md).
+
 ## Rules for agents
 
 - Never read, print, copy into logs, or commit secret values. Listing file
