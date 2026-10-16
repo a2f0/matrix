@@ -44,23 +44,26 @@ export function runGh(args: string[]): string {
 }
 
 /**
- * The line holding the quote that closes a value opened at lines[start][column], or -1.
+ * Where the quote that closes a value opened at lines[start][column] sits, or undefined.
  * Like gh's dotenv parser, any quote not directly after a backslash closes it, across lines.
  */
-function closingLine(lines: string[], start: number, column: number, quote: string): number {
+function closingQuote(lines: string[], start: number, column: number, quote: string): { line: number; position: number } | undefined {
   let previous = quote;
   for (let index = start, offset = column + 1; index < lines.length; index++, offset = 0) {
     const line = lines[index]!;
     for (let position = offset; position < line.length; position++) {
-      if (line[position] === quote && previous !== "\\") return index;
+      if (line[position] === quote && previous !== "\\") return { line: index, position };
       previous = line[position]!;
     }
     previous = "\n";
   }
-  return -1;
+  return undefined;
 }
 
-/** Names a dotenv file assigns, in order. Values, including quoted multi-line ones, are skipped unread. */
+/**
+ * Names a dotenv file assigns, in order. Values, including quoted multi-line ones, are skipped
+ * unread. Lines gh could read differently are rejected, so the names reported are the ones set.
+ */
 export function dotenvNames(source: string, file: string): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
@@ -78,9 +81,13 @@ export function dotenvNames(source: string, file: string): string[] {
     names.push(name);
     const quote = value[0];
     if (quote !== "\"" && quote !== "'") continue;
-    const closing = closingLine(lines, index, line.length - value.length, quote);
-    if (closing < 0) throw new Error(`${file}:${index + 1}: ${name} has an unterminated quoted value.`);
-    index = closing;
+    const closing = closingQuote(lines, index, line.length - value.length, quote);
+    if (!closing) throw new Error(`${file}:${index + 1}: ${name} has an unterminated quoted value.`);
+    // gh keeps parsing after a closing quote, so anything but a comment there could be another setting.
+    if (!/^\s*(?:#.*)?$/.test(lines[closing.line]!.slice(closing.position + 1))) {
+      throw new Error(`${file}:${closing.line + 1}: ${name} has text after its closing quote.`);
+    }
+    index = closing.line;
   }
   return names;
 }

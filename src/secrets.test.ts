@@ -59,6 +59,9 @@ test("rejects lines and names GitHub would refuse", () => {
   expect(() => dotenvNames("A=1\nA=2\n", "f")).toThrow("A is assigned twice");
   expect(() => dotenvNames("TOKEN=1\ntoken=2\n", "f")).toThrow("token is assigned twice");
   expect(() => dotenvNames("A=\"open\n", "f")).toThrow("unterminated quoted value");
+  expect(() => dotenvNames("A=\"x\" B=y\n", "f")).toThrow("f:1: A has text after its closing quote.");
+  expect(() => dotenvNames("A='one\ntwo' C=3\n", "f")).toThrow("f:2: A has text after its closing quote.");
+  expect(dotenvNames("A=\"x\"   # note\nB='y'\n", "f")).toEqual(["A", "B"]);
 });
 
 test("plans without changing GitHub and reports settings the files do not name", () => {
