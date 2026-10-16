@@ -1,8 +1,9 @@
-import { writeSync } from "node:fs";
+import { existsSync, writeSync } from "node:fs";
 import path from "node:path";
 import { checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
 import { cloneUrl, loadManifest, parseManifest, saveManifest, selectRepos } from "./manifest";
+import { deploySecrets, type Gh, runGh, secretsRoot } from "./secrets";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -11,6 +12,9 @@ export const HELP = `Usage: matrix <command>
   sync [repo...]        Clone missing checkouts, fetch, and fast-forward clean default branches
   status [repo...]      Report branch, local changes, and distance from origin's default branch
   discover [--apply]    Compare matrix.json with the owner's repositories; --apply adds new ones
+  deploy-secrets [repo...] [--apply]
+                        Compare each repo's matrix-secrets ci/ files with its GitHub Actions
+                        secrets and variables; --apply sets them (nothing is deleted)
   --help
 
 Repos are owner/name or checkout name; none selects all. Output is JSON.
@@ -20,7 +24,7 @@ Checkouts are never reset, stashed, or deleted.
 function output(value: unknown): void { writeSync(1, `${JSON.stringify(value, null, 2)}\n`); }
 function usage(condition: boolean, message: string): void { if (!condition) throw new Error(message); }
 
-export function main(argv = process.argv.slice(2), root = ROOT): number {
+export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh): number {
   const [command, ...args] = argv;
   if (!command || command === "--help" || command === "-h") { writeSync(1, HELP); return 0; }
   const manifest = loadManifest(root);
@@ -51,6 +55,16 @@ export function main(argv = process.argv.slice(2), root = ROOT): number {
       saveManifest(root, parseManifest(JSON.stringify({ ...manifest, repos: [...manifest.repos, ...plan.added].sort(byName) })));
     }
     output({ applied: apply, ...plan });
+    return 0;
+  }
+  if (command === "deploy-secrets") {
+    const apply = args.includes("--apply");
+    const names = args.filter(arg => arg !== "--apply");
+    const option = names.find(arg => arg.startsWith("-"));
+    usage(option === undefined, `Unknown deploy-secrets option '${option}'.`);
+    const secrets = secretsRoot(root);
+    usage(existsSync(secrets), `Secrets folder ${secrets} does not exist; set MATRIX_SECRETS_DIR.`);
+    output({ applied: apply, secrets, results: selectRepos(manifest, names).map(repo => deploySecrets(secrets, repo, apply, gh)) });
     return 0;
   }
   throw new Error(`Unknown command '${command}'. Run matrix --help.`);

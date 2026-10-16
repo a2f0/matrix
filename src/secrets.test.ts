@@ -1,0 +1,82 @@
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { deploySecrets, dotenvNames, type Gh, secretsRoot } from "./secrets";
+
+let secrets: string, calls: string[][];
+const remote: Record<string, string[]> = { secret: ["DEPLOY_KEY", "LEGACY_TOKEN"], variable: [] };
+const gh: Gh = args => {
+  calls.push(args);
+  return args[1] === "list" ? `${remote[args[0]!]!.join("\n")}\n` : "";
+};
+
+function ci(file: string, content: string): string {
+  const directory = path.join(secrets, "demo", "ci");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(path.join(directory, file), content);
+  return path.join(directory, file);
+}
+
+beforeEach(() => {
+  secrets = mkdtempSync(path.join(tmpdir(), "matrix-secrets-"));
+  calls = [];
+});
+
+afterEach(() => rmSync(secrets, { recursive: true, force: true }));
+
+test("reads names in order and skips comments, export prefixes, and quoted multi-line values", () => {
+  const source = [
+    "# header",
+    "",
+    "export API_TOKEN=abc # trailing",
+    "SSH_KEY=\"-----BEGIN KEY-----",
+    "NOT_A_NAME=inside the value \\\" still inside",
+    "-----END KEY-----\"",
+    "SINGLE='one",
+    "two'",
+    "  PLAIN = value",
+  ].join("\n");
+  expect(dotenvNames(source, "ci/secrets.env")).toEqual(["API_TOKEN", "SSH_KEY", "SINGLE", "PLAIN"]);
+});
+
+test("rejects lines and names GitHub would refuse", () => {
+  expect(() => dotenvNames("just text\n", "f")).toThrow("f:1 is not a NAME=value line.");
+  expect(() => dotenvNames("GITHUB_TOKEN=x\n", "f")).toThrow("reserves names");
+  expect(() => dotenvNames("A=1\nA=2\n", "f")).toThrow("A is assigned twice");
+  expect(() => dotenvNames("A=\"open\n", "f")).toThrow("unterminated quoted value");
+});
+
+test("plans without changing GitHub and reports settings the files do not name", () => {
+  ci("secrets.env", "# comment only\nDEPLOY_KEY=value\nNEW_TOKEN=value\n");
+  const result = deploySecrets(secrets, "a2f0/demo", false, gh);
+  expect(result).toEqual({
+    repo: "a2f0/demo",
+    path: path.join(secrets, "demo", "ci"),
+    secrets: { deploy: ["DEPLOY_KEY", "NEW_TOKEN"], unmanaged: ["LEGACY_TOKEN"] },
+    variables: { deploy: [], unmanaged: [] },
+    applied: false,
+  });
+  expect(calls.every(args => args[1] === "list")).toBe(true);
+});
+
+test("applies each non-empty file through gh without passing values or deleting anything", () => {
+  const file = ci("secrets.env", "DEPLOY_KEY=sensitive-value\n");
+  ci("variables.env", "# nothing yet\n");
+  deploySecrets(secrets, "a2f0/demo", true, gh);
+  const changes = calls.filter(args => args[1] !== "list");
+  expect(changes).toEqual([["secret", "set", "--repo", "a2f0/demo", "--env-file", file]]);
+  expect(JSON.stringify(calls)).not.toContain("sensitive-value");
+});
+
+test("skips repositories without a ci folder", () => {
+  expect(deploySecrets(secrets, "a2f0/other", true, gh)).toEqual({
+    repo: "a2f0/other", path: path.join(secrets, "other", "ci"), skipped: "no ci folder", applied: false,
+  });
+  expect(calls).toEqual([]);
+});
+
+test("locates matrix-secrets beside the repository unless overridden", () => {
+  expect(secretsRoot("/work/matrix", {})).toBe("/work/matrix-secrets");
+  expect(secretsRoot("/work/matrix", { MATRIX_SECRETS_DIR: "/vault/secrets" })).toBe("/vault/secrets");
+});
