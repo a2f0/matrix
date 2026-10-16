@@ -3,7 +3,7 @@ import path from "node:path";
 import { checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
 import { cloneUrl, loadManifest, parseManifest, saveManifest, selectRepos } from "./manifest";
-import { deploySecrets, type Gh, runGh, secretsRoot } from "./secrets";
+import { deployAll, type Gh, runGh, secretsRoot } from "./secrets";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -64,8 +64,9 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
     usage(option === undefined, `Unknown deploy-secrets option '${option}'.`);
     const secrets = secretsRoot(root);
     usage(existsSync(secrets), `Secrets folder ${secrets} does not exist; set MATRIX_SECRETS_DIR.`);
-    output({ applied: apply, secrets, results: selectRepos(manifest, names).map(repo => deploySecrets(secrets, repo, apply, gh)) });
-    return 0;
+    const { ok, results } = deployAll(secrets, selectRepos(manifest, names), apply, gh);
+    output({ ok, apply, secrets, results });
+    return ok ? 0 : 1;
   }
   throw new Error(`Unknown command '${command}'. Run matrix --help.`);
 }

@@ -18,8 +18,9 @@ export interface CiFile {
 
 export interface DeployResult {
   repo: string;
-  path: string;
+  path?: string;
   skipped?: string;
+  error?: string;
   secrets?: CiFile;
   variables?: CiFile;
   applied: boolean;
@@ -41,13 +42,21 @@ export function runGh(args: string[]): string {
   return result.stdout;
 }
 
-/** Return true when text holds the unescaped quote that closes a value. */
-function closes(text: string, quote: string): boolean {
-  for (let index = 0; index < text.length; index++) {
-    if (quote === "\"" && text[index] === "\\") index++;
-    else if (text[index] === quote) return true;
+/**
+ * The line holding the quote that closes a value opened at lines[start][column], or -1.
+ * Like gh's dotenv parser, any quote not directly after a backslash closes it, across lines.
+ */
+function closingLine(lines: string[], start: number, column: number, quote: string): number {
+  let previous = quote;
+  for (let index = start, offset = column + 1; index < lines.length; index++, offset = 0) {
+    const line = lines[index]!;
+    for (let position = offset; position < line.length; position++) {
+      if (line[position] === quote && previous !== "\\") return index;
+      previous = line[position]!;
+    }
+    previous = "\n";
   }
-  return false;
+  return -1;
 }
 
 /** Names a dotenv file assigns, in order. Values, including quoted multi-line ones, are skipped unread. */
@@ -68,12 +77,9 @@ export function dotenvNames(source: string, file: string): string[] {
     names.push(name);
     const quote = value[0];
     if (quote !== "\"" && quote !== "'") continue;
-    let rest = value.slice(1);
-    const start = index;
-    while (!closes(rest, quote)) {
-      if (++index >= lines.length) throw new Error(`${file}:${start + 1}: ${name} has an unterminated quoted value.`);
-      rest = lines[index]!;
-    }
+    const closing = closingLine(lines, index, line.length - value.length, quote);
+    if (closing < 0) throw new Error(`${file}:${index + 1}: ${name} has an unterminated quoted value.`);
+    index = closing;
   }
   return names;
 }
@@ -98,4 +104,16 @@ export function deploySecrets(secrets: string, repo: string, apply: boolean, gh:
   }
   const [secret, variable] = files;
   return { repo, path: directory, secrets: secret!.plan, variables: variable!.plan, applied: apply };
+}
+
+/** Deploy each repository in turn, recording a failure without hiding the others' results. */
+export function deployAll(secrets: string, repos: string[], apply: boolean, gh: Gh = runGh): { ok: boolean; results: DeployResult[] } {
+  const results = repos.map(repo => {
+    try {
+      return deploySecrets(secrets, repo, apply, gh);
+    } catch (error) {
+      return { repo, error: error instanceof Error ? error.message : String(error), applied: false };
+    }
+  });
+  return { ok: results.every(result => result.error === undefined), results };
 }

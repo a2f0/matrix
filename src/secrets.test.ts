@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { deploySecrets, dotenvNames, type Gh, runGh, secretsRoot } from "./secrets";
+import { deployAll, deploySecrets, dotenvNames, type Gh, runGh, secretsRoot } from "./secrets";
 
 let secrets: string, calls: string[][];
 const remote: Record<string, string[]> = { secret: ["DEPLOY_KEY", "LEGACY_TOKEN"], variable: [] };
@@ -40,6 +40,19 @@ test("reads names in order and skips comments, export prefixes, and quoted multi
   expect(dotenvNames(source, "ci/secrets.env")).toEqual(["API_TOKEN", "SSH_KEY", "SINGLE", "PLAIN"]);
 });
 
+test("treats a quote after a backslash as part of the value, as gh's parser does", () => {
+  const source = [
+    "SINGLE='it\\'s",
+    "HIDDEN_ONE=still inside",
+    "done'",
+    "DOUBLE=\"ends with a backslash \\\\\"",
+    "HIDDEN_TWO=still inside\"",
+    "EMPTY=''",
+    "LAST=1",
+  ].join("\n");
+  expect(dotenvNames(source, "f")).toEqual(["SINGLE", "DOUBLE", "EMPTY", "LAST"]);
+});
+
 test("rejects lines and names GitHub would refuse", () => {
   expect(() => dotenvNames("just text\n", "f")).toThrow("f:1 is not a NAME=value line.");
   expect(() => dotenvNames("GITHUB_TOKEN=x\n", "f")).toThrow("reserves names");
@@ -68,6 +81,14 @@ test("applies each non-empty file through gh without passing values or deleting 
   const changes = calls.filter(args => args[1] !== "list");
   expect(changes).toEqual([["secret", "set", "--repo", "a2f0/demo", "--env-file", file]]);
   expect(JSON.stringify(calls)).not.toContain("sensitive-value");
+});
+
+test("records a failing repository and keeps the others' results", () => {
+  ci("secrets.env", "BROKEN\n");
+  const { ok, results } = deployAll(secrets, ["a2f0/demo", "a2f0/other"], false, gh);
+  expect(ok).toBe(false);
+  expect(results[0]).toEqual({ repo: "a2f0/demo", error: `${path.join(secrets, "demo", "ci", "secrets.env")}:1 is not a NAME=value line.`, applied: false });
+  expect(results[1]).toMatchObject({ repo: "a2f0/other", skipped: "no ci folder" });
 });
 
 test("skips repositories without a ci folder", () => {
