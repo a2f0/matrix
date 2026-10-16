@@ -83,7 +83,9 @@ including adopting agent-tool in one that lacks it.
 Secrets for every managed repository live in `../matrix-secrets`, one namespace
 per repository with `staging/`, `prod/`, and `ci/` folders. Each clone links its
 gitignored `.secrets` there. Backups and GitHub Actions values are managed from
-this workspace; see [docs/secrets.md](docs/secrets.md).
+this workspace; see [docs/secrets.md](docs/secrets.md). Terraform state lives
+in one Cloudflare R2 bucket per repository; see
+[docs/terraform-state.md](docs/terraform-state.md).
 
 ## Sweeps
 
