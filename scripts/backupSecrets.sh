@@ -6,13 +6,13 @@ umask 077
 MATRIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SECRETS_DIR="${MATRIX_SECRETS_DIR:-$MATRIX_ROOT/../matrix-secrets}"
 OUTPUT_DIR="$HOME/matrix-secrets-backups"
-PASSWORD=""
+PASSWORD_FILE=""
 NO_PASSWORD=false
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 ARCHIVE_EXTENSION=".zip"
 
 usage() {
-  echo "Usage: backupSecrets.sh [output_dir] [--password <password>] [--no-password]"
+  echo "Usage: backupSecrets.sh [output_dir] [--password-file <file>] [--no-password]"
 }
 
 fail() {
@@ -23,18 +23,16 @@ fail() {
 output_dir_set=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --password)
+    --password-file)
       if [[ $# -lt 2 ]]; then
         usage >&2
-        fail "missing value for --password"
+        fail "missing value for --password-file"
       fi
-      PASSWORD="$2"
-      [[ -n "$PASSWORD" ]] || fail "--password cannot be empty"
+      PASSWORD_FILE="$2"
       shift 2
       ;;
-    --password=*)
-      PASSWORD="${1#*=}"
-      [[ -n "$PASSWORD" ]] || fail "--password cannot be empty"
+    --password-file=*)
+      PASSWORD_FILE="${1#*=}"
       shift
       ;;
     --no-password)
@@ -61,11 +59,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -n "$PASSWORD" && "$NO_PASSWORD" == true ]]; then
-  fail "--password and --no-password cannot be combined"
+if [[ -n "$PASSWORD_FILE" && "$NO_PASSWORD" == true ]]; then
+  fail "--password-file and --no-password cannot be combined"
 fi
-if [[ -z "$PASSWORD" && "$NO_PASSWORD" != true && ! -t 0 ]]; then
-  fail "non-interactive backups require --password or explicit --no-password"
+# The passphrase is read from a file so it never appears in process arguments.
+if [[ -n "$PASSWORD_FILE" ]]; then
+  [[ -f "$PASSWORD_FILE" && -r "$PASSWORD_FILE" ]] || fail "password file is not a readable file: $PASSWORD_FILE"
+  [[ -n "$(head -n 1 "$PASSWORD_FILE")" ]] || fail "password file's first line is empty: $PASSWORD_FILE"
+elif [[ "$NO_PASSWORD" != true && ! -t 0 ]]; then
+  fail "non-interactive backups require --password-file or explicit --no-password"
 fi
 command -v zip >/dev/null 2>&1 || fail "'zip' command not found."
 if [[ "$NO_PASSWORD" != true ]]; then
@@ -117,12 +119,10 @@ ARCHIVE_PATH="$OUTPUT_ABS/matrix-secrets-backup-${TIMESTAMP}-${RESERVATION_DIR##
 # archive is never written to disk.
 if [[ "$NO_PASSWORD" == true ]]; then
   (cd "$SECRETS_PARENT" && zip -r "$TEMP_ARCHIVE" "$SECRETS_NAME" -x '*.DS_Store' >/dev/null)
-elif [[ -n "$PASSWORD" ]]; then
-  echo "backupSecrets: WARNING: --password exposes the passphrase in the backup command's process list." >&2
+elif [[ -n "$PASSWORD_FILE" ]]; then
   (cd "$SECRETS_PARENT" && zip -r - "$SECRETS_NAME" -x '*.DS_Store' 2>/dev/null) |
-    gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
-      --symmetric --cipher-algo AES256 --force-aead --output "$TEMP_ARCHIVE" \
-      3<<<"$PASSWORD"
+    gpg --batch --yes --pinentry-mode loopback --passphrase-file "$PASSWORD_FILE" \
+      --symmetric --cipher-algo AES256 --force-aead --output "$TEMP_ARCHIVE"
 else
   (cd "$SECRETS_PARENT" && zip -r - "$SECRETS_NAME" -x '*.DS_Store' 2>/dev/null) |
     gpg --symmetric --cipher-algo AES256 --force-aead --output "$TEMP_ARCHIVE"

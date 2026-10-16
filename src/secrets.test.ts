@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { deploySecrets, dotenvNames, type Gh, secretsRoot } from "./secrets";
+import { deploySecrets, dotenvNames, type Gh, runGh, secretsRoot } from "./secrets";
 
 let secrets: string, calls: string[][];
 const remote: Record<string, string[]> = { secret: ["DEPLOY_KEY", "LEGACY_TOKEN"], variable: [] };
@@ -80,4 +80,20 @@ test("skips repositories without a ci folder", () => {
 test("locates matrix-secrets beside the repository unless overridden", () => {
   expect(secretsRoot("/work/matrix", {})).toBe("/work/matrix-secrets");
   expect(secretsRoot("/work/matrix", { MATRIX_SECRETS_DIR: "/vault/secrets" })).toBe("/vault/secrets");
+});
+
+test("withholds gh output when a set fails, but keeps it for listings", () => {
+  const bin = path.join(secrets, "bin");
+  mkdirSync(bin);
+  writeFileSync(path.join(bin, "gh"), "#!/bin/sh\necho 'parse error near sensitive-value' >&2\nexit 1\n");
+  chmodSync(path.join(bin, "gh"), 0o755);
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}:${saved}`;
+  try {
+    expect(() => runGh(["secret", "set", "--repo", "a2f0/demo", "--env-file", "ci/secrets.env"])).toThrow("output withheld");
+    expect(() => runGh(["secret", "set"])).not.toThrow("sensitive-value");
+    expect(() => runGh(["secret", "list"])).toThrow("parse error near sensitive-value");
+  } finally {
+    process.env.PATH = saved;
+  }
 });

@@ -52,14 +52,15 @@ ignore pattern with a trailing slash does not match a symlink.
 ## Backups
 
 ```sh
-bun run secrets:backup [output_dir] [--password <password>] [--no-password]
+bun run secrets:backup [output_dir] [--password-file <file>] [--no-password]
 ```
 
 Archives the whole folder as `matrix-secrets/...` into `~/matrix-secrets-backups`
 by default, with mode 600. Interactive runs prompt GPG for a passphrase
-(AES-256). Non-interactive runs need `--password` or an explicit
-`--no-password`. The plaintext archive is never written to disk when encrypting,
-and an output directory inside the secrets folder is refused.
+(AES-256). Non-interactive runs need `--password-file`, whose first line is the
+passphrase, or an explicit `--no-password`. The passphrase never appears in
+process arguments, the plaintext archive is never written to disk when
+encrypting, and an output directory inside the secrets folder is refused.
 
 ## CI values
 

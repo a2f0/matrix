@@ -30,7 +30,7 @@ bun run status
 | `bun run sync [repo...]` | Clone missing checkouts, fetch all, fast-forward clean default branches |
 | `bun run status [repo...]` | Report branch, local changes, and distance from origin's default branch |
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
-| `bun run secrets:backup [dir] [--password p \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
+| `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 
 Repositories are named as `owner/name` or by checkout name; none selects all.

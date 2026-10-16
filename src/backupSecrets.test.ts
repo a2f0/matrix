@@ -6,7 +6,7 @@ import path from "node:path";
 import { ROOT } from "./cli";
 
 const SCRIPT = path.join(ROOT, "scripts", "backupSecrets.sh");
-let temporary: string, secrets: string, output: string, gnupg: string;
+let temporary: string, secrets: string, output: string, gnupg: string, passphrase: string;
 
 function backup(...args: string[]): { status: number | null; stderr: string } {
   const env = { ...process.env, MATRIX_SECRETS_DIR: secrets, GNUPGHOME: gnupg, HOME: temporary };
@@ -39,6 +39,8 @@ beforeEach(() => {
   mkdirSync(gnupg, { mode: 0o700 });
   writeFileSync(path.join(secrets, "demo", "prod", "app.env"), "TOKEN=fixture-secret\n");
   writeFileSync(path.join(secrets, ".DS_Store"), "finder");
+  passphrase = path.join(temporary, "passphrase");
+  writeFileSync(passphrase, "fixture-passphrase\n", { mode: 0o600 });
 });
 
 afterEach(() => rmSync(temporary, { recursive: true, force: true }));
@@ -46,13 +48,16 @@ afterEach(() => rmSync(temporary, { recursive: true, force: true }));
 test("non-interactive backups require an explicit encryption choice", () => {
   const result = backup(output);
   expect(result.status).toBe(1);
-  expect(result.stderr).toContain("require --password or explicit --no-password");
+  expect(result.stderr).toContain("require --password-file or explicit --no-password");
   expect(archives()).toEqual([]);
 });
 
-test("rejects conflicting, empty, and unknown options", () => {
-  expect(backup(output, "--password", "x", "--no-password").stderr).toContain("cannot be combined");
-  expect(backup(output, "--password=").stderr).toContain("cannot be empty");
+test("rejects conflicting and unknown options and unusable password files", () => {
+  expect(backup(output, "--password-file", passphrase, "--no-password").stderr).toContain("cannot be combined");
+  expect(backup(output, "--password-file", path.join(temporary, "absent")).stderr).toContain("not a readable file");
+  writeFileSync(passphrase, "\nsecond line\n");
+  expect(backup(output, `--password-file=${passphrase}`).stderr).toContain("first line is empty");
+  expect(backup(output, "--password", "inline").stderr).toContain("unknown option: --password");
   expect(backup(output, "--force").stderr).toContain("unknown option");
   expect(backup(output, output, "--no-password").stderr).toContain("too many positional arguments");
 });
@@ -70,12 +75,12 @@ test("refuses a missing source and an output directory inside it", () => {
 });
 
 test("encrypts the folder under its own name without touching earlier archives", () => {
-  expect(backup(output, "--password", "fixture-passphrase").status).toBe(0);
+  expect(backup(output, "--password-file", passphrase).status).toBe(0);
   const [first] = archives();
   expect(first).toEndWith(".zip.gpg");
   expect(mode(first!)).toBe(0o600);
   const before = statSync(first!).mtimeMs;
-  expect(backup(output, "--password", "fixture-passphrase").status).toBe(0);
+  expect(backup(output, `--password-file=${passphrase}`).status).toBe(0);
   expect(archives()).toHaveLength(2);
   expect(statSync(first!).mtimeMs).toBe(before);
   const zip = decrypt(first!, "fixture-passphrase");
