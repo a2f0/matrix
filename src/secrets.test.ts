@@ -44,16 +44,17 @@ test("rejects lines and names GitHub would refuse", () => {
   expect(() => dotenvNames("just text\n", "f")).toThrow("f:1 is not a NAME=value line.");
   expect(() => dotenvNames("GITHUB_TOKEN=x\n", "f")).toThrow("reserves names");
   expect(() => dotenvNames("A=1\nA=2\n", "f")).toThrow("A is assigned twice");
+  expect(() => dotenvNames("TOKEN=1\ntoken=2\n", "f")).toThrow("token is assigned twice");
   expect(() => dotenvNames("A=\"open\n", "f")).toThrow("unterminated quoted value");
 });
 
 test("plans without changing GitHub and reports settings the files do not name", () => {
-  ci("secrets.env", "# comment only\nDEPLOY_KEY=value\nNEW_TOKEN=value\n");
+  ci("secrets.env", "# comment only\ndeploy_key=value\nNEW_TOKEN=value\n");
   const result = deploySecrets(secrets, "a2f0/demo", false, gh);
   expect(result).toEqual({
     repo: "a2f0/demo",
     path: path.join(secrets, "demo", "ci"),
-    secrets: { deploy: ["DEPLOY_KEY", "NEW_TOKEN"], unmanaged: ["LEGACY_TOKEN"] },
+    secrets: { deploy: ["deploy_key", "NEW_TOKEN"], unmanaged: ["LEGACY_TOKEN"] },
     variables: { deploy: [], unmanaged: [] },
     applied: false,
   });

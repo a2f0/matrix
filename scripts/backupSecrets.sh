@@ -79,14 +79,23 @@ SECRETS_ABS="$(cd "$SECRETS_DIR" && pwd -P)"
 SECRETS_PARENT="$(dirname "$SECRETS_ABS")"
 SECRETS_NAME="$(basename "$SECRETS_ABS")"
 
-# Resolve the output path before creating it, so a refused path leaves nothing behind.
+# Canonicalize the output path before creating it, so a refused path leaves
+# nothing behind: existing components resolve through symlinks, and `.` and
+# `..` apply in order, including after components that do not exist yet.
 resolve_path() {
-  local path="$1" suffix=""
-  while [[ ! -d "$path" ]]; do
-    suffix="/$(basename "$path")$suffix"
-    path="$(dirname "$path")"
+  local current component
+  local -a components
+  if [[ "$1" == /* ]]; then current="/"; else current="$(pwd -P)"; fi
+  IFS=/ read -r -a components <<<"$1"
+  for component in "${components[@]}"; do
+    case "$component" in
+      "" | .) continue ;;
+      ..) current="$(dirname "$current")" ;;
+      *) current="${current%/}/$component" ;;
+    esac
+    if [[ -d "$current" ]]; then current="$(cd "$current" && pwd -P)"; fi
   done
-  printf '%s%s\n' "$(cd "$path" && pwd -P)" "$suffix"
+  printf '%s\n' "$current"
 }
 
 OUTPUT_ABS="$(resolve_path "$OUTPUT_DIR")"

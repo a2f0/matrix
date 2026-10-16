@@ -63,7 +63,10 @@ test("refuses a missing source and an output directory inside it", () => {
   mkdirSync(path.join(secrets, "demo"), { recursive: true });
   symlinkSync(secrets, path.join(temporary, "alias"));
   expect(backup(path.join(temporary, "alias", "backups"), "--no-password").stderr).toContain("cannot be inside the secrets directory");
+  const detour = path.join(temporary, "missing", "..", "matrix-secrets", "backups");
+  expect(backup(detour, "--no-password").stderr).toContain("cannot be inside the secrets directory");
   expect(readdirSync(secrets)).toEqual(["demo"]);
+  expect(existsSync(path.join(temporary, "missing"))).toBe(false);
 });
 
 test("encrypts the folder under its own name without touching earlier archives", () => {

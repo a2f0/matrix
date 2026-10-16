@@ -49,6 +49,7 @@ function closes(text: string, quote: string): boolean {
 /** Names a dotenv file assigns, in order. Values, including quoted multi-line ones, are skipped unread. */
 export function dotenvNames(source: string, file: string): string[] {
   const names: string[] = [];
+  const seen = new Set<string>();
   const lines = source.split(/\r?\n/);
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
@@ -57,7 +58,9 @@ export function dotenvNames(source: string, file: string): string[] {
     if (!match) throw new Error(`${file}:${index + 1} is not a NAME=value line.`);
     const [, name, value] = match as unknown as [string, string, string];
     if (/^GITHUB_/i.test(name)) throw new Error(`${file}:${index + 1}: GitHub reserves names that start with GITHUB_.`);
-    if (names.includes(name)) throw new Error(`${file}:${index + 1}: ${name} is assigned twice.`);
+    // GitHub names are case-insensitive, so TOKEN and token are one setting.
+    if (seen.has(name.toUpperCase())) throw new Error(`${file}:${index + 1}: ${name} is assigned twice.`);
+    seen.add(name.toUpperCase());
     names.push(name);
     const quote = value[0];
     if (quote !== "\"" && quote !== "'") continue;
@@ -82,8 +85,8 @@ export function deploySecrets(secrets: string, repo: string, apply: boolean, gh:
   const files = (Object.keys(KINDS) as Kind[]).map(kind => {
     const file = path.join(directory, KINDS[kind]);
     const names = existsSync(file) ? dotenvNames(readFileSync(file, "utf8"), file) : [];
-    const listed = new Set(names);
-    return { kind, file, plan: { deploy: names, unmanaged: remoteNames(gh, kind, repo).filter(name => !listed.has(name)) } };
+    const listed = new Set(names.map(name => name.toUpperCase()));
+    return { kind, file, plan: { deploy: names, unmanaged: remoteNames(gh, kind, repo).filter(name => !listed.has(name.toUpperCase())) } };
   });
   if (apply) {
     // gh reads the values from the file itself, so they never pass through this process.
