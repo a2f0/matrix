@@ -29,6 +29,13 @@ thread through
 `POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies`
 and resolve only fully addressed findings.
 
+## Secrets
+
+Secrets live in `../matrix-secrets/<project>/{staging,prod,ci}`, linked from each
+clone's gitignored `.secrets`; `docs/secrets.md` describes the layout, backups,
+and CI deployment. Never read, print, log, or commit secret values; names are
+fine. Change that folder only on request, and back it up first.
+
 ## Onboarding a repository
 
 1. Add it with `bun run discover --apply`, or by editing `repos`, and ship that

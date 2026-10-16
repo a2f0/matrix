@@ -13,6 +13,8 @@
     "sync": "bun src/index.ts sync",
     "status": "bun src/index.ts status",
     "discover": "bun src/index.ts discover",
+    "secrets:backup": "bash scripts/backupSecrets.sh",
+    "secrets:deploy": "bun src/index.ts deploy-secrets",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "agent-tool": "agent-tool",

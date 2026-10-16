@@ -8,7 +8,8 @@ without touching in-progress work.
 ```text
 matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
-src/                 The matrix CLI: sync, status, discover
+src/                 The matrix CLI: sync, status, discover, deploy-secrets
+scripts/             backupSecrets.sh for ../matrix-secrets
 AGENTS.md            Coordinator rules for sweeps
 ```
 
@@ -29,6 +30,8 @@ bun run status
 | `bun run sync [repo...]` | Clone missing checkouts, fetch all, fast-forward clean default branches |
 | `bun run status [repo...]` | Report branch, local changes, and distance from origin's default branch |
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
+| `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
+| `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 
 Repositories are named as `owner/name` or by checkout name; none selects all.
 Output is JSON for coordinating agents; `sync` also prints progress to stderr
@@ -74,6 +77,13 @@ preserved.
 Remove a repository by editing `repos`; its checkout is then reported as
 unmanaged until you delete it. `AGENTS.md` describes onboarding a repository,
 including adopting agent-tool in one that lacks it.
+
+## Secrets
+
+Secrets for every managed repository live in `../matrix-secrets`, one namespace
+per repository with `staging/`, `prod/`, and `ci/` folders. Each clone links its
+gitignored `.secrets` there. Backups and GitHub Actions values are managed from
+this workspace; see [docs/secrets.md](docs/secrets.md).
 
 ## Sweeps
 
