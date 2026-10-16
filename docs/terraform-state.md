@@ -70,9 +70,20 @@ Until 2026-10-16, state lived in AWS S3:
 The active objects were copied to the new buckets and checked byte for byte, so
 lineage and serial are unchanged.
 
-Every object in those buckets, plus `tearleads-terraform` and
-`new-relic-terraform`, and tearleads' local bootstrap state, is archived under
-`matrix-secrets/root/legacy/terraform-state/<bucket>/<key>`. Several archived
-states belong to stacks whose code no longer exists, and still track live
-resources. Clean them up from the archive with the original configuration from
-Git history, never by deleting what they reference blindly.
+Every object in those buckets was archived in `matrix-secrets`, along with
+`tearleads-terraform`, `new-relic-terraform`, and tearleads' local bootstrap
+state. The buckets were then deleted.
+
+Several archived states belonged to stacks whose code no longer exists. On
+2026-10-16 the resources they still tracked were checked live and deleted by
+hand, and then the archive was deleted. A copy survives in the
+`matrix-secrets` backup that its README names.
+
+These resources were kept, and no Terraform manages them now:
+- AWS budgets and their `billing-alerts` topic.
+- The `a2f0/tearleads` repository and its ruleset.
+- tearleads.com's Google mail and verification DNS records.
+- The Google Workspace groups.
+- The Tailscale policy and keys.
+- The Vercel project.
+- The New Relic monitors.
