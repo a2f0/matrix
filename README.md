@@ -15,7 +15,8 @@ AGENTS.md            Coordinator rules for sweeps
 
 ## Setup
 
-Requires Bun 1.4.2, Git, and an authenticated `gh` for discovery.
+Requires Bun 1.4.2 or newer, Git, and an authenticated `gh` for discovery.
+Development and CI use Bun 1.4.3.
 
 ```sh
 bun install --frozen-lockfile
@@ -98,15 +99,17 @@ directory, and describe the change:
 `AGENTS.md` defines the procedure: sync and check status, read each checkout's
 own guidance, use one `<type>/<topic>` branch per sweep, delegate at most four
 repositories at a time, validate and independently review each repository,
-publish a package release before the repositories whose change needs it, stop
-at open PRs unless merging is authorized, and report a per-repository ledger,
-on a tracking issue when one is requested. Each repository ships under its own
-policy and pinned agent-tool; matrix never overrides a repository's rules.
+publish a package release before the repositories whose change needs it, and
+report a per-repository ledger, on a tracking issue when one is requested. Each
+repository ships under its own policy and pinned agent-tool; matrix never
+overrides a repository's rules.
 
 For a dependency sweep, use the shared
 [`update-dependencies`](.agents/skills/update-dependencies/SKILL.md) skill and
 the [dependency maintenance guide](docs/dependency-upgrades.md), including the
-plan helper for older checkouts. Upgrade evidence goes in PRs; reusable
+plan helper for older checkouts. Dependency updates ship through merge and normal
+merge-triggered releases unless a narrower stopping point is requested.
+Upgrade evidence goes in PRs; reusable
 procedures and active constraints live in each repository's maintenance docs.
 
 The shared skills come from the exact-pinned
