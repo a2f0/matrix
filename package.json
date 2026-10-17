@@ -23,7 +23,7 @@
     "agents:check": "bun run agent-tool skills check"
   },
   "devDependencies": {
-    "@a2f0/agent-tool": "0.1.11",
+    "@a2f0/agent-tool": "0.1.13",
     "@types/bun": "1.4.2",
     "typescript": "7.0.2"
   }

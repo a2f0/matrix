@@ -5,14 +5,16 @@
     "": {
       "name": "matrix",
       "devDependencies": {
-        "@a2f0/agent-tool": "0.1.11",
+        "@a2f0/agent-tool": "0.1.13",
         "@types/bun": "1.4.2",
         "typescript": "7.0.2",
       },
     },
   },
   "packages": {
-    "@a2f0/agent-tool": ["@a2f0/agent-tool@0.1.11", "", { "bin": { "agent-tool": "src/index.ts" } }, "sha512-eRAHiNz+sujqHS+nyCWcKBQKGqU9tlm0iCvm6CghZ5+KjSWCjWKJQgeq3pd6Ax45amSltFToryR/m68T0XMnIg=="],
+    "@a2f0/agent-tool": ["@a2f0/agent-tool@0.1.13", "", { "dependencies": { "@resvg/resvg-wasm": "2.6.2" }, "bin": { "agent-tool": "src/index.ts" } }, "sha512-q5VOswEsU4KAP9h21GVVUfc+JhSR1cyZk7wv9kjVjCCeVuaZFDZewn/K+6K1/hUxBlpQh/gDFHpkuN4HE2ORtA=="],
+
+    "@resvg/resvg-wasm": ["@resvg/resvg-wasm@2.6.2", "", {}, "sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 

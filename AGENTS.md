@@ -68,6 +68,14 @@ fine. Change that folder only on request, and back it up first.
    committing; managed skills cannot be edited, so exclude their directories
    from a linter that rejects them.
 
+## Brand images
+
+Repositories that render icons, splash screens, favicons, or store graphics keep
+their SVG sources in `assets/brand/` and declare every output in the `images`
+section of `agent-tool.json`; `agent-tool images build <target>` renders them
+(see agent-tool's `docs/images.md`). Do not add per-repository image scripts or
+ImageMagick dependencies.
+
 ## Sweeps across checkouts
 
 A sweep applies one requested change to many checkouts. Coordinate it from a
