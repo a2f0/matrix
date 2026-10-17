@@ -132,10 +132,11 @@ directories can make delegated agents stop for permission prompts.
    `gh pr checks --watch` can exit successfully with no checks reported, and
    workflows triggered by both push and pull request list each check twice;
    wait until every entry has finished.
-6. Dependency updates use `update-dependencies` and `ship-pr` through merge,
-   unless the user requests a narrower stopping point. Other sweeps stop once
-   each PR is open unless the request explicitly authorizes merging.
-   When merging is authorized, follow each repository's CI, merge, and
+6. A request to perform dependency updates includes `update-dependencies` and
+   `ship-pr` through merge and the repository's normal merge-triggered publishing
+   or deployment, unless the user requests a narrower stopping point. Other
+   sweeps stop once each PR is open unless the request authorizes merging.
+   When a sweep merges, follow each repository's CI, merge, and
    deployment policy; some merges deploy sites or publish packages. npm can take
    several minutes to list a version after its publish workflow succeeds, so
    poll before reporting a failed publish. Never weaken a repository's policy to

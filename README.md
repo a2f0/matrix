@@ -107,9 +107,9 @@ overrides a repository's rules.
 For a dependency sweep, use the shared
 [`update-dependencies`](.agents/skills/update-dependencies/SKILL.md) skill and
 the [dependency maintenance guide](docs/dependency-upgrades.md), including the
-plan helper for older checkouts. Dependency updates use `ship-pr` through merge
-unless a narrower stopping point is requested. Other sweeps stop at open PRs
-unless merging is authorized. Upgrade evidence goes in PRs; reusable
+plan helper for older checkouts. Dependency updates ship through merge and normal
+merge-triggered releases unless a narrower stopping point is requested.
+Upgrade evidence goes in PRs; reusable
 procedures and active constraints live in each repository's maintenance docs.
 
 The shared skills come from the exact-pinned

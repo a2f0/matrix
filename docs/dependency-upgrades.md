@@ -34,7 +34,14 @@ documented publish and consumer package managers as well as lockfile owners.
 It requires a non-destructive preview before infrastructure applies or
 deployments, including effects from hooks and CI. Destructive, replacement, or
 unverifiable upgrade groups stay pinned and are reported in the upgrade PR and
-sweep ledger. A preview does not authorize a deployment.
+sweep ledger.
+
+A request to perform dependency updates includes the `ship-pr` workflow through
+merge and normal merge-triggered publishing or deployment. Explicit inventory-only,
+local-change, or open-PR-only requests retain their narrower scope. A preview alone
+does not authorize deployment, and the shipping default does not authorize a
+standalone infrastructure apply or manual deployment. These scope rules do not
+waive the preview gates.
 
 ## Plan helper for older checkouts
 
