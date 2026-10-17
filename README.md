@@ -15,7 +15,8 @@ AGENTS.md            Coordinator rules for sweeps
 
 ## Setup
 
-Requires Bun 1.4.2, Git, and an authenticated `gh` for discovery.
+Requires Bun 1.4.2 or newer, Git, and an authenticated `gh` for discovery.
+Development and CI use Bun 1.4.3.
 
 ```sh
 bun install --frozen-lockfile
