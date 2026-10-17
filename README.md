@@ -99,15 +99,17 @@ directory, and describe the change:
 `AGENTS.md` defines the procedure: sync and check status, read each checkout's
 own guidance, use one `<type>/<topic>` branch per sweep, delegate at most four
 repositories at a time, validate and independently review each repository,
-publish a package release before the repositories whose change needs it, stop
-at open PRs unless merging is authorized, and report a per-repository ledger,
-on a tracking issue when one is requested. Each repository ships under its own
-policy and pinned agent-tool; matrix never overrides a repository's rules.
+publish a package release before the repositories whose change needs it, and
+report a per-repository ledger, on a tracking issue when one is requested. Each
+repository ships under its own policy and pinned agent-tool; matrix never
+overrides a repository's rules.
 
 For a dependency sweep, use the shared
 [`update-dependencies`](.agents/skills/update-dependencies/SKILL.md) skill and
 the [dependency maintenance guide](docs/dependency-upgrades.md), including the
-plan helper for older checkouts. Upgrade evidence goes in PRs; reusable
+plan helper for older checkouts. Dependency updates use `ship-pr` through merge
+unless a narrower stopping point is requested. Other sweeps stop at open PRs
+unless merging is authorized. Upgrade evidence goes in PRs; reusable
 procedures and active constraints live in each repository's maintenance docs.
 
 The shared skills come from the exact-pinned
