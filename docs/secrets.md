@@ -95,3 +95,6 @@ Each project's Terraform state bucket key (`TF_STATE_*`) lives in its tier
   when moving or deleting anything.
 - Sweeps that change how a repository reads secrets follow the layout above and
   update the inventory in `matrix-secrets/README.md`.
+- Repositories keep no encrypted secrets of their own, such as SOPS or Blackbox
+  files. Their values belong in the project's tier folders, read through
+  `.secrets`.
