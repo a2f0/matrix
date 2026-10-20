@@ -17,8 +17,7 @@ AGENTS.md            Coordinator rules for sweeps
 
 Requires Bun 1.4.2 or newer, Git, and an authenticated `gh` for discovery.
 [mise](https://mise.jdx.dev/) installs the development Bun version pinned in
-`.mise.toml`; CI uses the same pin. Keep `package.json`'s `packageManager`
-version aligned with it.
+`.mise.toml`; CI uses the same pin.
 
 ```sh
 mise install
