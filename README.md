@@ -16,9 +16,11 @@ AGENTS.md            Coordinator rules for sweeps
 ## Setup
 
 Requires Bun 1.4.2 or newer, Git, and an authenticated `gh` for discovery.
-Development and CI use Bun 1.4.3.
+[mise](https://mise.jdx.dev/) installs the development Bun version pinned in
+`.mise.toml`; CI uses the same pin.
 
 ```sh
+mise install
 bun install --frozen-lockfile
 bun run sync
 bun run status

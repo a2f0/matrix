@@ -28,6 +28,9 @@ issues. A useful report records the outcome and safe evidence, not raw secrets.
 
 ## Compatibility and deployment gates
 
+For matrix itself, keep the Bun version in `.mise.toml` aligned with
+`package.json`'s `packageManager`. CI installs the toolchain from `.mise.toml`.
+
 The skill inventories package and toolchain pins, follows upstream migrations,
 checks compatibility groups and resolved dependency advisories, and validates
 documented publish and consumer package managers as well as lockfile owners.

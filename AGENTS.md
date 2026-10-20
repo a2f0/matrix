@@ -13,6 +13,10 @@ explicit request.
 
 ## Changing matrix itself
 
+Use the Bun version pinned in `.mise.toml`. In agent shells, put its
+`~/.local/share/mise/installs/bun/<version>/bin` first on `PATH`; do not run
+`mise trust` to activate the checkout.
+
 Validate with `bun run typecheck`, `bun test`, and `bun run agents:check`.
 Capture noisy finite commands with the pinned harness, for example
 `bun run agent:run --label tests -- bun test`. It preserves exit status and full
