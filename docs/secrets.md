@@ -28,7 +28,8 @@ Each tier is self-contained:
 - `app.env` holds the project's own values for the tier. Loaders read
   `shared.env` and then `app.env`, so the later file wins.
 - Other files (keystores, store keys, service-account JSON, extra env files)
-  keep the names their tooling expects.
+  keep the names their tooling expects. Store release files and variables are
+  named in [fastlane.md](fastlane.md#secrets).
 - Commands that take no tier use `prod`. A project with one environment uses
   only `prod/` and leaves `staging/` empty.
 

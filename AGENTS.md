@@ -80,6 +80,14 @@ section of `agent-tool.json`; `agent-tool images build <target>` renders them
 (see agent-tool's `docs/images.md`). Do not add per-repository image scripts or
 ImageMagick dependencies.
 
+## Store releases
+
+Repositories that ship iOS or Android store builds follow
+[docs/fastlane.md](docs/fastlane.md): fastlane in the native app directory, the
+same lane and package-script names, `NATIVE_RELEASE_TIER` for a staging app,
+and store secrets in `.secrets/<tier>/` under the names it lists. Bring a newly
+onboarded app to it, and change it there before diverging in one repository.
+
 ## Sweeps across checkouts
 
 A sweep applies one requested change to many checkouts. Coordinate it from a
