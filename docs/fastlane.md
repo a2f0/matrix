@@ -22,7 +22,7 @@ Capacitor.
 .ruby-version                 Ruby pin; .mise.toml's ruby, when present, matches it
 APP_DIR/
   Gemfile, Gemfile.lock       ruby file: '<relative path>/.ruby-version'; fastlane and rubocop
-  .rubocop.yml                Excludes android/, ios/, node_modules/, vendor/; Metrics/BlockLength off for fastlane/lanes/
+  .rubocop.yml                Excludes android/, ios/, node_modules/, vendor/; Metrics/BlockLength skips lanes/ios.rb and lanes/android.rb
   package.json                One script per routine lane (see Invocation)
   fastlane/
     Appfile                   app_identifier and package_name from the tier table
@@ -31,10 +31,10 @@ APP_DIR/
     lanes/android.rb          platform :android lanes and the helpers only they use
     lanes/store.rb            Lanes outside a platform and helpers both platforms use (optional)
     lib/native_release_target.rb  Tier table, secrets paths, and secrets loading
-    lib/*.rb                  Plain Ruby modules, no lane definitions, loaded with require_relative
+    lib/*.rb                  Plain Ruby helpers, no lane definitions, loaded with require_relative
     metadata/{ios,android}/   Store listing text (optional)
     test/*.test.ts            Lane and helper tests, run by the repository's test command
-    test/support/             Ruby fakes the tests load
+    test/support/             Ruby fakes and TypeScript helpers the tests load
 ```
 
 fastlane defines `UI` only inside its own namespace, so `lib/` code reports
@@ -60,15 +60,16 @@ variable has to be set in the environment rather than passed as a lane option.
 
 ## Lanes
 
-Every repository has these lanes, with these names and options:
+Every repository has these lanes, with these names, options, and `desc`
+strings. `track:` defaults to `internal` and `release_status:` to `completed`:
 
-| Lane | Does | Options |
-| --- | --- | --- |
-| `ios build_release` | Signed App Store IPA, without uploading | `build_number:` |
-| `ios upload_release` | `build_release`, then uploads to TestFlight | `build_number:` |
-| `ios profiles` | Creates or renews the match App Store profiles | `force:true` regenerates them |
-| `android build_release` | Signed release App Bundle, without uploading | `build_number:` |
-| `android upload_release` | `build_release`, then uploads to a Google Play track | `build_number:`, `track:` (`internal`), `release_status:` (`completed`) |
+| Lane | `desc` |
+| --- | --- |
+| `ios build_release` | Build a signed App Store IPA without uploading it (build_number:) |
+| `ios upload_release` | Run build_release, then upload to TestFlight (build_number:) |
+| `ios profiles` | Create or renew the match App Store profiles (force:true regenerates them) |
+| `android build_release` | Build a signed release App Bundle without uploading it (build_number:) |
+| `android upload_release` | Run build_release, then upload to a Google Play track (build_number:, track:internal, release_status:completed) |
 
 A repository that needs any of these uses these names:
 
@@ -87,10 +88,11 @@ A repository that needs any of these uses these names:
 
 `build_number:` is the iOS build number or the Android version code. Without
 it, each repository picks the next number its own way. Lanes that only one
-repository needs keep repository-specific names. Each lane's `desc` is an
-imperative sentence, as in "Build a signed App Store IPA without uploading it
-(build_number:)", naming its options in parentheses; repositories that share
-code, such as the two Capacitor apps, use the same wording.
+repository needs keep repository-specific names. The required lanes use the
+`desc` strings above word for word, and a comment above the lane carries
+anything specific to the repository. Every other `desc` is an imperative
+sentence that names its options in parentheses; repositories that share code,
+such as the two Capacitor apps, use the same wording.
 
 ## Invocation
 
