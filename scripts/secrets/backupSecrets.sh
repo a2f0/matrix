@@ -3,7 +3,7 @@
 set -euo pipefail
 umask 077
 
-MATRIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+MATRIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 SECRETS_DIR="${MATRIX_SECRETS_DIR:-$MATRIX_ROOT/../matrix-secrets}"
 OUTPUT_DIR="$HOME/matrix-secrets-backups"
 PASSWORD_FILE=""

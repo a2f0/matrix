@@ -9,7 +9,7 @@ without touching in-progress work.
 matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
 src/                 The matrix CLI: sync, status, discover, deploy-secrets
-scripts/             backupSecrets.sh for ../matrix-secrets
+scripts/secrets/     Backup entrypoint for ../matrix-secrets
 AGENTS.md            Coordinator rules for sweeps
 ```
 
@@ -121,6 +121,10 @@ lockfile, and `.agent-tool-skills.json` together. The installer supplies matchin
 copies for Claude in `.claude/skills` and Codex in `.agents/skills`; OpenCode
 discovers `.agents/skills` too. Do not edit managed copies.
 
+[Tooling and layout](docs/tooling.md) defines shared command ownership, script
+locations, and documentation structure across the matrix. Repository-specific
+validation and release requirements remain in each checkout's guidance.
+
 ## Development
 
 ```sh
@@ -129,24 +133,12 @@ bun run agent:run --label tests -- bun test
 bun run agent:run --label skills -- bun run agents:check
 ```
 
-The pinned agent-tool harness keeps complete stdout and stderr in a private
-temporary log and returns a compact JSON receipt with the command's exit status,
-duration, output size, and log path. Failed commands also show a bounded excerpt
-and retain their failure status. Inspect a specific log without replaying it all:
-
-```sh
-bun run agent-tool logs <log-path> --max-bytes 8192 --tail-lines 80
-```
-
-Use the harness for finite setup, validation, build, and hook-running commands.
-Review required warnings, timings, and artifacts before accepting a check; a
-success receipt only establishes process completion. Keep review findings and
-structured decision output such as `sync` and `status` visible. Interactive tools
-and persistent servers run directly. Logs remain in the receipt's temporary
-directory until that specific directory is removed or the OS cleans it up.
-
-The installed shipping, review, and dependency skills use this workflow across
-checkouts while preserving each repository's checks and evidence requirements.
+The pinned agent-tool harness reports a compact result and retains the full
+private log. Inspect required diagnostics with `bun run agent-tool logs <path>`.
+Logs remain in the reported temporary directory until it is removed; use
+`--max-bytes` and `--tail-lines` to bound inspection.
+See [AGENTS.md](AGENTS.md) for validation and shipping requirements and
+[dependency maintenance](docs/dependency-upgrades.md) for upgrade constraints.
 
 Tests build temporary local Git remotes and make no network calls.
 `bunfig.toml` limits `bun test` to `src`, so it never runs the checkouts' suites.
