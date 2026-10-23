@@ -91,6 +91,21 @@ section of `agent-tool.json`; `agent-tool images build <target>` renders them
 (see agent-tool's `docs/images.md`). Do not add per-repository image scripts or
 ImageMagick dependencies.
 
+Every website serves `favicon.svg`, `favicon.ico` (16, 32, and 48 pixels), and
+an opaque 180-pixel `apple-touch-icon.png` rendered from `assets/brand/logo.svg`,
+linked from each page head; balebase and tearleads are the references. Render
+them during dev and build, including the build a deploy runs, into a gitignored
+directory or the build output, and add `agent-tool.json` and `assets/brand/**`
+to cached build inputs such as Turbo's. Never commit binary images: replace a
+committed raster with its SVG source and a rendered output. Export editor SVGs
+as plain SVG that meets agent-tool's source rules, and have pages that display
+the logo use the `assets/brand` copy instead of a duplicate. Pages that a
+published package lets another site copy under a subpath either link relative
+icons that the package ships rendered (dnbm) or link root-absolute icons so the
+host's apply (skyline); every host serves its own icons at the root. Merging
+does not put a favicon live where a repository deploys only on request; report
+those deploys rather than running them.
+
 ## Store releases
 
 Repositories that ship iOS or Android store builds follow
@@ -107,7 +122,10 @@ directories can make delegated agents stop for permission prompts.
 
 1. Run `bun run sync`, then `bun run status`. Change only checkouts whose
    status is `ready`. Report the rest (local changes, another branch, diverged,
-   errors) instead of resetting, stashing, or discarding their state. Without
+   errors) instead of resetting, stashing, or discarding their state. A clean
+   checkout left on a renamed former default branch, whose upstream is gone, may
+   switch to the current default with the user's approval; keep the old local
+   branch, and move aside rather than delete files it leaves untracked. Without
    named targets, a sweep covers every managed checkout where the change applies.
 2. Each checkout is its own repository, and this file stops at its boundary.
    Before changing a checkout, read its `AGENTS.md`, README, and the docs they
