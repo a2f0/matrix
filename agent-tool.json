@@ -1,6 +1,18 @@
 {
   "schemaVersion": 1,
   "merge": {
-    "requiredChecks": [{"name": "verify", "workflow": "CI"}]
+    "requiredChecks": [
+      {
+        "name": "verify",
+        "workflow": "CI"
+      }
+    ]
+  },
+  "branch": {
+    "types": null,
+    "exempt": [
+      "main"
+    ],
+    "maxLength": null
   }
 }

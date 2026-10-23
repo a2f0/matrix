@@ -17,7 +17,9 @@ Use the Bun version pinned in `.mise.toml`. In agent shells, put its
 `~/.local/share/mise/installs/bun/<version>/bin` first on `PATH`; do not run
 `mise trust` to activate the checkout.
 
-Validate with `bun run typecheck`, `bun test`, and `bun run agents:check`.
+Validate with `bun run check`, which records typecheck, tests, and managed-skill
+checks through the shared validation group. CI also validates the actual branch
+name using `bun run lint:branch-name <name>`.
 Capture noisy finite commands with the pinned harness, for example
 `bun run agent:run --label tests -- bun test`. It preserves exit status and full
 private logs while returning a compact receipt and a bounded failure excerpt.
@@ -29,8 +31,8 @@ Ship with the installed `ship-pr` skill; title and required CI policy is in
 `agent-tool.json`. After updating the agent-tool pin, run `bun run agents:sync`
 and commit the lockfile, skills, and `.agent-tool-skills.json` together. Do not
 edit managed skills. When handling review feedback, reply in its original review
-thread through
-`POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies`
+thread with
+`agent-tool pr threads reply <comment-id> --body-file <reply-file>`
 and resolve only fully addressed findings.
 
 ## Secrets
@@ -132,9 +134,11 @@ directories can make delegated agents stop for permission prompts.
 4. Use one branch name for the whole sweep in the `<type>/<topic>` form with a
    Conventional Commits type, such as `chore/<topic>`; several repositories
    reject other branch names. Create it from the synced default branch with
-   `git switch --no-track -c <branch>`, and push with an explicit remote, as in
-   `git push -u origin HEAD`, so user Git settings cannot point the branch at a
-   local upstream. Run the checkout's documented setup before committing so its
+   `agent-tool branch create <branch> --base <default-branch> --remote origin`.
+   Push the reviewed commit with `agent-tool branch push <reviewed-head> --remote origin`.
+   These commands validate refs, avoid local upstream inheritance, and preserve
+   normal hooks. Use the checkout's own pinned CLI; older checkouts may still
+   need `git switch --no-track -c` and `git push -u origin HEAD`. Run the checkout's documented setup before committing so its
    hooks run. Agent shells do not activate mise's per-directory tools, so the
    default Bun, Node, or Terraform can differ from a checkout's pins; put the
    pinned versions under `~/.local/share/mise/installs` first on `PATH` instead
@@ -171,12 +175,12 @@ directories can make delegated agents stop for permission prompts.
    merge, publish or deploy, or the reason it was skipped or failed. Finish with
    that ledger.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
-   `bun run sync`. Several repositories keep merged branches. When `reset`
-   removes one, which it does only without keep-branch and after confirming the
-   remote branch still points at the shipped commit, delete it with
-   `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`;
-   `git push --delete` runs pre-push hooks, which in some checkouts are the full
-   validation gate.
+   `bun run sync`. The shared `agent-tool repo cleanup <pr> <shipped-head> --apply`
+   verifies merge ancestry and branch identities before cleanup; keep-branch
+   preserves the feature refs. Its REST deletion avoids full pre-push gates but
+   cannot atomically bind deletion to an expected SHA. A checkout requiring an
+   atomic lease must retain its stronger cleanup procedure. Reinstall documented
+   dependencies and hooks after returning to the default branch.
 
 When the request asks for an issue to track a sweep, open it in this workspace's
 repository. Each PR body references it as `Part of <owner>/<repo>#<number>`

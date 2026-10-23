@@ -13,6 +13,9 @@ jobs:
         with:
           version: 2026.10.13
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun test
-      - run: bun run agents:check
+      - name: Check the actual branch name
+        if: github.event_name == 'pull_request' || github.ref_type == 'branch'
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: bun run lint:branch-name "$BRANCH_NAME"
+      - run: bun run check
