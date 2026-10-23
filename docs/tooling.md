@@ -120,7 +120,7 @@ must exercise its relocated default paths as well as explicit path overrides.
 | Confirmed-merge checkout cleanup | `agent-tool repo cleanup` |
 
 See the installed CLI help and upstream
-[workflow reference](https://github.com/a2f0/agent-tool/blob/main/docs/workflows.md)
+[workflow reference](../node_modules/@a2f0/agent-tool/docs/workflows.md)
 for arguments and limitations. Naming policy is explicit in `agent-tool.json`:
 use each repository's accepted Conventional Commit types and long-lived branch
 exemptions, and `maxLength: null` when no existing length cap applies. CI passes

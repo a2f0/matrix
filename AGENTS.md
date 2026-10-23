@@ -139,8 +139,9 @@ directories can make delegated agents stop for permission prompts.
    `agent-tool branch push <reviewed-head> --remote origin`.
    These commands validate refs, avoid local upstream inheritance, and preserve
    normal hooks. Use the checkout's own pinned CLI; older checkouts may still
-   need `git switch --no-track -c` and `git push -u origin HEAD`. Run the checkout's documented setup before committing so its
-   hooks run. Agent shells do not activate mise's per-directory tools, so the
+   need `git switch --no-track -c` and `git push -u origin HEAD`. Run the
+   checkout's documented setup before committing so its hooks run. Agent shells
+   do not activate mise's per-directory tools, so the
    default Bun, Node, or Terraform can differ from a checkout's pins; put the
    pinned versions under `~/.local/share/mise/installs` first on `PATH` instead
    of running `mise trust`. Commit only the sweep's change.
@@ -177,16 +178,16 @@ directories can make delegated agents stop for permission prompts.
    that ledger.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
    `bun run sync`. The shared `agent-tool repo cleanup <pr> <shipped-head> --apply`
-   verifies merge ancestry and branch identities before cleanup; keep-branch
-   preserves the feature refs. Its REST deletion avoids full pre-push gates but
+   verifies that the merge commit is on the default branch and the feature refs
+   match the shipped head; keep-branch preserves the feature refs. Its REST
+   deletion avoids full pre-push gates but
    cannot atomically bind deletion to an expected SHA. A checkout requiring an
    atomic lease must retain its stronger cleanup procedure. Reinstall documented
    dependencies and hooks after returning to the default branch.
    With older pins, use that checkout's reset skill, verify the remote branch still
    matches the shipped head, and delete it with
    `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`.
-   `git push --delete` would rerun pre-push hooks, often the full validation gate;
-   keep a checkout's stronger atomic-lease requirement when it has one.
+   `git push --delete` would rerun pre-push hooks, often the full validation gate.
 
 When the request asks for an issue to track a sweep, open it in this workspace's
 repository. Each PR body references it as `Part of <owner>/<repo>#<number>`
