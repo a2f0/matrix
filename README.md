@@ -131,8 +131,9 @@ validation and release requirements remain in each checkout's guidance.
 bun run check
 ```
 
-The pinned agent-tool harness reports a compact result and retains the full
-private log. Inspect required diagnostics with `bun run agent-tool logs <path>`.
+The pinned agent-tool group reports each step and retains its full private log.
+List durable group reports with `bun run agent-tool runs list`; inspect required
+diagnostics with `bun run agent-tool logs <path>`.
 Logs remain in the reported temporary directory until it is removed; use
 `--max-bytes` and `--tail-lines` to bound inspection.
 See [AGENTS.md](AGENTS.md) for validation and shipping requirements and
