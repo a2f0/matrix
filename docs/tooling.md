@@ -51,6 +51,8 @@ or `scripts/auth/` remain useful when they describe a cohesive subsystem. Native
 projects keep the [fastlane layout](fastlane.md), and Terraform modules and stacks
 remain in their existing infrastructure tree. Do not relocate application source
 under `scripts/` or invent empty directories to match this table.
+Store build wrappers belong in `scripts/release/` alongside their upload
+entrypoints; `scripts/build/` holds ordinary application and package builds.
 
 A move includes relative root resolution, imports, generated paths, config
 includes, CI, hooks, tests, package commands, native build files, and owned skills.
@@ -94,5 +96,7 @@ checkout merely to inspect a name.
 Run the checkout's documented setup and checks after migration. Retain behavioral
 fixtures for repository-specific guarantees, and move generic guard coverage
 upstream with the shared implementation. Review and ship each repository through
-its own `ship-pr` workflow, then verify its normal merge-triggered release and
-return to the updated default branch.
+its own `ship-pr` workflow within the requested stopping point. When merging is
+authorized, verify its normal merge-triggered release and return to the updated
+default branch. The [sweep rules](../AGENTS.md#sweeps-across-checkouts) define
+which requests include merging.

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ROOT } from "./cli";
@@ -101,4 +101,20 @@ test("writes a private plain archive when asked for no password", () => {
 test("defaults to ~/matrix-secrets-backups", () => {
   expect(backup("--no-password").status).toBe(0);
   expect(archives(path.join(temporary, "matrix-secrets-backups"))).toHaveLength(1);
+});
+
+test("finds the default secrets directory beside the relocated workspace", () => {
+  const scriptDirectory = path.join(temporary, "matrix", "scripts", "secrets");
+  mkdirSync(scriptDirectory, { recursive: true });
+  const copiedScript = path.join(scriptDirectory, "backupSecrets.sh");
+  copyFileSync(SCRIPT, copiedScript);
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: temporary };
+  delete env.MATRIX_SECRETS_DIR;
+  const result = spawnSync("bash", [copiedScript, output, "--no-password"], {
+    cwd: temporary, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  });
+  expect(result.status).toBe(0);
+  expect(result.stdout).toContain(`Backed up: ${realpathSync(secrets)}`);
+  const [archive] = archives();
+  expect(entry(archive!, "matrix-secrets/demo/prod/app.env")).toBe("TOKEN=fixture-secret\n");
 });
