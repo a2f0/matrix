@@ -135,7 +135,8 @@ directories can make delegated agents stop for permission prompts.
    Conventional Commits type, such as `chore/<topic>`; several repositories
    reject other branch names. Create it from the synced default branch with
    `agent-tool branch create <branch> --base <default-branch> --remote origin`.
-   Push the reviewed commit with `agent-tool branch push <reviewed-head> --remote origin`.
+   Push the reviewed commit with
+   `agent-tool branch push <reviewed-head> --remote origin`.
    These commands validate refs, avoid local upstream inheritance, and preserve
    normal hooks. Use the checkout's own pinned CLI; older checkouts may still
    need `git switch --no-track -c` and `git push -u origin HEAD`. Run the checkout's documented setup before committing so its
@@ -153,10 +154,10 @@ directories can make delegated agents stop for permission prompts.
    with the producer's API and migration notes in its brief. If the producer's
    publish fails after it merges, the consumer pins the first release that does
    publish, once its tarball is confirmed to contain the change. Changes that do
-   not depend on a new release still ship in parallel. Right after a PR opens,
-   `gh pr checks --watch` can exit successfully with no checks reported, and
-   workflows triggered by both push and pull request list each check twice;
-   wait until every entry has finished.
+   not depend on a new release still ship in parallel. Use
+   `agent-tool pr checks --wait --head <reviewed-head>` to wait for every check
+   entry. For older pins, `gh pr checks --watch` can exit successfully before
+   checks appear; wait for all push and pull-request entries to finish.
 6. A request to perform dependency updates includes `update-dependencies` and
    `ship-pr` through merge and the repository's normal merge-triggered publishing
    or deployment, unless the user requests a narrower stopping point. Other
@@ -181,6 +182,11 @@ directories can make delegated agents stop for permission prompts.
    cannot atomically bind deletion to an expected SHA. A checkout requiring an
    atomic lease must retain its stronger cleanup procedure. Reinstall documented
    dependencies and hooks after returning to the default branch.
+   With older pins, use that checkout's reset skill, verify the remote branch still
+   matches the shipped head, and delete it with
+   `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`.
+   `git push --delete` would rerun pre-push hooks, often the full validation gate;
+   keep a checkout's stronger atomic-lease requirement when it has one.
 
 When the request asks for an issue to track a sweep, open it in this workspace's
 repository. Each PR body references it as `Part of <owner>/<repo>#<number>`

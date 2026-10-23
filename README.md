@@ -128,9 +128,7 @@ validation and release requirements remain in each checkout's guidance.
 ## Development
 
 ```sh
-bun run agent:run --label typecheck -- bun run typecheck
-bun run agent:run --label tests -- bun test
-bun run agent:run --label skills -- bun run agents:check
+bun run check
 ```
 
 The pinned agent-tool harness reports a compact result and retains the full
