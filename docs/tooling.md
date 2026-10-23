@@ -30,8 +30,9 @@ here.
 ## Script locations
 
 Group repository-owned scripts by purpose. Use only directories that the project
-needs, preserve its established filename style, and keep supporting tests beside
-the code they exercise.
+needs and preserve its established filename style. Keep tests where the
+repository's runner and typechecker discover them; prefer colocating script tests
+when those tools support it.
 
 | Location | Contents |
 | --- | --- |
@@ -60,6 +61,8 @@ includes, CI, hooks, tests, package commands, native build files, and owned skil
 Search both literal paths and constructions using shell variables or path joins.
 Remove obsolete helpers after all callers migrate. Avoid leaving a second copy
 or a permanent compatibility wrapper for a private script path.
+After moving hook sources, rerun the hook installer in each existing checkout so
+Git does not retain an obsolete hooks path.
 
 ## Documentation structure
 
@@ -82,9 +85,9 @@ resolved constraints; do not accumulate per-sweep journals in the checkout.
 
 ## Adoption and validation
 
-Follow the [onboarding and sweep rules](../AGENTS.md#onboarding-a-repository) for
-publication order, package pins, managed skills, validation, shipping scope, and
-checkout cleanup.
+Follow the [onboarding rules](../AGENTS.md#onboarding-a-repository) and
+[sweep rules](../AGENTS.md#sweeps-across-checkouts) for publication order, package
+pins, managed skills, validation, shipping scope, and checkout cleanup.
 
 Preserve branch exemptions and length limits, signature verification modes,
 attribution restrictions, hook ownership, required CI jobs, conditional skip

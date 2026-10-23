@@ -135,6 +135,8 @@ bun run agent:run --label skills -- bun run agents:check
 
 The pinned agent-tool harness reports a compact result and retains the full
 private log. Inspect required diagnostics with `bun run agent-tool logs <path>`.
+Logs remain in the reported temporary directory until it is removed; use
+`--max-bytes` and `--tail-lines` to bound inspection.
 See [AGENTS.md](AGENTS.md) for validation and shipping requirements and
 [dependency maintenance](docs/dependency-upgrades.md) for upgrade constraints.
 
