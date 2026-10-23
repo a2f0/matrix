@@ -51,6 +51,7 @@ or `scripts/auth/` remain useful when they describe a cohesive subsystem. Native
 projects keep the [fastlane layout](fastlane.md), and Terraform modules and stacks
 remain in their existing infrastructure tree. Do not relocate application source
 under `scripts/` or invent empty directories to match this table.
+
 Store build wrappers belong in `scripts/release/` alongside their upload
 entrypoints; `scripts/build/` holds ordinary application and package builds.
 
@@ -81,10 +82,9 @@ resolved constraints; do not accumulate per-sweep journals in the checkout.
 
 ## Adoption and validation
 
-Publish an agent-tool change before upgrading its consumers. Verify the publish
-workflow and registry version, and inspect the published tarball for the API being
-adopted. Install the exact version, regenerate managed skills with its installer,
-and commit manifests, lockfiles, and skill ownership records together.
+Follow the [onboarding and sweep rules](../AGENTS.md#onboarding-a-repository) for
+publication order, package pins, managed skills, validation, shipping scope, and
+checkout cleanup.
 
 Preserve branch exemptions and length limits, signature verification modes,
 attribution restrictions, hook ownership, required CI jobs, conditional skip
@@ -93,10 +93,6 @@ policy. Hook installation must preserve hooks it does not own and report drift
 before a push. CI must validate explicit PR branch names without changing the
 checkout merely to inspect a name.
 
-Run the checkout's documented setup and checks after migration. Retain behavioral
-fixtures for repository-specific guarantees, and move generic guard coverage
-upstream with the shared implementation. Review and ship each repository through
-its own `ship-pr` workflow within the requested stopping point. When merging is
-authorized, verify its normal merge-triggered release and return to the updated
-default branch. The [sweep rules](../AGENTS.md#sweeps-across-checkouts) define
-which requests include merging.
+Retain behavioral fixtures for repository-specific guarantees, and move generic
+guard coverage upstream with the shared implementation. Tests for a script move
+must exercise its relocated default paths as well as explicit path overrides.

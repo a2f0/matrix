@@ -112,8 +112,9 @@ and need no script:
 
 `store_build_numbers` is `store:build-numbers`. Repositories that wrap releases
 in repository-root scripts name them
-`scripts/release/{build,upload}{Ios,Android}[Staging]Release.sh` and delegate to these
-package scripts.
+`scripts/release/{build,upload}{Ios,Android}[Staging]Release.sh` and delegate to
+these package scripts. Existing root wrappers move with all their callers, using
+the [script relocation rules](tooling.md#script-locations).
 
 ## Secrets
 
