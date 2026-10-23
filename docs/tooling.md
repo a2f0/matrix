@@ -99,3 +99,35 @@ checkout merely to inspect a name.
 Retain behavioral fixtures for repository-specific guarantees, and move generic
 guard coverage upstream with the shared implementation. Tests for a script move
 must exercise its relocated default paths as well as explicit path overrides.
+
+## Shared command entrypoints
+
+| Workflow | Shared command |
+| --- | --- |
+| Branch name and Git-ref validity | `agent-tool branch check [name...]` |
+| Synced-base feature branch creation | `agent-tool branch create <name> --base <base> --remote origin` |
+| Push exactly the reviewed commit through hooks | `agent-tool branch push <head> --remote origin` |
+| Commit subjects, attribution, and signature policy | `agent-tool commits check` |
+| Copied-hook installation and ownership drift | `agent-tool hooks install`, `agent-tool hooks check` |
+| Current repository, PR, base, and head | `agent-tool repo context --fetch`, `agent-tool pr context` |
+| Every CI entry and exact-head merge readiness | `agent-tool pr checks --wait`, `agent-tool pr preflight` |
+| Review-thread replies and resolution | `agent-tool pr threads` |
+| Version publication decisions and verified artifacts | `agent-tool release plan`, `agent-tool release verify` |
+| Sequential validation receipts and durable history | `agent-tool run-group`, `agent-tool runs list` |
+| Conditional CI aggregate results | `agent-tool ci gate` |
+| Binary-policy checks | `agent-tool checks binaries` |
+| Pinned executables and branch-protection diagnostics | `agent-tool toolchain check`, `agent-tool policy check` |
+| Confirmed-merge checkout cleanup | `agent-tool repo cleanup` |
+
+See the installed CLI help and upstream
+[workflow reference](https://github.com/a2f0/agent-tool/blob/2450eb206deb0e26bb167154f5195732f11ebe7f/docs/workflows.md)
+for arguments and limitations. Naming policy is explicit in `agent-tool.json`:
+use each repository's accepted Conventional Commit types and long-lived branch
+exemptions, and `maxLength: null` when no existing length cap applies. CI passes
+its actual PR or destination branch name; detached HEAD is never evidence of a
+valid name. Tag-only jobs skip branch naming checks.
+
+The root `bun run check` group preserves the same typecheck, test, and skill-drift
+checks as CI. Rich parallel test runners, application-specific deployment guards,
+full commitlint rules, and stronger binary or atomic-cleanup policies remain
+repository-owned when the shared command cannot represent their guarantees.

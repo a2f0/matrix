@@ -20,10 +20,12 @@
     "agent-tool": "agent-tool",
     "agent:run": "agent-tool run",
     "agents:sync": "bun run agent-tool skills install --apply",
-    "agents:check": "bun run agent-tool skills check"
+    "agents:check": "bun run agent-tool skills check",
+    "check": "agent-tool run-group scripts/testing/verify.json",
+    "lint:branch-name": "agent-tool branch check"
   },
   "devDependencies": {
-    "@a2f0/agent-tool": "0.1.15",
+    "@a2f0/agent-tool": "0.1.19",
     "@types/bun": "1.4.3",
     "typescript": "7.0.2"
   }

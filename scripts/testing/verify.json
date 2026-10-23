@@ -1,0 +1,28 @@
+{
+  "label": "verify",
+  "steps": [
+    {
+      "label": "typecheck",
+      "command": [
+        "bun",
+        "run",
+        "typecheck"
+      ]
+    },
+    {
+      "label": "tests",
+      "command": [
+        "bun",
+        "test"
+      ]
+    },
+    {
+      "label": "skills",
+      "command": [
+        "bun",
+        "run",
+        "agents:check"
+      ]
+    }
+  ]
+}
