@@ -114,6 +114,18 @@ same lane and package-script names, `NATIVE_RELEASE_TIER` for a staging app,
 and store secrets in `.secrets/<tier>/` under the names it lists. Bring a newly
 onboarded app to it, and change it there before diverging in one repository.
 
+## Search indexing
+
+Repositories that serve websites follow the
+[seo-optimization skill](https://github.com/a2f0/balebase/blob/main/skills/seo-optimization/SKILL.md),
+which balebase owns and `~/.claude/skills` and `~/.agents/skills` link to.
+Every non-production tier and internal host sends `X-Robots-Tag: noindex,
+nofollow` and a robots meta tag while robots.txt still allows crawling;
+production pages carry static titles, descriptions, canonical URLs, preview
+images, robots.txt, and a sitemap; and Workers set `workers_dev` and
+`preview_urls` to false. Bring a newly onboarded site to it, and change the
+skill before diverging in one repository.
+
 ## Sweeps across checkouts
 
 A sweep applies one requested change to many checkouts. Coordinate it from a
