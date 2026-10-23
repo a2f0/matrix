@@ -72,6 +72,15 @@ fine. Change that folder only on request, and back it up first.
    committing; managed skills cannot be edited, so exclude their directories
    from a linter that rejects them.
 
+## Shared tooling and repository layout
+
+Follow [docs/tooling.md](docs/tooling.md) for shared command ownership, script
+locations, and documentation structure. Put reusable Git, GitHub, hook, release,
+and validation mechanics in agent-tool; keep repository-specific commands and
+policy in the checkout. Update every caller when moving a script, including CI,
+hooks, package scripts, tests, native build references, and repository-owned
+skills. Preserve documented package-script names as the normal entrypoints.
+
 ## Brand images
 
 Repositories that render icons, splash screens, favicons, or store graphics keep

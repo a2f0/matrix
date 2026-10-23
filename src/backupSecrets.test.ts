@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ROOT } from "./cli";
 
-const SCRIPT = path.join(ROOT, "scripts", "backupSecrets.sh");
+const SCRIPT = path.join(ROOT, "scripts", "secrets", "backupSecrets.sh");
 let temporary: string, secrets: string, output: string, gnupg: string, passphrase: string;
 
 function backup(...args: string[]): { status: number | null; stderr: string } {
