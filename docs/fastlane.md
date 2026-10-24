@@ -11,6 +11,7 @@ table is the only place that difference shows.
 | a2f0/rn-sandbox | repository root | production |
 | a2f0/tearleads | `packages/app-capacitor` | production, staging |
 | a2f0/balebase | `packages/app-capacitor` | production, staging |
+| a2f0/ct | `packages/app-capacitor` | production |
 
 `APP_DIR` is the directory that holds the native `ios/` and `android/`
 projects: the repository root for React Native and the Capacitor package for
@@ -139,6 +140,24 @@ with the keystore in the same secrets folder, so overriding the folder moves
 all three together. A value
 copied from `root/root.env` stays in `shared.env` until it is rotated into a
 project key, so a loader always reads both files.
+
+## Readiness
+
+The `ios readiness` and `android readiness` lanes inspect an existing signed
+IPA or App Bundle and its store records, read-only, and write a private report
+to the gitignored `.readiness/<tier>/<platform>.json`. The release build lanes
+write the `<artifact>.build.json` source/hash receipt they check. Each
+repository's `docs/readiness.md` describes its lanes and the expectations its
+lanes pass in, and the
+[app-store-readiness skill](https://github.com/a2f0/balebase/blob/main/skills/app-store-readiness/SKILL.md)
+covers the store policy, device, and accessibility checks the lanes leave
+unverified.
+
+balebase owns `skills/app-store-readiness/` and `APP_DIR/fastlane/lib/readiness.rb`,
+`readiness_artifacts.rb`, `readiness_stores.rb`, and
+`fastlane/test/readiness.test.ts`. nc and ct keep byte-identical copies;
+change every copy together. `~/.claude/skills` and `~/.agents/skills` link to
+balebase's skill. Bring a newly onboarded store app to them.
 
 ## Validation
 
