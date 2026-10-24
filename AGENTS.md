@@ -73,6 +73,10 @@ fine. Change that folder only on request, and back it up first.
    Run the checkout's own hooks and linters over the installed skills before
    committing; managed skills cannot be edited, so exclude their directories
    from a linter that rejects them.
+5. Make sure the root `.gitignore` lists `.DS_Store` as a plain pattern, so it
+   matches at every depth. Every managed repository ignores macOS Finder
+   metadata, so it never shows up as a local change or holds back `sync`; add
+   the rule in the onboarding change when it is missing.
 
 ## Shared tooling and repository layout
 
@@ -134,7 +138,9 @@ directories can make delegated agents stop for permission prompts.
 
 1. Run `bun run sync`, then `bun run status`. Change only checkouts whose
    status is `ready`. Report the rest (local changes, another branch, diverged,
-   errors) instead of resetting, stashing, or discarding their state. A clean
+   errors) instead of resetting, stashing, or discarding their state. An
+   untracked `.DS_Store` means that repository lacks the ignore rule from
+   onboarding step 5: ship the rule there instead of deleting the file. A clean
    checkout left on a renamed former default branch, whose upstream is gone, may
    switch to the current default with the user's approval; keep the old local
    branch, and move aside rather than delete files it leaves untracked. Without
