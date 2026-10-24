@@ -117,6 +117,9 @@ Repositories that ship iOS or Android store builds follow
 same lane and package-script names, `NATIVE_RELEASE_TIER` for a staging app,
 and store secrets in `.secrets/<tier>/` under the names it lists. Bring a newly
 onboarded app to it, and change it there before diverging in one repository.
+Store apps also carry the app-store-readiness skill and readiness lanes that
+balebase owns ([docs/fastlane.md](docs/fastlane.md#readiness)); audit a store
+candidate with them and record its findings in the PR.
 
 ## Search indexing
 
