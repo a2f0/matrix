@@ -228,10 +228,10 @@ directories can make delegated agents stop for permission prompts.
    but cannot atomically bind deletion to an expected SHA. A checkout requiring an
    atomic lease must retain its stronger cleanup procedure. Reinstall documented
    dependencies and hooks after returning to the default branch.
-   With older pins, use that checkout's reset skill. Unless keep-branch was
+   With pins that lack `repo cleanup`, use that checkout's reset skill. Unless keep-branch was
    requested, verify each remaining feature ref matches the shipped head before
-   deleting it; preserve moved refs and report unfinished cleanup. Delete the
-   matching remote ref with
+   deleting it; preserve moved refs and report unfinished cleanup. Unless keeping
+   the branch, delete the matching remote ref with
    `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`.
    `git push --delete` would rerun pre-push hooks, often the full validation gate.
    After switching to the updated default branch, prune the matching local
