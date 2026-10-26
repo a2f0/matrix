@@ -5,14 +5,14 @@
     "": {
       "name": "matrix",
       "devDependencies": {
-        "@a2f0/agent-tool": "0.1.19",
+        "@a2f0/agent-tool": "0.1.21",
         "@types/bun": "1.4.3",
         "typescript": "7.0.2",
       },
     },
   },
   "packages": {
-    "@a2f0/agent-tool": ["@a2f0/agent-tool@0.1.19", "", { "dependencies": { "@resvg/resvg-wasm": "2.6.2" }, "bin": { "agent-tool": "src/index.ts" } }, "sha512-Lh4LCkfb7u7W4Q+nHOGTORTDBQLfr9LkRtoV6BEZsHl5Ewlvik8pxYBo+nuOwVLo+cUSNe55Q+H7kHJxb9aiIA=="],
+    "@a2f0/agent-tool": ["@a2f0/agent-tool@0.1.21", "", { "dependencies": { "@resvg/resvg-wasm": "2.6.2" }, "bin": { "agent-tool": "src/index.ts" } }, "sha512-wfI1kvTJIf2VXimYnB2t1eFEEmitccDF2DegYztqoTwFnwuVmtf8lHYdopmuZ4WQIFY7aBQU2HwybXLFZE6vdg=="],
 
     "@resvg/resvg-wasm": ["@resvg/resvg-wasm@2.6.2", "", {}, "sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw=="],
 

@@ -221,15 +221,21 @@ directories can make delegated agents stop for permission prompts.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
    `bun run sync`. The shared `agent-tool repo cleanup <pr> <shipped-head> --apply`
    verifies that the merge commit is on the default branch and the feature refs
-   match the shipped head; keep-branch preserves the feature refs. Its REST
-   deletion avoids full pre-push gates but
-   cannot atomically bind deletion to an expected SHA. A checkout requiring an
+   match the shipped head, then prunes the shipped local branch even after a
+   squash merge or when its remote branch is already gone. Verify the local
+   feature ref is absent before reporting cleanup complete; keep-branch preserves
+   the feature refs. Remote ref deletion uses REST to avoid full pre-push gates
+   but cannot atomically bind deletion to an expected SHA. A checkout requiring an
    atomic lease must retain its stronger cleanup procedure. Reinstall documented
    dependencies and hooks after returning to the default branch.
-   With older pins, use that checkout's reset skill, verify the remote branch still
-   matches the shipped head, and delete it with
+   With pins that lack `repo cleanup`, use that checkout's reset skill. Unless keep-branch was
+   requested, verify each remaining feature ref matches the shipped head before
+   deleting it; preserve moved refs and report unfinished cleanup. Unless keeping
+   the branch, delete the matching remote ref with
    `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`.
    `git push --delete` would rerun pre-push hooks, often the full validation gate.
+   After switching to the updated default branch, prune the matching local
+   feature branch with `git branch -D -- <branch>` unless keeping the branch.
 
 When the request asks for an issue to track a sweep, open it in this workspace's
 repository. Each PR body references it as `Part of <owner>/<repo>#<number>`
