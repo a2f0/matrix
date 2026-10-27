@@ -83,6 +83,33 @@ Keep operational requirements in `AGENTS.md` and linked guides rather than
 maintaining parallel `CLAUDE.md` instructions. Remove obsolete commands and
 resolved constraints; do not accumulate per-sweep journals in the checkout.
 
+### README files
+
+A root README introduces the project to someone landing on its GitHub page:
+
+1. The H1 is the plain project name. It is never a link, and no standalone
+   link line follows it.
+2. The first paragraph says what the project is. When the repository serves a
+   public website, it contains the sentence
+   `This repo is available on the web at <https://a2f0.net>.`, with the primary
+   production host as an angle-bracket autolink (markdownlint rejects bare
+   URLs). Other public hosts, such as a demo, app, or dashboard, can follow it.
+3. A `Quick start` section takes a fresh clone to a running project in one code
+   block, typically `mise install`, the dependency install, hook installation,
+   and the development entrypoint with its local URL. Every command must exist.
+4. A layout or sub-project table, common commands, and links to the detailed
+   guides follow as the repository needs them.
+
+Material specific to one sub-project, such as a workspace package, a native
+platform directory, or a Worker, goes in a README in that folder, linked from
+the root. Package READMEs follow the same heading and first-paragraph rules.
+
+READMEs carry no instructions for coding agents. Managed and repository-owned
+skills, output capture with `agent:run`, harness notes, and review and shipping
+policy belong in `AGENTS.md`. A README need not link to `AGENTS.md`. A project
+whose product is agent tooling, like agent-tool, still describes that product in
+its README.
+
 ## Adoption and validation
 
 Follow the [onboarding rules](../AGENTS.md#onboarding-a-repository) and

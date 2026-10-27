@@ -13,7 +13,7 @@ scripts/secrets/     Backup entrypoint for ../matrix-secrets
 AGENTS.md            Coordinator rules for sweeps
 ```
 
-## Setup
+## Quick start
 
 Requires Bun 1.4.2 or newer, Git, and an authenticated `gh` for discovery.
 [mise](https://mise.jdx.dev/) installs the development Bun version pinned in
@@ -106,20 +106,16 @@ report a per-repository ledger, on a tracking issue when one is requested. Each
 repository ships under its own policy and pinned agent-tool; matrix never
 overrides a repository's rules.
 
-For a dependency sweep, use the shared
-[`update-dependencies`](.agents/skills/update-dependencies/SKILL.md) skill and
-the [dependency maintenance guide](docs/dependency-upgrades.md), including the
-plan helper for older checkouts. Dependency updates ship through merge and normal
-merge-triggered releases unless a narrower stopping point is requested.
-Upgrade evidence goes in PRs; reusable
-procedures and active constraints live in each repository's maintenance docs.
+Dependency sweeps follow the shared `update-dependencies` skill and the
+[dependency maintenance guide](docs/dependency-upgrades.md). They ship through
+merge and normal merge-triggered releases unless you ask for a narrower stopping
+point. Upgrade evidence goes in PRs; reusable procedures and active constraints
+live in each repository's maintenance docs.
 
 The shared skills come from the exact-pinned
-[`@a2f0/agent-tool`](https://www.npmjs.com/package/@a2f0/agent-tool) package.
-After changing the pin, run `bun run agents:sync` and commit the updated skills,
-lockfile, and `.agent-tool-skills.json` together. The installer supplies matching
-copies for Claude in `.claude/skills` and Codex in `.agents/skills`; OpenCode
-discovers `.agents/skills` too. Do not edit managed copies.
+[`@a2f0/agent-tool`](https://www.npmjs.com/package/@a2f0/agent-tool) package,
+which installs matching copies for Claude in `.claude/skills` and Codex in
+`.agents/skills`; OpenCode discovers `.agents/skills` too.
 
 [Tooling and layout](docs/tooling.md) defines shared command ownership, script
 locations, and documentation structure across the matrix. Repository-specific
@@ -131,13 +127,6 @@ validation and release requirements remain in each checkout's guidance.
 bun run check
 ```
 
-The pinned agent-tool group reports each step and retains its full private log.
-List durable group reports with `bun run agent-tool runs list`; inspect required
-diagnostics with `bun run agent-tool logs <path>`.
-Logs remain in the reported temporary directory until it is removed; use
-`--max-bytes` and `--tail-lines` to bound inspection.
-See [AGENTS.md](AGENTS.md) for validation and shipping requirements and
-[dependency maintenance](docs/dependency-upgrades.md) for upgrade constraints.
-
-Tests build temporary local Git remotes and make no network calls.
+`bun run check` runs the typecheck, tests, and managed-skill checks that CI
+runs. Tests build temporary local Git remotes and make no network calls.
 `bunfig.toml` limits `bun test` to `src`, so it never runs the checkouts' suites.
