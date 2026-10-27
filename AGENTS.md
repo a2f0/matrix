@@ -23,8 +23,10 @@ name using `bun run lint:branch-name <name>`.
 Capture noisy finite commands with the pinned harness, for example
 `bun run agent:run --label tests -- bun test`. It preserves exit status and full
 private logs while returning a compact receipt and a bounded failure excerpt.
-Use `bun run agent-tool logs <log-path>` or a targeted search for more evidence;
-inspect required warnings, timings, and artifacts before accepting a check.
+Use `bun run agent-tool logs <log-path>` (bounded with `--max-bytes` and
+`--tail-lines`) or a targeted search for more evidence, and
+`bun run agent-tool runs list` for durable group reports; inspect required
+warnings, timings, and artifacts before accepting a check.
 Keep review verdicts and structured decision output, including matrix sync/status
 results, visible. Do not wrap interactive tools or persistent servers.
 Ship with the installed `ship-pr` skill; title and required CI policy is in
@@ -77,6 +79,19 @@ fine. Change that folder only on request, and back it up first.
    matches at every depth. Every managed repository ignores macOS Finder
    metadata, so it never shows up as a local change or holds back `sync`; add
    the rule in the onboarding change when it is missing.
+6. Bring its READMEs to the [README rules](#readme-files) in the onboarding
+   change.
+
+## README files
+
+READMEs are written for people. The H1 is the plain project name, never a
+link. When a repository serves a public website, the first paragraph says
+`This repo is available on the web at <https://host>.` with its primary
+production host. A `Quick start` section goes from a fresh clone to a running
+project. Material for one sub-project lives in that folder's README, linked from
+the root. Instructions for coding agents, such as skills, output capture, and
+review or shipping policy, belong in `AGENTS.md`, never in a README.
+[docs/tooling.md](docs/tooling.md#readme-files) has the details.
 
 ## Shared tooling and repository layout
 
