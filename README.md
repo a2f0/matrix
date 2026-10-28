@@ -55,6 +55,9 @@ clones: symlinks, worktrees, and linked Git directories are rejected, and any
 assume-unchanged or skip-worktree entry (including a sparse checkout) counts as
 a local change that needs attention. Entries under `checkouts/` that the
 manifest does not manage are listed as `unmanaged` and left alone.
+For a checkout that pins `@a2f0/agent-tool`, `agentTool` compares the pin with
+the version in its `node_modules`, and `staleInstalls` lists those that differ;
+reinstall that checkout's dependencies, which `sync` never does.
 
 ## Managed repositories
 

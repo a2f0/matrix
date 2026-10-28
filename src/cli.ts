@@ -34,7 +34,8 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
     const repos = selectRepos(manifest, args);
     if (command === "status") {
       const checkouts = repos.map(repo => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol)));
-      output({ ready: checkouts.every(checkout => checkout.ready), checkouts, unmanaged: unmanagedCheckouts(root, manifest.repos) });
+      const staleInstalls = checkouts.filter(checkout => checkout.agentTool && !checkout.agentTool.current).map(checkout => checkout.repo);
+      output({ ready: checkouts.every(checkout => checkout.ready), checkouts, staleInstalls, unmanaged: unmanagedCheckouts(root, manifest.repos) });
       return 0;
     }
     const results = repos.map(repo => {

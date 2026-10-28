@@ -308,6 +308,28 @@ describe("checkoutStatus", () => {
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
   });
 
+  test("compares the agent-tool pin with the version node_modules holds", () => {
+    syncRepo(root, REPO, remote);
+    expect(checkoutStatus(root, REPO, remote)).not.toHaveProperty("agentTool");
+
+    // An ignored node_modules leaves the checkout ready whatever it holds.
+    writeFileSync(path.join(checkout, ".git", "info", "exclude"), "node_modules/\n");
+    writeFileSync(path.join(checkout, "package.json"), `${JSON.stringify({ devDependencies: { "@a2f0/agent-tool": "0.1.21" } })}\n`);
+    run(checkout, "add", "package.json");
+    run(checkout, "commit", "-q", "-m", "pin agent-tool");
+    run(checkout, "push", "-q", "origin", "HEAD");
+    run(checkout, "fetch", "-q", "origin");
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: true, agentTool: { pinned: "0.1.21", installed: null, current: false } });
+
+    const installed = path.join(checkout, "node_modules", "@a2f0", "agent-tool");
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(path.join(installed, "package.json"), `${JSON.stringify({ version: "0.1.19" })}\n`);
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: true, agentTool: { pinned: "0.1.21", installed: "0.1.19", current: false } });
+
+    writeFileSync(path.join(installed, "package.json"), `${JSON.stringify({ version: "0.1.21" })}\n`);
+    expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: true, agentTool: { pinned: "0.1.21", installed: "0.1.21", current: true } });
+  });
+
   test("lists unmanaged checkout entries without touching them", () => {
     syncRepo(root, REPO, remote);
     mkdirSync(path.join(root, "checkouts", "old-clone"));

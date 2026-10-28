@@ -184,6 +184,8 @@ directories can make delegated agents stop for permission prompts.
    switch to the current default with the user's approval; keep the old local
    branch, and move aside rather than delete files it leaves untracked. Without
    named targets, a sweep covers every managed checkout where the change applies.
+   Checkouts in `staleInstalls` hold an older agent-tool than they pin; tell
+   their delegates to run the documented install before using any script.
 2. Each checkout is its own repository, and this file stops at its boundary.
    Before changing a checkout, read its `AGENTS.md`, README, and the docs they
    point to, and follow them inside it: setup, hooks, validation, versioning,
