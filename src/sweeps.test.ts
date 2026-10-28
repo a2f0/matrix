@@ -125,6 +125,12 @@ describe("recordEntry", () => {
     expect(parseEvent("declined", "restore-claude-md: Codex asked again ")).toEqual({ kind: "declined", cause: "restore-claude-md", detail: "Codex asked again" });
   });
 
+  test("replays updates in the order they were recorded, even within one millisecond", () => {
+    start("chore/demo", ["a2f0/one"]);
+    for (const status of ["in-progress", "open", "blocked", "merged"] as const) recordEntry(root, "chore/demo", "one", { status }, at(1));
+    expect(sweepReport(root, "chore/demo").repos[0]!.status).toBe("merged");
+  });
+
   test("keeps every update when processes record the same repository at once", async () => {
     start("chore/demo", ["a2f0/one"]);
     const module = path.join(import.meta.dir, "sweeps.ts");

@@ -23,10 +23,10 @@ A ledger lives in Git's common directory, at
 `sweep.json` holds the branch, topic, tracking issue, start time, and
 repositories, and `repos/<checkout>/` holds one repository's updates. Files are
 private to the user and never committed, since run-specific evidence belongs in
-PRs and tracking issues rather than a repository journal. Each `record` adds a
-new update file and never rewrites one, so the coordinator and parallel
-delegates can record at once without losing each other's changes; an entry is
-its updates replayed in time order.
+PRs and tracking issues rather than a repository journal. Each `record` adds the
+next numbered update file and never rewrites one, so the coordinator and
+parallel delegates can record at once without losing each other's changes; an
+entry is its updates replayed in the order they were recorded.
 
 `sweep start` refuses a branch that already has a ledger, and a start that
 fails leaves nothing behind, so a corrected retry succeeds. It records every

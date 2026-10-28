@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
 import { git, gitOutput } from "./git";
@@ -142,7 +142,7 @@ function sweepDirectory(root: string, branch: string): string {
   return path.join(sweepsDirectory(root), encodeURIComponent(branch));
 }
 
-/** One repository's updates, each in its own file, so concurrent writers never overwrite each other. */
+/** One repository's numbered update files. */
 function entryDirectory(directory: string, repo: string): string { return path.join(directory, "repos", repoName(repo)); }
 
 function readJson<T>(file: string): T {
@@ -162,20 +162,43 @@ function writeJson(file: string, value: unknown): void {
 /** An update as stored: the fields it sets, the notes and events it adds, and when. */
 type StoredUpdate = EntryUpdate & { readonly at: string };
 
-/** Append an update under a unique name; recording never rewrites an earlier file. */
-function appendUpdate(directory: string, repo: string, update: StoredUpdate): void {
-  writeJson(path.join(entryDirectory(directory, repo), `${update.at.replace(/[:.]/g, "-")}-${randomUUID()}.json`), update);
+const UPDATE = /^([0-9]+)\.json$/;
+
+/** Update files in append order. */
+function updateFiles(folder: string): string[] {
+  return readdirSync(folder).filter(name => UPDATE.test(name)).sort((left, right) => Number(UPDATE.exec(left)![1]) - Number(UPDATE.exec(right)![1]));
 }
 
-/** Replay a repository's updates in time order. A new status without a reason clears the old reason. */
+/**
+ * Append an update as the next numbered file; recording never rewrites an earlier one.
+ * A hard link publishes the complete file only if its number is still free, so
+ * concurrent writers each take a distinct number and replay follows append order.
+ */
+function appendUpdate(directory: string, repo: string, update: StoredUpdate): void {
+  const folder = entryDirectory(directory, repo);
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  const temporary = path.join(folder, `.${randomUUID()}.tmp`);
+  writeFileSync(temporary, `${JSON.stringify(update, null, 2)}\n`, { mode: 0o600 });
+  try {
+    for (let sequence = updateFiles(folder).length + 1; ; sequence++) {
+      try {
+        linkSync(temporary, path.join(folder, `${String(sequence).padStart(6, "0")}.json`));
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+/** Replay a repository's updates in append order. A new status without a reason clears the old reason. */
 function loadEntry(directory: string, repo: string): RepoEntry {
   const folder = entryDirectory(directory, repo);
-  const updates = readdirSync(folder)
-    .filter(name => name.endsWith(".json"))
-    .map(name => ({ name, update: readJson<StoredUpdate>(path.join(folder, name)) }))
-    .sort((left, right) => left.update.at.localeCompare(right.update.at) || left.name.localeCompare(right.name));
+  const updates = updateFiles(folder).map(name => readJson<StoredUpdate>(path.join(folder, name)));
   let entry: Record<string, unknown> = { repo, status: "pending", notes: [], events: [], updatedAt: "" };
-  for (const { update } of updates) {
+  for (const update of updates) {
     const { at, notes = [], events = [], ...fields } = update;
     const previous = entry;
     entry = { ...previous, ...fields };
