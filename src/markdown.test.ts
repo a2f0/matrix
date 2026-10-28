@@ -19,8 +19,8 @@ test("separates prose from inline code and fenced blocks", () => {
 });
 
 test("lists link targets in prose only, across wrapped lines", () => {
-  const source = "See [the\nguide](docs/guide.md#setup \"Title\") and [site](https://example.com).\n`[code](not-a-link.md)`\n";
-  expect(linkTargets(source)).toEqual(["docs/guide.md#setup", "https://example.com"]);
+  const source = "See [the\nguide](docs/guide.md#setup \"Title\") and [site](https://example.com).\n`[code](not-a-link.md)`\n\n[ref]: docs/ref.md \"Ref\"\n";
+  expect(linkTargets(source)).toEqual(["docs/guide.md#setup", "https://example.com", "docs/ref.md"]);
 });
 
 test("derives GitHub anchors, numbering repeated headings", () => {

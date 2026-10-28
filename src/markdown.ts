@@ -84,11 +84,13 @@ export function splitCode(source: string): { prose: string; code: string[] } {
   return { prose: prose.join("\n"), code };
 }
 
-/** Inline link targets in prose, without their titles. */
+/** Link targets in prose, inline and from reference definitions, without their titles. */
 export function linkTargets(source: string): string[] {
   const { prose } = splitCode(source);
   // Lines are joined so a link text that wraps still parses.
-  return [...prose.replace(/\n/g, " ").matchAll(/\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"]*")?\s*\)/g)].map(([, target]) => target!);
+  const inline = [...prose.replace(/\n/g, " ").matchAll(/\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"]*")?\s*\)/g)].map(([, target]) => target!);
+  const definitions = [...prose.matchAll(/^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/gm)].map(([, target]) => target!);
+  return [...inline, ...definitions];
 }
 
 /** GitHub's anchor for a heading: lowercase, punctuation removed, spaces as hyphens. */
