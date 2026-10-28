@@ -79,19 +79,34 @@ function nonBlankLines(source: string): string[] { return source.split("\n").map
  * only on the same character repeated at least as many times, so a longer fence
  * can show shorter ones as examples.
  */
-function headings(source: string): string[] {
+function headings(source: string): Array<{ level: number; text: string }> {
   let fence: string | undefined;
-  const found: string[] = [];
+  const found: Array<{ level: number; text: string }> = [];
   for (const line of source.split("\n")) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence === undefined) {
+      const heading = /^ {0,3}(#{1,6})(?:\s+(.*?))?(?:\s+#+)?\s*$/.exec(line);
       if (marker) fence = marker;
-      else if (/^ {0,3}#{1,6}\s/.test(line)) found.push(line.trim());
+      // An ATX heading may end with closing hashes, which are not part of its text.
+      else if (heading) found.push({ level: heading[1]!.length, text: heading[2] ?? "" });
     } else if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) {
       fence = undefined;
     }
   }
   return found;
+}
+
+function hasSection(source: string, name: string): boolean {
+  return headings(source).some(heading => heading.level >= 2 && heading.text.toLowerCase() === name.toLowerCase());
+}
+
+/** Inline, reference, and autolinks, and shortcut references the document defines. */
+function hasLink(text: string, document: string): boolean {
+  if (/\]\(|\]\[|<https?:|https?:\/\//.test(text)) return true;
+  return [...text.matchAll(/\[([^\]]+)\]/g)].some(([, label]) => {
+    const escaped = label!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^ {0,3}\\[${escaped}\\]:`, "im").test(document);
+  });
 }
 
 /**
@@ -184,9 +199,9 @@ export const RULES: readonly Rule[] = [
       const guidance = checkout.read("AGENTS.md");
       if (guidance === undefined) found.push("no AGENTS.md for the Output capture section");
       else {
-        const sections = headings(guidance).filter(heading => /^#{2,}\s/.test(heading));
         // An AGENTS.md without sections carries the same text as a paragraph.
-        if (sections.length > 0 && !sections.some(heading => /^#{2,}\s+Output capture\s*$/i.test(heading))) found.push("AGENTS.md has no Output capture section");
+        const sectioned = headings(guidance).some(heading => heading.level >= 2);
+        if (sectioned && !hasSection(guidance, "Output capture")) found.push("AGENTS.md has no Output capture section");
         for (const name of ["agent:run", "agent:logs"]) if (!guidance.includes(name)) found.push(`AGENTS.md does not mention ${name}`);
       }
       return problems(found);
@@ -201,8 +216,10 @@ export const RULES: readonly Rule[] = [
       if (readme === undefined) return fail("no README.md");
       const [first, second] = nonBlankLines(readme);
       if (!first || !/^#\s+\S/.test(first)) return fail("README.md does not start with an H1");
-      if (/\]\(|<https?:|https?:\/\//.test(first)) return fail(`H1 '${first}' contains a link`);
-      if (second && /^(\[[^\]]*\]\([^)]*\)|<https?:[^>]*>|https?:\/\/\S+)$/.test(second)) return fail(`a standalone link line follows the H1: '${second}'`);
+      if (hasLink(first, readme)) return fail(`H1 '${first}' contains a link`);
+      if (second && /^(\[[^\]]*\](\([^)]*\)|\[[^\]]*\])?|<https?:[^>]*>|https?:\/\/\S+)$/.test(second) && hasLink(second, readme)) {
+        return fail(`a standalone link line follows the H1: '${second}'`);
+      }
       return pass;
     },
   },
@@ -213,7 +230,7 @@ export const RULES: readonly Rule[] = [
     check: checkout => {
       const readme = checkout.read("README.md");
       if (readme === undefined) return fail("no README.md");
-      return headings(readme).some(heading => /^#{2,}\s+Quick start\s*$/i.test(heading)) ? pass : fail("README.md has no Quick start section");
+      return hasSection(readme, "Quick start") ? pass : fail("README.md has no Quick start section");
     },
   },
   {

@@ -116,6 +116,10 @@ describe("audit", () => {
     expect(failures(checkout("no-start", { "README.md": "# demo\n\n```md\n## Quick start\n```\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
     expect(failures(checkout("nested", { "README.md": "# demo\n\n````md\n```sh\nbun install\n```\n## Quick start\n````\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
     expect(failures(checkout("tilde", { "README.md": "# demo\n\n~~~\n```\n~~~\n\n## Quick start\n" }))).toEqual({});
+    expect(failures(checkout("closed", { "README.md": "# demo #\n\n## Quick start ##\n", "AGENTS.md": "# Guidance\n\n## Output capture ##\n\n`agent:run`, `agent:logs`\n" }))).toEqual({});
+    expect(failures(checkout("reference", { "README.md": "# [demo][site]\n\n## Quick start\n\n[site]: https://demo.example\n" }))["readme-title"]).toBe("H1 '# [demo][site]' contains a link");
+    expect(failures(checkout("shortcut", { "README.md": "# [demo]\n\n## Quick start\n\n[demo]: https://demo.example\n" }))["readme-title"]).toBe("H1 '# [demo]' contains a link");
+    expect(failures(checkout("brackets", { "README.md": "# [demo]\n[beta]\n\n## Quick start\n" }))).toEqual({});
     expect(failures(checkout("agentic", { "README.md": `${README}\n## Output capture\n\nUse agent:run.\n` }))["readme-agent-free"]).toBe("README.md mentions Output capture, agent:run");
   });
 
