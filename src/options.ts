@@ -28,7 +28,10 @@ export function parseOptions(args: string[], spec: Record<string, FlagKind>, com
       continue;
     }
     const value = equals === -1 ? args[++index] : arg.slice(equals + 1);
-    if (value === undefined) throw new Error(`${command} option '--${name}' needs a value.`);
+    // A following option means the value was left out; `--name=--text` passes text that starts with dashes.
+    if (value === undefined || (equals === -1 && value.startsWith("--"))) {
+      throw new Error(`${command} option '--${name}' needs a value; use --${name}=<value> for one that starts with --.`);
+    }
     if (kind === "list") (parsed.lists[name] ??= []).push(value);
     else if (name in parsed.values) throw new Error(`${command} option '--${name}' was given twice.`);
     else parsed.values[name] = value;
