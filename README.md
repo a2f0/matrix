@@ -8,7 +8,7 @@ without touching in-progress work.
 ```text
 matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
-src/                 The matrix CLI: sync, status, discover, deploy-secrets
+src/                 The matrix CLI: sync, status, discover, deploy-secrets, sweep
 scripts/secrets/     Backup entrypoint for ../matrix-secrets
 AGENTS.md            Coordinator rules for sweeps
 ```
@@ -35,6 +35,7 @@ bun run status
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
+| `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |
 
 Repositories are named as `owner/name` or by checkout name; none selects all.
 Output is JSON for coordinating agents; `sync` also prints progress to stderr
@@ -108,6 +109,12 @@ publish a package release before the repositories whose change needs it, and
 report a per-repository ledger, on a tracking issue when one is requested. Each
 repository ships under its own policy and pinned agent-tool; matrix never
 overrides a repository's rules.
+
+`bun run sweep` keeps that ledger in Git's common directory, never committed,
+along with the friction each repository hit: retries, fallbacks, declined
+review findings, and steps that needed a person. `bun run sweep retro` groups
+friction across sweeps, so a cause that recurs becomes a fix or a lesson
+instead of a surprise next time. See [sweep ledgers](docs/sweeps.md).
 
 Dependency sweeps follow the shared `update-dependencies` skill and the
 [dependency maintenance guide](docs/dependency-upgrades.md). They ship through

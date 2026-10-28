@@ -24,8 +24,8 @@ Keep application builds, tests, affected-package selection, infrastructure
 previews, and deployment commands in their repositories. Shared validation
 reporting records what those commands did; it does not choose a smaller suite or
 treat a cached success as evidence for a changed checkout. Keep matrix's manifest,
-checkout synchronization, sweep scheduling, and cross-repository release order
-here.
+checkout synchronization, sweep scheduling, [sweep ledgers and retrospectives](sweeps.md),
+and cross-repository release order here.
 
 ## Script locations
 

@@ -11,6 +11,13 @@ branches, use conventional commits, and preserve unrelated edits. Do not
 force-push or add attribution footers. Do not create GitHub issues without an
 explicit request.
 
+Claude Code, Codex, and Hermes all read this file. Claude Code loads the
+managed skills from `.claude/skills` and Codex from `.agents/skills`; Hermes
+does not load repository skills, so in Hermes read
+`.agents/skills/<name>/SKILL.md` before following a skill named here.
+Delegated subagents start without this conversation, so give each one the
+paths, rules, and commands it needs.
+
 ## Changing matrix itself
 
 Use the Bun version pinned in `.mise.toml`. In agent shells, put its
@@ -186,6 +193,9 @@ directories can make delegated agents stop for permission prompts.
    named targets, a sweep covers every managed checkout where the change applies.
    Checkouts in `staleInstalls` hold an older agent-tool than they pin; tell
    their delegates to run the documented install before using any script.
+   Choose the sweep branch (step 4) and open its ledger with
+   `bun run sweep start <branch> --topic <text> [repo...]`; it starts ready
+   checkouts as `pending` and skips the rest with the reason `status` gives.
 2. Each checkout is its own repository, and this file stops at its boundary.
    Before changing a checkout, read its `AGENTS.md`, README, and the docs they
    point to, and follow them inside it: setup, hooks, validation, versioning,
@@ -250,9 +260,17 @@ directories can make delegated agents stop for permission prompts.
    its checkout path and these rules; do not edit a delegated checkout yourself.
    Run at most four at a time: concurrent validation suites saturate the machine
    and cause timing failures.
-   Keep a ledger per repository: branch, commit, validation, review verdict, PR,
-   merge, publish or deploy, or the reason it was skipped or failed. Finish with
-   that ledger.
+   Record each repository in the ledger as its state changes with
+   `bun run sweep record <branch> <repo>`: status, commits, PR, validation,
+   reviewer and verdict, publish or deploy, cleanup, or the reason it was
+   unchanged, skipped, blocked, or failed. Record friction as it happens: a
+   step that passed only on a rerun (`--retry`), a substitute tool or reviewer
+   (`--fallback`), a declined review finding (`--declined`), or a step that
+   needed the user (`--manual`), each with a kebab-case cause such as
+   `--retry enospc:<detail>`; [docs/sweeps.md](docs/sweeps.md) defines the
+   fields. Delegates report these to the coordinator or record them with
+   `bun run --cwd <workspace> sweep record`. Finish with
+   `bun run sweep report <branch>`.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
    `bun run sync`. The shared `agent-tool repo cleanup <pr> <shipped-head> --apply`
    verifies that the merge commit is on the default branch and the feature refs
@@ -271,11 +289,18 @@ directories can make delegated agents stop for permission prompts.
    `git push --delete` would rerun pre-push hooks, often the full validation gate.
    After switching to the updated default branch, prune the matching local
    feature branch with `git branch -D -- <branch>` unless keeping the branch.
+9. Before the final report, run `bun run sweep retro`. Give each recurring
+   cause a resolution in the repository that owns it: a fix, guidance, or a
+   recorded decision, shipped as its own PR or listed as a follow-up in the
+   report ([docs/sweeps.md](docs/sweeps.md#retro)). Friction never justifies
+   weakening a repository's policy. When a lesson becomes something matrix or
+   agent-tool can check or perform, replace its prose with the command.
 
 When the request asks for an issue to track a sweep, open it in this workspace's
 repository. Each PR body references it as `Part of <owner>/<repo>#<number>`
 without a closing keyword, so one repository's merge does not close the sweep.
-Post each repository's ledger entry on the issue as it ships.
+Post each repository's ledger entry on the issue as it ships;
+`bun run sweep report <branch> --markdown` renders the table.
 
 `.ignore` lets ripgrep-based search tools see checkouts from the workspace root;
 scope searches to `checkouts/<name>` when working on one repository.
