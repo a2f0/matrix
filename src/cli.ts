@@ -1,5 +1,6 @@
 import { existsSync, writeSync } from "node:fs";
 import path from "node:path";
+import { audit, registryLatest, selectRules } from "./audit";
 import { checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
 import { cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
@@ -14,6 +15,8 @@ export const HELP = `Usage: matrix <command>
   sync [repo...]        Clone missing checkouts, fetch, and fast-forward clean default branches
   status [repo...]      Report branch, local changes, and distance from origin's default branch
   discover [--apply]    Compare matrix.json with the owner's repositories; --apply adds new ones
+  audit [repo...] [--rule id]... [--remote]
+                        Check checkouts against matrix standards; --remote adds registry rules
   deploy-secrets [repo...] [--apply]
                         Compare each repo's matrix-secrets ci/ files with its GitHub Actions
                         secrets and variables; --apply sets them (nothing is deleted)
@@ -132,6 +135,17 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
     const { ok, results } = deployAll(secrets, selectRepos(manifest, names), apply, gh);
     output({ ok, apply, secrets, results });
     return ok ? 0 : 1;
+  }
+  if (command === "audit") {
+    const { positional, lists, booleans } = parseOptions(args, { rule: "list", remote: "boolean" }, "audit");
+    const rules = selectRules(lists.rule ?? [], booleans.has("remote"));
+    const repos = selectRepos(manifest, positional);
+    const statusOf = (repo: string) => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol));
+    // Ask the registry once per package, and only when a remote rule needs it.
+    const latest = new Map<string, string>();
+    const result = audit(root, repos, rules, statusOf, { latest: name => latest.get(name) ?? latest.set(name, registryLatest(name)).get(name)! });
+    output(result);
+    return result.ok ? 0 : 1;
   }
   if (command === "sweep") return sweepCommand(args, root, manifest);
   throw new Error(`Unknown command '${command}'. Run matrix --help.`);

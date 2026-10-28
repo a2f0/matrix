@@ -37,8 +37,8 @@ needed, or with a targeted search; inspect required warnings, timings, and
 artifacts before accepting a check. Run `bun run check` directly, since it
 prints its own group report (`bun run agent-tool runs list` lists earlier
 ones), and keep review verdicts and structured decision output, including
-matrix sync/status results, visible. Do not wrap interactive tools or
-persistent servers.
+matrix sync, status, and audit results, visible. Do not wrap interactive tools
+or persistent servers.
 Ship with the installed `ship-pr` skill; title and required CI policy is in
 `agent-tool.json`. After updating the agent-tool pin, run `bun run agents:sync`
 and commit the lockfile, skills, and `.agent-tool-skills.json` together. Do not
@@ -53,6 +53,15 @@ Secrets live in `../matrix-secrets/<project>/{staging,prod,ci}`, linked from eac
 clone's gitignored `.secrets`; `docs/secrets.md` describes the layout, backups,
 and CI deployment. Never read, print, log, or commit secret values; names are
 fine. Change that folder only on request, and back it up first.
+
+## Checking standards
+
+`bun run audit [repo...]` checks every checkout against the standards below
+that its files can show, and `--remote` adds the latest-release check for its
+agent-tool pin; [docs/audit.md](docs/audit.md) maps each rule to its standard.
+When a change here adds such a standard, add its rule in the same change, or
+say in the PR why files cannot show it. When agent-tool replaces a documented
+command, add the old spelling to the audit's superseded patterns.
 
 ## Onboarding a repository
 
@@ -94,6 +103,8 @@ fine. Change that folder only on request, and back it up first.
    the rule in the onboarding change when it is missing.
 6. Bring its READMEs to the [README rules](#readme-files) in the onboarding
    change.
+7. Run `bun run audit <name>` once those changes merge, and report any rule it
+   still fails as unfinished onboarding.
 
 ## README files
 
@@ -205,12 +216,14 @@ directories can make delegated agents stop for permission prompts.
 3. Inspect before editing; the same request often needs different edits per
    repository. Inventory every form of the target, not one literal spelling: a
    route can appear with shell variables in place of placeholders, and
-   repository-owned skills carry copies that agent-tool does not manage. When
-   the change does not apply or is already true, record that and leave the
-   checkout untouched.
+   repository-owned skills carry copies that agent-tool does not manage. For a
+   standard `bun run audit` checks, start from its failures, then still inspect
+   every form. When the change does not apply or is already true, record that
+   and leave the checkout untouched.
    For dependency sweeps, use the shared `update-dependencies` skill and its
-   compatibility and infrastructure-preview gates. For checkouts with an older
-   pin or no local agent-tool, use the workspace's plan helper described in README.
+   compatibility and infrastructure-preview gates. For a checkout without
+   agent-tool, use the workspace's
+   [plan helper](docs/dependency-upgrades.md#plan-helper-for-checkouts-without-agent-tool).
    Keep top-level READMEs focused on purpose, setup, and normal usage. Put reusable
    upgrade procedures and active constraints in the checkout's existing dependency
    maintenance doc, linked briefly from README and AGENTS.md; create a focused doc
@@ -225,8 +238,8 @@ directories can make delegated agents stop for permission prompts.
    Push the reviewed commit with
    `agent-tool branch push <reviewed-head> --remote origin`.
    These commands validate refs, avoid local upstream inheritance, and preserve
-   normal hooks. Use the checkout's own pinned CLI; older checkouts may still
-   need `git switch --no-track -c` and `git push -u origin HEAD`. Run the
+   normal hooks. Use the checkout's own pinned CLI; the audit's
+   `agent-tool-pin` rule confirms every pin has these commands. Run the
    checkout's documented setup before committing so its hooks run. Agent shells
    do not activate mise's per-directory tools, so the
    default Bun, Node, or Terraform can differ from a checkout's pins; put the
@@ -244,8 +257,7 @@ directories can make delegated agents stop for permission prompts.
    publish, once its tarball is confirmed to contain the change. Changes that do
    not depend on a new release still ship in parallel. Use
    `agent-tool pr checks --wait --head <reviewed-head>` to wait for every check
-   entry. For older pins, `gh pr checks --watch` can exit successfully before
-   checks appear; wait for all push and pull-request entries to finish.
+   entry.
 6. A request to perform dependency updates includes `update-dependencies` and
    `ship-pr` through merge and the repository's normal merge-triggered publishing
    or deployment, unless the user requests a narrower stopping point. Other
@@ -281,14 +293,6 @@ directories can make delegated agents stop for permission prompts.
    but cannot atomically bind deletion to an expected SHA. A checkout requiring an
    atomic lease must retain its stronger cleanup procedure. Reinstall documented
    dependencies and hooks after returning to the default branch.
-   With pins that lack `repo cleanup`, use that checkout's reset skill. Unless keep-branch was
-   requested, verify each remaining feature ref matches the shipped head before
-   deleting it; preserve moved refs and report unfinished cleanup. Unless keeping
-   the branch, delete the matching remote ref with
-   `gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/{branch}`.
-   `git push --delete` would rerun pre-push hooks, often the full validation gate.
-   After switching to the updated default branch, prune the matching local
-   feature branch with `git branch -D -- <branch>` unless keeping the branch.
 9. Before the final report, run `bun run sweep retro`. Give each recurring
    cause a resolution in the repository that owns it: a fix, guidance, or a
    recorded decision, shipped as its own PR or listed as a follow-up in the

@@ -30,6 +30,8 @@ issues. A useful report records the outcome and safe evidence, not raw secrets.
 
 For matrix itself, keep the Bun version in `.mise.toml` aligned with
 `package.json`'s `packageManager`. CI installs the toolchain from `.mise.toml`.
+`bun run audit --rule agent-tool-latest` lists the checkouts whose exact
+agent-tool pin trails the latest published release.
 
 The skill inventories package and toolchain pins, follows upstream migrations,
 checks compatibility groups and resolved dependency advisories, and validates
@@ -46,7 +48,7 @@ does not authorize deployment, and the shipping default does not authorize a
 standalone infrastructure apply or manual deployment. These scope rules do not
 waive the preview gates.
 
-## Plan helper for older checkouts
+## Plan helper for checkouts without agent-tool
 
 The read-only `agent-tool dependencies check-terraform-plan <plan.json>` helper
 checks saved Terraform plan JSON for unsafe or incomplete actions. A successful
@@ -54,8 +56,9 @@ check does not establish plan freshness, backend identity, or the safety of
 effects outside the plan. Keep plans and state private; the skill describes the
 remaining checks before any authorized apply.
 
-If a checkout's agent-tool is unavailable or predates 0.1.8, run the helper from
-this workspace:
+Every onboarded checkout pins an agent-tool that has the helper, as
+`bun run audit --rule agent-tool-pin` confirms. For a checkout that has not
+adopted agent-tool yet, run the helper from this workspace:
 
 ```sh
 node_modules/.bin/agent-tool --repo checkouts/<name> dependencies check-terraform-plan <absolute-plan.json>

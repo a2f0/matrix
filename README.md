@@ -8,7 +8,7 @@ without touching in-progress work.
 ```text
 matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
-src/                 The matrix CLI: sync, status, discover, deploy-secrets, sweep
+src/                 The matrix CLI: sync, status, discover, audit, deploy-secrets, sweep
 scripts/secrets/     Backup entrypoint for ../matrix-secrets
 AGENTS.md            Coordinator rules for sweeps
 ```
@@ -33,6 +33,7 @@ bun run status
 | `bun run sync [repo...]` | Clone missing checkouts, fetch all, fast-forward clean default branches |
 | `bun run status [repo...]` | Report branch, local changes, and distance from origin's default branch |
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
+| `bun run audit [repo...] [--rule id]... [--remote]` | Check checkouts against the shared standards; `--remote` also compares agent-tool pins with the latest release |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 | `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |
@@ -59,6 +60,12 @@ manifest does not manage are listed as `unmanaged` and left alone.
 For a checkout that pins `@a2f0/agent-tool`, `agentTool` compares the pin with
 the version in its `node_modules`, and `staleInstalls` lists those that differ;
 reinstall that checkout's dependencies, which `sync` never does.
+
+`audit` checks each checkout's files against the standards the matrix shares:
+agent guidance, ignore rules, agent-tool adoption, output capture, README
+structure, brand images, and stale copies of commands that agent-tool replaced.
+It reports failing repositories by rule and never changes a checkout; see
+[checkout audit](docs/audit.md).
 
 ## Managed repositories
 

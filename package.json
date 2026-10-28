@@ -13,6 +13,7 @@
     "sync": "bun src/index.ts sync",
     "status": "bun src/index.ts status",
     "discover": "bun src/index.ts discover",
+    "audit": "bun src/index.ts audit",
     "sweep": "bun src/index.ts sweep",
     "secrets:backup": "bash scripts/secrets/backupSecrets.sh",
     "secrets:deploy": "bun src/index.ts deploy-secrets",
