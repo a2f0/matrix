@@ -126,6 +126,8 @@ describe("audit", () => {
     expect(failures(checkout("reference", { "README.md": "# [demo][site]\n\n## Quick start\n\n[site]: https://demo.example\n" }))["readme-title"]).toBe("H1 '# [demo][site]' contains a link");
     expect(failures(checkout("shortcut", { "README.md": "# [demo]\n\n## Quick start\n\n[demo]: https://demo.example\n" }))["readme-title"]).toBe("H1 '# [demo]' contains a link");
     expect(failures(checkout("brackets", { "README.md": "# [demo]\n[beta]\n\n## Quick start\n" }))).toEqual({});
+    expect(failures(checkout("setext", { "README.md": "# demo\n\nQuick start\n-----------\n\n```sh\nbun install\n```\n" }))).toEqual({});
+    expect(failures(checkout("rule", { "README.md": "# demo\n\nOne\nparagraph\nQuick start\n---\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
     expect(failures(checkout("agentic", { "README.md": `${README}\n## Output capture\n\nUse agent:run.\n` }))["readme-agent-free"]).toBe("README.md mentions Output capture, agent:run");
   });
 
@@ -138,7 +140,7 @@ describe("audit", () => {
   test("finds superseded commands in Markdown, every spelling, outside managed skills", () => {
     const repo = checkout("stale", {
       "AGENTS.md": `${GUIDANCE}\nReply with \`POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies\`.\n`,
-      "docs/shipping.md": "Run `git push -u origin HEAD`, then `gh pr checks --watch`.\nOr `git push origin --delete feat/x`.\n",
+      "docs/shipping.md": "Run `git push -u origin HEAD`, then `gh pr checks 12 --watch`.\nOr `git push origin --delete feat/x`.\n",
       "docs/cleanup.md": "Delete atomically: `git push --force-with-lease=refs/heads/x:abc --delete origin x`.\n",
       "scripts/ship.sh": "gh pr checks --watch\n",
     });

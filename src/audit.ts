@@ -83,14 +83,22 @@ interface Heading { readonly level: number; readonly text: string; readonly line
 
 function headings(source: string): Heading[] {
   let fence: string | undefined;
+  // The lines of the paragraph being read, which a Setext underline turns into a heading.
+  let paragraph: { lines: string[]; start: number } | undefined;
   const found: Heading[] = [];
   for (const [index, line] of source.split("\n").entries()) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence === undefined) {
       const heading = /^ {0,3}(#{1,6})(?:\s+(.*?))?(?:\s+#+)?\s*$/.exec(line);
+      const underline = /^ {0,3}(=+|-+)\s*$/.exec(line)?.[1];
       if (marker) fence = marker;
       // An ATX heading may end with closing hashes, which are not part of its text.
       else if (heading) found.push({ level: heading[1]!.length, text: heading[2] ?? "", line: index });
+      // = underlines a level 1 heading and - a level 2 one; the heading is the whole paragraph.
+      else if (underline && paragraph) found.push({ level: underline[0] === "=" ? 1 : 2, text: paragraph.lines.join(" "), line: paragraph.start });
+      if (marker || heading || underline || !line.trim()) paragraph = undefined;
+      else if (paragraph) paragraph.lines.push(line.trim());
+      else paragraph = { lines: [line.trim()], start: index };
     } else if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) {
       fence = undefined;
     }
@@ -127,7 +135,7 @@ function hasLink(text: string, document: string): boolean {
 export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: string; exempt?: RegExp }> = [
   { id: "review-reply-endpoint", pattern: "pulls/([^/[:space:]`]+/)?comments/[^/[:space:]`]+/replies", replacement: "agent-tool pr threads reply" },
   { id: "untracked-branch-switch", pattern: "git switch --no-track", replacement: "agent-tool branch create" },
-  { id: "pr-checks-watch", pattern: "gh pr checks --watch", replacement: "agent-tool pr checks --wait" },
+  { id: "pr-checks-watch", pattern: "gh pr checks[^`]*--watch", replacement: "agent-tool pr checks --wait" },
   { id: "push-head-upstream", pattern: "git push (-u|--set-upstream) origin HEAD", replacement: "agent-tool branch push <reviewed-head> --remote origin" },
   // A leased deletion is the stronger cleanup some checkouts require, not the hook-running push it replaced.
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
