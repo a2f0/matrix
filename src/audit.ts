@@ -79,16 +79,18 @@ function nonBlankLines(source: string): string[] { return source.split("\n").map
  * only on the same character repeated at least as many times, so a longer fence
  * can show shorter ones as examples.
  */
-function headings(source: string): Array<{ level: number; text: string }> {
+interface Heading { readonly level: number; readonly text: string; readonly line: number }
+
+function headings(source: string): Heading[] {
   let fence: string | undefined;
-  const found: Array<{ level: number; text: string }> = [];
-  for (const line of source.split("\n")) {
+  const found: Heading[] = [];
+  for (const [index, line] of source.split("\n").entries()) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence === undefined) {
       const heading = /^ {0,3}(#{1,6})(?:\s+(.*?))?(?:\s+#+)?\s*$/.exec(line);
       if (marker) fence = marker;
       // An ATX heading may end with closing hashes, which are not part of its text.
-      else if (heading) found.push({ level: heading[1]!.length, text: heading[2] ?? "" });
+      else if (heading) found.push({ level: heading[1]!.length, text: heading[2] ?? "", line: index });
     } else if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) {
       fence = undefined;
     }
@@ -96,8 +98,15 @@ function headings(source: string): Array<{ level: number; text: string }> {
   return found;
 }
 
-function hasSection(source: string, name: string): boolean {
-  return headings(source).some(heading => heading.level >= 2 && heading.text.toLowerCase() === name.toLowerCase());
+function hasSection(source: string, name: string): boolean { return section(source, name) !== undefined; }
+
+/** A section's body: the lines after its heading, up to the next heading at its level or above. */
+function section(source: string, name: string): string | undefined {
+  const all = headings(source);
+  const start = all.findIndex(heading => heading.level >= 2 && heading.text.toLowerCase() === name.toLowerCase());
+  if (start === -1) return undefined;
+  const end = all.slice(start + 1).find(heading => heading.level <= all[start]!.level)?.line;
+  return source.split("\n").slice(all[start]!.line + 1, end).join("\n");
 }
 
 /** Inline, reference, and autolinks, and shortcut references the document defines. */
@@ -201,8 +210,9 @@ export const RULES: readonly Rule[] = [
       else {
         // An AGENTS.md without sections carries the same text as a paragraph.
         const sectioned = headings(guidance).some(heading => heading.level >= 2);
-        if (sectioned && !hasSection(guidance, "Output capture")) found.push("AGENTS.md has no Output capture section");
-        for (const name of ["agent:run", "agent:logs"]) if (!guidance.includes(name)) found.push(`AGENTS.md does not mention ${name}`);
+        const text = sectioned ? section(guidance, "Output capture") : guidance;
+        if (text === undefined) found.push("AGENTS.md has no Output capture section");
+        else for (const name of ["agent:run", "agent:logs"]) if (!text.includes(name)) found.push(`Output capture guidance does not mention ${name}`);
       }
       return problems(found);
     },

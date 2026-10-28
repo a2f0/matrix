@@ -106,7 +106,13 @@ describe("audit", () => {
     expect(failures(checkout("capture", {
       "package.json": JSON.stringify({ scripts: { "agent:run": "agent-tool run" }, devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }),
       "AGENTS.md": "# Guidance\n\n## Validation\n\nRun `bun run agent:run`.\n",
-    }))["output-capture"]).toBe("no agent:logs script; AGENTS.md has no Output capture section; AGENTS.md does not mention agent:logs");
+    }))["output-capture"]).toBe("no agent:logs script; AGENTS.md has no Output capture section");
+    expect(failures(checkout("empty-section", {
+      "AGENTS.md": "# Guidance\n\n## Output capture\n\nTBD.\n\n## Validation\n\nRun `bun run agent:run` and `bun run agent:logs`.\n",
+    }))["output-capture"]).toBe("Output capture guidance does not mention agent:run; Output capture guidance does not mention agent:logs");
+    expect(failures(checkout("subsection", {
+      "AGENTS.md": "# Guidance\n\n## Output capture\n\nUse `agent:run`.\n\n### Logs\n\nRead with `agent:logs`.\n",
+    }))).toEqual({});
     expect(failures(checkout("paragraph", { "AGENTS.md": "# Guidance\n\nRun `bun run agent:run` and `bun run agent:logs <log>`.\n" }))).toEqual({});
   });
 
