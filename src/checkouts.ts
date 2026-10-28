@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { git, gitOutput, gitSucceeds } from "./git";
 import { CHECKOUTS, checkoutPath, parseGitHubRepo, repoName } from "./manifest";
@@ -27,7 +27,16 @@ export interface CheckoutStatus {
   /** Commits on HEAD that origin's default branch lacks, and the reverse. */
   readonly ahead?: number;
   readonly behind?: number;
+  /** The checkout's exact agent-tool pin and the version its node_modules holds, when it pins one. */
+  readonly agentTool?: AgentToolInstall;
   readonly error?: string;
+}
+
+export interface AgentToolInstall {
+  readonly pinned: string;
+  /** Null when node_modules has no agent-tool package. */
+  readonly installed: string | null;
+  readonly current: boolean;
 }
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
@@ -88,6 +97,33 @@ function changeCount(directory: string): number {
   return status.length + hidden.length;
 }
 
+const AGENT_TOOL = "@a2f0/agent-tool";
+
+function packageJson(file: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(readFileSync(file, "utf8"));
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  } catch { return undefined; }
+}
+
+function dependency(manifest: Record<string, unknown>, name: string): string | undefined {
+  for (const field of ["devDependencies", "dependencies"]) {
+    const version = (manifest[field] as Record<string, unknown> | undefined)?.[name];
+    if (typeof version === "string") return version;
+  }
+  return undefined;
+}
+
+/** Sync updates sources but never installs, so node_modules can lag the pin that scripts expect. */
+function agentToolInstall(directory: string): AgentToolInstall | undefined {
+  const manifest = packageJson(path.join(directory, "package.json"));
+  const pinned = manifest && dependency(manifest, AGENT_TOOL);
+  if (pinned === undefined) return undefined;
+  const version = packageJson(path.join(directory, "node_modules", AGENT_TOOL, "package.json"))?.version;
+  const installed = typeof version === "string" ? version : null;
+  return { pinned, installed, current: installed === pinned };
+}
+
 function snapshot(directory: string) {
   return { branch: currentBranch(directory), defaultBranch: defaultBranch(directory), head: gitOutput(directory, ["rev-parse", "HEAD"]) };
 }
@@ -143,7 +179,8 @@ export function checkoutStatus(root: string, repo: string, url: string): Checkou
     const counts = gitOutput(directory, ["rev-list", "--left-right", "--count", `HEAD...refs/remotes/origin/${state.defaultBranch}`]);
     const [ahead = 0, behind = 0] = counts.split(/\s+/).map(Number);
     const ready = state.branch === state.defaultBranch && changes === 0 && ahead === 0 && behind === 0;
-    return { ...base, present: true, ready, ...state, changes, ahead, behind };
+    const agentTool = agentToolInstall(directory);
+    return { ...base, present: true, ready, ...state, changes, ahead, behind, ...(agentTool && { agentTool }) };
   } catch (error) {
     return { ...base, present: true, ready: false, error: message(error) };
   }

@@ -200,6 +200,20 @@ the warnings, coverage, timings, and artifacts it must produce with
 success log. Never narrow a suite, lower coverage, or silence warnings to save
 output.
 
+Run captures from the repository root. In a workspace package directory,
+`bun run` looks only at that package's scripts, so `agent:run` is not found,
+and `bun run --cwd <root> agent:run` runs the command from the root instead.
+Point the command at the package, as in
+`bun run agent:run --label api -- bun run --cwd packages/api test`;
+`agent:logs` takes the receipt's absolute log path, so it works from the root
+too. Workspaces add this as a local rule after the standard text.
+
+`bun run sync` updates sources but never installs dependencies, so a
+checkout's `node_modules` can hold an older agent-tool than its pin, and its
+scripts then run that older harness. `bun run status` lists those checkouts in
+`staleInstalls`; run the checkout's documented install before using its
+scripts.
+
 ### Agent guidance
 
 Each repository's `AGENTS.md` has an `Output capture` section adapted from the
