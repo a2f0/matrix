@@ -234,7 +234,10 @@ export interface StartOptions { topic?: string; issue?: string }
  * Create a ledger for a sweep branch. Ready checkouts start `pending` at their
  * current commit; the rest are `skipped` with the reason, as sweep step 1 requires.
  */
-export function startSweep(root: string, branch: string, repos: string[], statusOf: (repo: string) => CheckoutStatus, options: StartOptions = {}, now = new Date()): SweepReport {
+export function startSweep(root: string, branch: string, selected: string[], statusOf: (repo: string) => CheckoutStatus, options: StartOptions = {}, now = new Date()): SweepReport {
+  // Naming one repository twice, as owner/name and as a checkout name, must not count it twice.
+  const seen = new Set<string>();
+  const repos = selected.filter(repo => !seen.has(repo.toLowerCase()) && seen.add(repo.toLowerCase()));
   if (repos.length === 0) throw new Error("A sweep needs at least one repository.");
   if (options.issue !== undefined && !ISSUE.test(options.issue)) throw new Error("--issue must be owner/repo#number.");
   const topic = options.topic === undefined ? undefined : text(options.topic, "topic");

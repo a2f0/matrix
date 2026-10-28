@@ -71,6 +71,10 @@ describe("startSweep", () => {
     expect(start("chore/demo", ["a2f0/one"]).counts).toEqual({ pending: 1 });
   });
 
+  test("records a repository named twice once", () => {
+    expect(start("chore/demo", ["a2f0/one", "a2f0/two", "A2F0/one"]).sweep.repos).toEqual(["a2f0/one", "a2f0/two"]);
+  });
+
   test("keeps branches that differ only in separators apart", () => {
     start("chore/a-b", ["a2f0/one"]);
     start("chore-a/b", ["a2f0/two"], 1);
