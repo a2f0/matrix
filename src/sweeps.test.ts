@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
@@ -64,6 +64,13 @@ describe("startSweep", () => {
     expect(() => startSweep(root, "chore/other", ["a2f0/one"], statusOf, { issue: "matrix#4" })).toThrow("owner/repo#number");
   });
 
+  test("leaves nothing behind when a start fails, so a corrected retry succeeds", () => {
+    expect(() => startSweep(root, "chore/demo", ["a2f0/one"], statusOf, { topic: "  " })).toThrow("--topic must not be empty");
+    expect(() => startSweep(root, "chore/demo", ["a2f0/one"], () => { throw new Error("status failed"); })).toThrow("status failed");
+    expect(existsSync(path.join(sweepsDirectory(root), encodeURIComponent("chore/demo")))).toBe(false);
+    expect(start("chore/demo", ["a2f0/one"]).counts).toEqual({ pending: 1 });
+  });
+
   test("keeps branches that differ only in separators apart", () => {
     start("chore/a-b", ["a2f0/one"]);
     start("chore-a/b", ["a2f0/two"], 1);
@@ -102,19 +109,20 @@ describe("recordEntry", () => {
     expect(parseEvent("declined", "restore-claude-md: Codex asked again ")).toEqual({ kind: "declined", cause: "restore-claude-md", detail: "Codex asked again" });
   });
 
-  test("waits for another writer, and takes over a lock a killed process left", () => {
+  test("keeps every update when processes record the same repository at once", async () => {
     start("chore/demo", ["a2f0/one"]);
-    const file = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"), "repos", "one.json");
-    writeFileSync(`${file}.lock`, "");
-    const before = readFileSync(file, "utf8");
-    expect(() => recordEntry(root, "chore/demo", "one", { status: "merged" }, new Date(), 100)).toThrow("held by another writer");
-    expect(readFileSync(file, "utf8")).toBe(before);
-
-    const old = new Date(Date.now() - 120_000);
-    utimesSync(`${file}.lock`, old, old);
-    expect(recordEntry(root, "chore/demo", "one", { status: "merged" }, new Date(), 100).status).toBe("merged");
-    expect(existsSync(`${file}.lock`)).toBe(false);
-  });
+    const module = path.join(import.meta.dir, "sweeps.ts");
+    const writers = Array.from({ length: 8 }, (_, index) => new Promise<number | null>((resolve, reject) => {
+      const script = `import { recordEntry } from ${JSON.stringify(module)}; recordEntry(${JSON.stringify(root)}, "chore/demo", "one", { notes: ["writer ${index}"], events: [{ kind: "retry", cause: "writer-${index}" }] });`;
+      const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "inherit"] });
+      child.on("error", reject);
+      child.on("exit", resolve);
+    }));
+    expect(await Promise.all(writers)).toEqual(Array(8).fill(0));
+    const entry = sweepReport(root, "chore/demo").repos[0]!;
+    expect(entry.notes.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `writer ${index}`));
+    expect(entry.events.map(event => event.cause).toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `writer-${index}`));
+  }, 30_000);
 });
 
 describe("reports", () => {

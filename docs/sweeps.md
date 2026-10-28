@@ -21,13 +21,15 @@ bun run sweep retro [branch...] [--last 5] [--min-repos 2] [--min-sweeps 2]
 A ledger lives in Git's common directory, at
 `.git/matrix/sweeps/<url-encoded branch>/`, beside agent-tool's run receipts:
 `sweep.json` holds the branch, topic, tracking issue, start time, and
-repositories, and `repos/<checkout>.json` holds one repository's entry. Files
-are private to the user and never committed, since run-specific evidence
-belongs in PRs and tracking issues rather than a repository journal. One file
-per repository lets parallel delegates record without conflicts, and a short
-lock serializes writers to the same entry.
+repositories, and `repos/<checkout>/` holds one repository's updates. Files are
+private to the user and never committed, since run-specific evidence belongs in
+PRs and tracking issues rather than a repository journal. Each `record` adds a
+new update file and never rewrites one, so the coordinator and parallel
+delegates can record at once without losing each other's changes; an entry is
+its updates replayed in time order.
 
-`sweep start` refuses a branch that already has a ledger. It records every
+`sweep start` refuses a branch that already has a ledger, and a start that
+fails leaves nothing behind, so a corrected retry succeeds. It records every
 selected repository, all of them by default: a ready checkout starts `pending`
 at its current commit, and any other is `skipped` with the reason `status`
 gives, such as `on branch feat/x` or `checkout missing; run sync`. A checkout

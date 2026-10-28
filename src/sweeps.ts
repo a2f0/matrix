@@ -1,4 +1,5 @@
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
 import { git, gitOutput } from "./git";
@@ -141,7 +142,8 @@ function sweepDirectory(root: string, branch: string): string {
   return path.join(sweepsDirectory(root), encodeURIComponent(branch));
 }
 
-function entryFile(directory: string, repo: string): string { return path.join(directory, "repos", `${repoName(repo)}.json`); }
+/** One repository's updates, each in its own file, so concurrent writers never overwrite each other. */
+function entryDirectory(directory: string, repo: string): string { return path.join(directory, "repos", repoName(repo)); }
 
 function readJson<T>(file: string): T {
   try { return JSON.parse(readFileSync(file, "utf8")) as T; } catch (error) {
@@ -152,35 +154,37 @@ function readJson<T>(file: string): T {
 /** Write through a rename so a reader never sees a partial file. */
 function writeJson(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   renameSync(temporary, file);
 }
 
-const LOCK_WAIT_MS = 10_000;
-const LOCK_STALE_MS = 60_000;
+/** An update as stored: the fields it sets, the notes and events it adds, and when. */
+type StoredUpdate = EntryUpdate & { readonly at: string };
 
-function pause(milliseconds: number): void { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds); }
+/** Append an update under a unique name; recording never rewrites an earlier file. */
+function appendUpdate(directory: string, repo: string, update: StoredUpdate): void {
+  writeJson(path.join(entryDirectory(directory, repo), `${update.at.replace(/[:.]/g, "-")}-${randomUUID()}.json`), update);
+}
 
-/** Serialize read-modify-write of one entry; delegates and the coordinator may record the same repository. */
-function withLock<T>(file: string, waitMs: number, action: () => T): T {
-  const lock = `${file}.lock`;
-  const deadline = Date.now() + waitMs;
-  for (;;) {
-    try {
-      closeSync(openSync(lock, "wx", 0o600));
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      let age = 0;
-      try { age = Date.now() - statSync(lock).mtimeMs; } catch { continue; }
-      // A writer holds the lock for milliseconds; an old one was left by a killed process.
-      if (age > LOCK_STALE_MS) { rmSync(lock, { force: true }); continue; }
-      if (Date.now() > deadline) throw new Error(`${lock} is held by another writer; retry once it finishes.`);
-      pause(25);
-    }
+/** Replay a repository's updates in time order. A new status without a reason clears the old reason. */
+function loadEntry(directory: string, repo: string): RepoEntry {
+  const folder = entryDirectory(directory, repo);
+  const updates = readdirSync(folder)
+    .filter(name => name.endsWith(".json"))
+    .map(name => ({ name, update: readJson<StoredUpdate>(path.join(folder, name)) }))
+    .sort((left, right) => left.update.at.localeCompare(right.update.at) || left.name.localeCompare(right.name));
+  let entry: Record<string, unknown> = { repo, status: "pending", notes: [], events: [], updatedAt: "" };
+  for (const { update } of updates) {
+    const { at, notes = [], events = [], ...fields } = update;
+    const previous = entry;
+    entry = { ...previous, ...fields };
+    if (fields.status !== undefined && fields.reason === undefined) delete entry.reason;
+    entry.notes = [...(previous.notes as string[]), ...notes];
+    entry.events = [...(previous.events as SweepEvent[]), ...events.map(event => ({ ...event, at }))];
+    entry.updatedAt = at;
   }
-  try { return action(); } finally { rmSync(lock, { force: true }); }
+  return entry as unknown as RepoEntry;
 }
 
 function loadSweep(root: string, branch: string): { directory: string; sweep: Sweep } {
@@ -193,7 +197,7 @@ function loadSweep(root: string, branch: string): { directory: string; sweep: Sw
 }
 
 function loadEntries(directory: string, sweep: Sweep): RepoEntry[] {
-  return sweep.repos.map(repo => readJson<RepoEntry>(entryFile(directory, repo)));
+  return sweep.repos.map(repo => loadEntry(directory, repo));
 }
 
 function plural(count: number, noun: string): string { return `${count} ${noun}${count === 1 ? "" : "s"}`; }
@@ -233,22 +237,11 @@ export interface StartOptions { topic?: string; issue?: string }
 export function startSweep(root: string, branch: string, repos: string[], statusOf: (repo: string) => CheckoutStatus, options: StartOptions = {}, now = new Date()): SweepReport {
   if (repos.length === 0) throw new Error("A sweep needs at least one repository.");
   if (options.issue !== undefined && !ISSUE.test(options.issue)) throw new Error("--issue must be owner/repo#number.");
+  const topic = options.topic === undefined ? undefined : text(options.topic, "topic");
   const directory = sweepDirectory(root, branch);
-  mkdirSync(path.dirname(directory), { recursive: true, mode: 0o700 });
-  try { mkdirSync(directory, { mode: 0o700 }); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`A sweep ledger for '${branch}' already exists at ${directory}; use sweep record or sweep report.`);
-    throw error;
-  }
   const at = now.toISOString();
-  const sweep: Sweep = {
-    schemaVersion: 1,
-    branch,
-    ...(options.topic !== undefined && { topic: text(options.topic, "topic") }),
-    ...(options.issue !== undefined && { issue: options.issue }),
-    startedAt: at,
-    repos,
-  };
-  const entries = repos.map((repo): RepoEntry => {
+  const sweep: Sweep = { schemaVersion: 1, branch, ...(topic !== undefined && { topic }), ...(options.issue !== undefined && { issue: options.issue }), startedAt: at, repos };
+  const initial = repos.map((repo): StoredUpdate => {
     const status = statusOf(repo);
     const reason = notReady(status);
     const install = status.agentTool;
@@ -256,13 +249,24 @@ export function startSweep(root: string, branch: string, repos: string[], status
       ? [`node_modules holds agent-tool ${install.installed ?? "none"}, pinned ${install.pinned}; run the checkout's install before its scripts`]
       : [];
     return reason === undefined
-      ? { repo, status: "pending", ...(status.head && { base: status.head }), notes, events: [], updatedAt: at }
-      : { repo, status: "skipped", reason, notes, events: [], updatedAt: at };
+      ? { at, status: "pending", ...(status.head && { base: status.head }), notes }
+      : { at, status: "skipped", reason, notes };
   });
-  for (const entry of entries) writeJson(entryFile(directory, entry.repo), entry);
-  // Written last: list and report treat a directory without sweep.json as absent.
-  writeJson(path.join(directory, "sweep.json"), sweep);
-  return report(sweep, entries);
+  mkdirSync(path.dirname(directory), { recursive: true, mode: 0o700 });
+  try { mkdirSync(directory, { mode: 0o700 }); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`A sweep ledger for '${branch}' already exists at ${directory}; use sweep record or sweep report.`);
+    throw error;
+  }
+  try {
+    repos.forEach((repo, index) => appendUpdate(directory, repo, initial[index]!));
+    // Written last: list and report treat a directory without sweep.json as absent.
+    writeJson(path.join(directory, "sweep.json"), sweep);
+  } catch (error) {
+    // This call created the directory, so a failed start leaves nothing behind to block a retry.
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+  return report(sweep, loadEntries(directory, sweep));
 }
 
 function resolveRepo(sweep: Sweep, name: string): string {
@@ -272,23 +276,12 @@ function resolveRepo(sweep: Sweep, name: string): string {
   return repo;
 }
 
-/** Apply an update to one repository's entry. A new status without a reason clears the old reason. */
-export function recordEntry(root: string, branch: string, name: string, update: EntryUpdate, now = new Date(), lockWaitMs = LOCK_WAIT_MS): RepoEntry {
+/** Record an update to one repository's entry and return the entry it produces. */
+export function recordEntry(root: string, branch: string, name: string, update: EntryUpdate, now = new Date()): RepoEntry {
   const { directory, sweep } = loadSweep(root, branch);
   const repo = resolveRepo(sweep, name);
-  const file = entryFile(directory, repo);
-  return withLock(file, lockWaitMs, () => {
-    const entry = readJson<RepoEntry>(file);
-    const at = now.toISOString();
-    const { notes = [], events = [], ...fields } = update;
-    const next: Record<string, unknown> = { ...entry, ...fields };
-    if (update.status !== undefined && update.reason === undefined) delete next.reason;
-    next.notes = [...entry.notes, ...notes];
-    next.events = [...entry.events, ...events.map(event => ({ ...event, at }))];
-    next.updatedAt = at;
-    writeJson(file, next);
-    return next as unknown as RepoEntry;
-  });
+  appendUpdate(directory, repo, { ...update, at: now.toISOString() });
+  return loadEntry(directory, repo);
 }
 
 export function sweepReport(root: string, branch: string): SweepReport {
