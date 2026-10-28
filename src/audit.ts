@@ -1,0 +1,330 @@
+import { spawnSync } from "node:child_process";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
+import path from "node:path";
+import type { CheckoutStatus } from "./checkouts";
+import { git } from "./git";
+import { checkoutPath } from "./manifest";
+
+const AGENT_TOOL = "@a2f0/agent-tool";
+/**
+ * The oldest pin the sweep rules support: 0.1.21 provides `branch create`,
+ * `branch push`, `pr checks --wait`, and `repo cleanup` with local pruning, so
+ * guidance no longer carries fallbacks for older pins.
+ */
+export const MINIMUM_AGENT_TOOL = "0.1.21";
+
+export type Outcome = { readonly status: "pass" } | { readonly status: "fail" | "skip"; readonly detail: string };
+
+/** One checkout as rules see it: its files, tracked paths, and package manifest. */
+export interface Checkout {
+  readonly repo: string;
+  readonly directory: string;
+  read(file: string): string | undefined;
+  exists(file: string): boolean;
+  tracked(...pathspecs: string[]): string[];
+  readonly packageJson?: Record<string, unknown>;
+}
+
+export interface AuditContext {
+  /** The registry's latest version of a package; only remote rules call it. */
+  latest(name: string): string;
+}
+
+export interface Rule {
+  readonly id: string;
+  readonly summary: string;
+  /** The guidance that defines the standard. */
+  readonly source: string;
+  /** Needs the network; runs only with --remote. */
+  readonly remote?: true;
+  check(checkout: Checkout, context: AuditContext): Outcome;
+}
+
+const pass: Outcome = { status: "pass" };
+const fail = (detail: string): Outcome => ({ status: "fail", detail });
+const skip = (detail: string): Outcome => ({ status: "skip", detail });
+const problems = (list: string[]): Outcome => (list.length === 0 ? pass : fail(list.join("; ")));
+
+function object(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function json(source: string | undefined): Record<string, unknown> | undefined {
+  if (source === undefined) return undefined;
+  try { return object(JSON.parse(source)); } catch { return undefined; }
+}
+
+function dependency(manifest: Record<string, unknown> | undefined, name: string): string | undefined {
+  for (const field of ["devDependencies", "dependencies"]) {
+    const version = object(manifest?.[field])?.[name];
+    if (typeof version === "string") return version;
+  }
+  return undefined;
+}
+
+/** agent-tool publishes itself; its checkout runs the source CLI instead of a pin. */
+function isProducer(checkout: Checkout): boolean { return checkout.packageJson?.name === AGENT_TOOL; }
+
+function compareVersions(left: string, right: string): number {
+  const a = left.split(".").map(Number);
+  const b = right.split(".").map(Number);
+  for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index]! - b[index]!;
+  return 0;
+}
+
+function nonBlankLines(source: string): string[] { return source.split("\n").map(line => line.trim()).filter(Boolean); }
+
+/** Markdown headings outside fenced code blocks. */
+function headings(source: string): string[] {
+  let fenced = false;
+  const found: string[] = [];
+  for (const line of source.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    else if (!fenced && /^#{1,6}\s/.test(line)) found.push(line.trim());
+  }
+  return found;
+}
+
+/**
+ * Guidance that a shared command replaced. Matrix stopped carrying these
+ * fallbacks once every checkout pinned MINIMUM_AGENT_TOOL; a hit in a
+ * checkout's own Markdown is stale guidance. Patterns are POSIX extended
+ * regular expressions for `git grep -E`.
+ */
+export const SUPERSEDED = [
+  { id: "review-reply-endpoint", pattern: "pulls/([^/[:space:]`]+/)?comments/[^/[:space:]`]+/replies", replacement: "agent-tool pr threads reply" },
+  { id: "untracked-branch-switch", pattern: "git switch --no-track", replacement: "agent-tool branch create" },
+  { id: "pr-checks-watch", pattern: "gh pr checks --watch", replacement: "agent-tool pr checks --wait" },
+  { id: "push-head-upstream", pattern: "git push (-u|--set-upstream) origin HEAD", replacement: "agent-tool branch push <reviewed-head> --remote origin" },
+  { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup" },
+] as const;
+
+function managedSkills(checkout: Checkout): string[] {
+  return Object.keys(object(json(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
+}
+
+const ONBOARDING = "AGENTS.md#onboarding-a-repository";
+
+export const RULES: readonly Rule[] = [
+  {
+    id: "agents-md",
+    summary: "AGENTS.md holds the repository's agent guidance",
+    source: ONBOARDING,
+    check: checkout => (checkout.tracked("AGENTS.md").length > 0 ? pass : fail("no tracked AGENTS.md at the root")),
+  },
+  {
+    id: "no-claude-md",
+    summary: "No CLAUDE.md; Claude Code reads AGENTS.md when none exists",
+    source: ONBOARDING,
+    check: checkout => {
+      const files = checkout.tracked(":(glob)**/CLAUDE.md");
+      return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
+    },
+  },
+  {
+    id: "ds-store-ignored",
+    summary: "The root .gitignore lists .DS_Store as a plain pattern",
+    source: ONBOARDING,
+    check: checkout => {
+      const lines = (checkout.read(".gitignore") ?? "").split("\n").map(line => line.trim());
+      return lines.includes(".DS_Store") || lines.includes("**/.DS_Store") ? pass : fail("root .gitignore does not list .DS_Store");
+    },
+  },
+  {
+    id: "agent-tool-pin",
+    summary: `@a2f0/agent-tool is pinned exactly, at ${MINIMUM_AGENT_TOOL} or newer, with agent-tool.json and managed skills`,
+    source: ONBOARDING,
+    check: checkout => {
+      if (isProducer(checkout)) return skip("publishes agent-tool and runs its source CLI");
+      const found: string[] = [];
+      const pin = dependency(checkout.packageJson, AGENT_TOOL);
+      if (pin === undefined) found.push("package.json does not depend on @a2f0/agent-tool");
+      else if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(pin)) found.push(`pin '${pin}' is not an exact version`);
+      else if (compareVersions(pin, MINIMUM_AGENT_TOOL) < 0) found.push(`pins ${pin}, older than ${MINIMUM_AGENT_TOOL}`);
+      if (!checkout.exists("agent-tool.json")) found.push("no agent-tool.json");
+      if (!checkout.exists(".agent-tool-skills.json")) found.push("no .agent-tool-skills.json; run agent-tool skills install --apply");
+      return problems(found);
+    },
+  },
+  {
+    id: "agent-tool-latest",
+    summary: "The agent-tool pin is the latest published release",
+    source: "docs/dependency-upgrades.md",
+    remote: true,
+    check: (checkout, context) => {
+      if (isProducer(checkout)) return skip("publishes agent-tool");
+      const pin = dependency(checkout.packageJson, AGENT_TOOL);
+      if (pin === undefined) return skip("does not pin agent-tool");
+      const latest = context.latest(AGENT_TOOL);
+      return pin === latest ? pass : fail(`pins ${pin}; latest is ${latest}`);
+    },
+  },
+  {
+    id: "output-capture",
+    summary: "agent:run and agent:logs scripts, and an Output capture section in AGENTS.md",
+    source: "AGENTS.md#output-capture",
+    check: checkout => {
+      const found: string[] = [];
+      const scripts = object(checkout.packageJson?.scripts) ?? {};
+      if (checkout.packageJson === undefined) found.push("no root package.json for the agent:run and agent:logs scripts");
+      else for (const name of ["agent:run", "agent:logs"]) if (typeof scripts[name] !== "string") found.push(`no ${name} script`);
+      const guidance = checkout.read("AGENTS.md");
+      if (guidance !== undefined) {
+        const sections = headings(guidance).filter(heading => /^#{2,}\s/.test(heading));
+        // An AGENTS.md without sections carries the same text as a paragraph.
+        if (sections.length > 0 && !sections.some(heading => /^#{2,}\s+Output capture\s*$/i.test(heading))) found.push("AGENTS.md has no Output capture section");
+        for (const name of ["agent:run", "agent:logs"]) if (!guidance.includes(name)) found.push(`AGENTS.md does not mention ${name}`);
+      }
+      return problems(found);
+    },
+  },
+  {
+    id: "readme-title",
+    summary: "The README's H1 is the plain project name, with no link and no link line after it",
+    source: "AGENTS.md#readme-files",
+    check: checkout => {
+      const readme = checkout.read("README.md");
+      if (readme === undefined) return fail("no README.md");
+      const [first, second] = nonBlankLines(readme);
+      if (!first || !/^#\s+\S/.test(first)) return fail("README.md does not start with an H1");
+      if (/\]\(|<https?:|https?:\/\//.test(first)) return fail(`H1 '${first}' contains a link`);
+      if (second && /^(\[[^\]]*\]\([^)]*\)|<https?:[^>]*>|https?:\/\/\S+)$/.test(second)) return fail(`a standalone link line follows the H1: '${second}'`);
+      return pass;
+    },
+  },
+  {
+    id: "readme-quick-start",
+    summary: "The README has a Quick start section",
+    source: "AGENTS.md#readme-files",
+    check: checkout => {
+      const readme = checkout.read("README.md");
+      if (readme === undefined) return fail("no README.md");
+      return headings(readme).some(heading => /^#{2,}\s+Quick start\s*$/i.test(heading)) ? pass : fail("README.md has no Quick start section");
+    },
+  },
+  {
+    id: "readme-agent-free",
+    summary: "The README carries no instructions for coding agents",
+    source: "AGENTS.md#readme-files",
+    check: checkout => {
+      if (isProducer(checkout)) return skip("its product is agent tooling");
+      const readme = checkout.read("README.md");
+      if (readme === undefined) return skip("no README.md");
+      const matches = readme.match(/agent:run|agent:logs|\.(?:claude|agents)\/skills|^#+\s+Output capture/gim) ?? [];
+      const mentions = [...new Set(matches.map(match => match.replace(/^#+\s+/, "")))];
+      return mentions.length === 0 ? pass : fail(`README.md mentions ${mentions.join(", ")}`);
+    },
+  },
+  {
+    id: "brand-images",
+    summary: "Brand images render from assets/brand/logo.svg through agent-tool.json, with no committed rasters",
+    source: "AGENTS.md#brand-images",
+    check: checkout => {
+      if (!checkout.exists("assets/brand")) return skip("no assets/brand");
+      const found: string[] = [];
+      if (!checkout.exists("assets/brand/logo.svg")) found.push("no assets/brand/logo.svg");
+      if (!object(json(checkout.read("agent-tool.json"))?.images)) found.push("agent-tool.json declares no images");
+      const rasters = checkout.tracked("assets/brand").filter(file => /\.(png|ico|icns|jpe?g|gif|webp|bmp|tiff?)$/i.test(file));
+      if (rasters.length > 0) found.push(`committed rasters: ${rasters.join(", ")}`);
+      return problems(found);
+    },
+  },
+  {
+    id: "superseded-guidance",
+    summary: "Markdown outside managed skills names no command a shared command replaced",
+    source: "docs/audit.md#superseded-guidance",
+    check: checkout => {
+      const exclusions = managedSkills(checkout).map(file => `:(exclude,literal)${file}`);
+      const found: string[] = [];
+      for (const entry of SUPERSEDED) {
+        const result = git(checkout.directory, ["grep", "-n", "-I", "-E", "-e", entry.pattern, "--", "*.md", ...exclusions]);
+        if (result.status === 1) continue;
+        if (result.status !== 0) throw new Error(`git grep failed in ${checkout.repo}: ${result.stderr}`);
+        const hits = result.stdout.split("\n").map(line => line.split(":").slice(0, 2).join(":"));
+        found.push(`${entry.id} at ${hits.slice(0, 5).join(", ")}${hits.length > 5 ? ` and ${hits.length - 5} more` : ""} (use ${entry.replacement})`);
+      }
+      return problems(found);
+    },
+  },
+];
+
+function isFile(file: string): boolean {
+  try { return lstatSync(file).isFile(); } catch { return false; }
+}
+
+function openCheckout(repo: string, directory: string): Checkout {
+  const read = (file: string) => (isFile(path.join(directory, file)) ? readFileSync(path.join(directory, file), "utf8") : undefined);
+  return {
+    repo,
+    directory,
+    read,
+    exists: file => existsSync(path.join(directory, file)),
+    tracked: (...pathspecs) => {
+      const result = git(directory, ["ls-files", "-z", "--", ...pathspecs]);
+      if (result.status !== 0) throw new Error(`git ls-files failed in ${repo}: ${result.stderr}`);
+      return result.stdout.split("\0").filter(Boolean);
+    },
+    packageJson: json(read("package.json")),
+  };
+}
+
+export interface CheckoutAudit {
+  readonly repo: string;
+  readonly path: string;
+  readonly branch?: string | null;
+  readonly head?: string;
+  readonly error?: string;
+  readonly failed: Array<{ rule: string; detail: string }>;
+  readonly skipped: Array<{ rule: string; detail: string }>;
+}
+
+export interface Audit {
+  /** True when every selected rule passed or was skipped in every present checkout. */
+  readonly ok: boolean;
+  readonly rules: Array<Pick<Rule, "id" | "summary" | "source">>;
+  /** Failing repositories by rule. */
+  readonly failures: Record<string, string[]>;
+  readonly checkouts: CheckoutAudit[];
+}
+
+export function selectRules(ids: string[], remote: boolean): Rule[] {
+  for (const id of ids) if (!RULES.some(rule => rule.id === id)) throw new Error(`Unknown audit rule '${id}'. Rules: ${RULES.map(rule => rule.id).join(", ")}.`);
+  return RULES.filter(rule => (ids.length > 0 ? ids.includes(rule.id) : true) && (remote || !rule.remote || ids.includes(rule.id)));
+}
+
+/** Check each checkout's working tree against the selected rules; reads local files only unless a remote rule runs. */
+export function audit(root: string, repos: string[], rules: Rule[], statusOf: (repo: string) => CheckoutStatus, context: AuditContext): Audit {
+  const failures: Record<string, string[]> = {};
+  const checkouts = repos.map((repo): CheckoutAudit => {
+    const status = statusOf(repo);
+    const base = { repo, path: status.path, failed: [], skipped: [] };
+    if (status.error) return { ...base, error: status.error };
+    if (!status.present) return { ...base, error: "checkout missing; run sync" };
+    const checkout = openCheckout(repo, checkoutPath(root, repo));
+    const result: CheckoutAudit = { ...base, branch: status.branch, head: status.head, failed: [], skipped: [] };
+    for (const rule of rules) {
+      const outcome = rule.check(checkout, context);
+      if (outcome.status === "fail") {
+        result.failed.push({ rule: rule.id, detail: outcome.detail });
+        (failures[rule.id] ??= []).push(repo);
+      } else if (outcome.status === "skip") result.skipped.push({ rule: rule.id, detail: outcome.detail });
+    }
+    return result;
+  });
+  return {
+    ok: checkouts.every(checkout => !checkout.error && checkout.failed.length === 0),
+    rules: rules.map(({ id, summary, source }) => ({ id, summary, source })),
+    failures,
+    checkouts,
+  };
+}
+
+/** Ask the registry through Bun, which matrix already requires, for a package's latest version. */
+export function registryLatest(name: string): string {
+  const result = spawnSync(process.execPath, ["info", name, "version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const version = result.stdout?.trim().split("\n").pop()?.trim();
+  if (result.error || result.status !== 0 || !version || !/^[0-9]+\.[0-9]+\.[0-9]+/.test(version)) {
+    throw new Error(`Could not read the latest ${name} from the registry: ${result.error?.message ?? (result.stderr.trim() || `exit ${result.status}`)}`);
+  }
+  return version;
+}

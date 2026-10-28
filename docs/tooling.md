@@ -24,8 +24,9 @@ Keep application builds, tests, affected-package selection, infrastructure
 previews, and deployment commands in their repositories. Shared validation
 reporting records what those commands did; it does not choose a smaller suite or
 treat a cached success as evidence for a changed checkout. Keep matrix's manifest,
-checkout synchronization, sweep scheduling, [sweep ledgers and retrospectives](sweeps.md),
-and cross-repository release order here.
+checkout synchronization, the [checkout audit](audit.md), sweep scheduling,
+[sweep ledgers and retrospectives](sweeps.md), and cross-repository release
+order here.
 
 ## Script locations
 
@@ -188,7 +189,7 @@ Run these directly instead:
 
 - Commands whose output is the decision: independent reviews,
   `versions prepare`, audits, infrastructure plans and previews, and matrix
-  `sync` and `status`. A receipt would hide the result.
+  `sync`, `status`, and `audit`. A receipt would hide the result.
 - `agent-tool run-group` checks, which capture each step themselves and print
   a compact report of per-step receipts.
 - Interactive tools, programs that need a terminal, and persistent servers or
