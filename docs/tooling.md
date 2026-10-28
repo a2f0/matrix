@@ -105,8 +105,8 @@ platform directory, or a Worker, goes in a README in that folder, linked from
 the root. Package READMEs follow the same heading and first-paragraph rules.
 
 READMEs carry no instructions for coding agents. Managed and repository-owned
-skills, output capture with `agent:run`, harness notes, and review and shipping
-policy belong in `AGENTS.md`. A README need not link to `AGENTS.md`. A project
+skills, [output capture](#output-capture), harness notes, and review and
+shipping policy belong in `AGENTS.md`. A README need not link to `AGENTS.md`. A project
 whose product is agent tooling, like agent-tool, still describes that product in
 its README.
 
@@ -140,6 +140,7 @@ must exercise its relocated default paths as well as explicit path overrides.
 | Every CI entry and exact-head merge readiness | `agent-tool pr checks --wait`, `agent-tool pr preflight` |
 | Review-thread replies and resolution | `agent-tool pr threads` |
 | Version publication decisions and verified artifacts | `agent-tool release plan`, `agent-tool release verify` |
+| Compact receipts and private logs for noisy commands | `agent-tool run`, `agent-tool logs` |
 | Sequential validation receipts and durable history | `agent-tool run-group`, `agent-tool runs list` |
 | Conditional CI aggregate results | `agent-tool ci gate` |
 | Binary-policy checks | `agent-tool checks binaries` |
@@ -158,3 +159,68 @@ The root `bun run check` group preserves the same typecheck, test, and skill-dri
 checks as CI. Rich parallel test runners, application-specific deployment guards,
 full commitlint rules, and stronger binary or atomic-cleanup policies remain
 repository-owned when the shared command cannot represent their guarantees.
+
+## Output capture
+
+Output capture keeps the output of noisy commands out of an agent's context
+without losing the evidence. Agent-tool's `run` command writes a command's
+stdout and stderr to a private log, preserves its exit status, and prints a
+one-line JSON receipt, adding a bounded excerpt of the log's tail when the
+command fails. Its `logs` command reads a bounded, terminal-safe tail of a log.
+The
+[agent-tool reference](https://github.com/a2f0/agent-tool/blob/4f04d2f5d0b308fb5755edc984e06c3983cd3933/docs/reference.md#compact-command-output)
+defines both, including excerpt limits, log permissions, and signal handling.
+
+Every managed repository exposes them as two package scripts:
+
+```json
+"agent:run": "agent-tool run",
+"agent:logs": "agent-tool logs"
+```
+
+A repository may keep an equivalent invocation it already uses, such as
+`bunx --bun --no-install agent-tool run`; the script names are the contract.
+
+Capture finite commands whose output is long and seldom useful on success:
+dependency installs, builds, test suites, linters and formatters, setup
+scripts, and Git commands that run hooks, such as `agent-tool branch push`.
+Run these directly instead:
+
+- Commands whose output is the decision: independent reviews,
+  `versions prepare`, audits, infrastructure plans and previews, and matrix
+  `sync` and `status`. A receipt would hide the result.
+- `agent-tool run-group` checks, which capture each step themselves and print
+  a compact report of per-step receipts.
+- Interactive tools, programs that need a terminal, and persistent servers or
+  watchers.
+
+A zero exit status is not the whole result. Before accepting a check, inspect
+the warnings, coverage, timings, and artifacts it must produce with
+`agent:logs` or a targeted search of the log, rather than rereading a whole
+success log. Never narrow a suite, lower coverage, or silence warnings to save
+output.
+
+### Agent guidance
+
+Each repository's `AGENTS.md` has an `Output capture` section adapted from the
+text below, with the repository's own commands as examples and local rules,
+such as verification reports or hook receipts, after it. An `AGENTS.md`
+without sections carries the same text as a paragraph. READMEs do not mention
+output capture.
+
+```markdown
+## Output capture
+
+Run finite, noisy commands, such as installs, builds, tests, linters, and Git
+commands that run hooks, through
+`bun run agent:run --label <name> -- <command> [args...]`. It keeps complete
+output in a private log, preserves the exit status, and prints a compact
+receipt, with a bounded excerpt of the log on failure. Read more with
+`bun run agent:logs <log-path>`, raising `--tail-lines` or `--max-bytes` as
+needed, or with a targeted search of the log. A zero exit does not rule out
+warnings: inspect required warnings, timings, and artifacts before accepting a
+check. Run reviews, version preparation, audits, infrastructure previews, and
+run-group checks directly so their results stay visible, and run interactive
+tools and servers directly too. Never narrow a suite or silence warnings to
+reduce output.
+```

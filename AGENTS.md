@@ -20,15 +20,18 @@ Use the Bun version pinned in `.mise.toml`. In agent shells, put its
 Validate with `bun run check`, which records typecheck, tests, and managed-skill
 checks through the shared validation group. CI also validates the actual branch
 name using `bun run lint:branch-name <name>`.
-Capture noisy finite commands with the pinned harness, for example
-`bun run agent:run --label tests -- bun test`. It preserves exit status and full
-private logs while returning a compact receipt and a bounded failure excerpt.
-Use `bun run agent-tool logs <log-path>` (bounded with `--max-bytes` and
-`--tail-lines`) or a targeted search for more evidence, and
-`bun run agent-tool runs list` for durable group reports; inspect required
-warnings, timings, and artifacts before accepting a check.
-Keep review verdicts and structured decision output, including matrix sync/status
-results, visible. Do not wrap interactive tools or persistent servers.
+Run finite, noisy commands through
+`bun run agent:run --label <name> -- <command> [args...]`, for example
+`bun run agent:run --label tests -- bun test`. It keeps complete output in a
+private log, preserves the exit status, and prints a compact receipt, with a
+bounded excerpt of the log on failure. Read more with
+`bun run agent:logs <log-path>`, raising `--tail-lines` or `--max-bytes` as
+needed, or with a targeted search; inspect required warnings, timings, and
+artifacts before accepting a check. Run `bun run check` directly, since it
+prints its own group report (`bun run agent-tool runs list` lists earlier
+ones), and keep review verdicts and structured decision output, including
+matrix sync/status results, visible. Do not wrap interactive tools or
+persistent servers.
 Ship with the installed `ship-pr` skill; title and required CI policy is in
 `agent-tool.json`. After updating the agent-tool pin, run `bun run agents:sync`
 and commit the lockfile, skills, and `.agent-tool-skills.json` together. Do not
@@ -59,6 +62,9 @@ fine. Change that folder only on request, and back it up first.
    Several default branches have no protection or rulesets, and there
    `agent-tool pr merge` is the only gate, so put the check in a job that
    `merge.requiredChecks` names. Do not add protection while onboarding.
+   Add the `agent:run` and `agent:logs` package scripts and an
+   `Output capture` section in `AGENTS.md`, as
+   [output capture](#output-capture) describes.
 3. Write `agent-tool.json` from the repository's real workflow and job names
    and its existing title rules. Read merge rules from both classic branch
    protection (`gh api repos/{owner}/{repo}/branches/{branch}/protection`) and
@@ -101,6 +107,18 @@ and validation mechanics in agent-tool; keep repository-specific commands and
 policy in the checkout. Update every caller when moving a script, including CI,
 hooks, package scripts, tests, native build references, and repository-owned
 skills. Preserve documented package-script names as the normal entrypoints.
+
+## Output capture
+
+Every managed repository runs noisy finite commands through agent-tool's `run`
+command, which keeps full output in a private log and returns a compact
+receipt, and reads logs back with `logs`. They are exposed as the `agent:run`
+and `agent:logs` package scripts, and each `AGENTS.md` has an `Output capture`
+section adapted from the text in
+[docs/tooling.md](docs/tooling.md#output-capture), which also says what to
+capture and what to keep visible. READMEs never mention it. Bring a newly
+onboarded repository to it, and change the shared text there before diverging
+in one repository.
 
 ## Brand images
 
