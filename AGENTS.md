@@ -26,7 +26,11 @@ Use the Bun version pinned in `.mise.toml`. In agent shells, put its
 
 Validate with `bun run check`, which records typecheck, tests, and managed-skill
 checks through the shared validation group. CI also validates the actual branch
-name using `bun run lint:branch-name <name>`.
+name using `bun run lint:branch-name <name>`. The tests check that every link,
+command, and audit rule the docs name exists, that matrix passes its own audit,
+and that this file stays within its word budget; make room for new guidance by
+moving detail into `docs/` or replacing a rule with a command, not by raising
+the budget.
 Run finite, noisy commands through
 `bun run agent:run --label <name> -- <command> [args...]`, for example
 `bun run agent:run --label tests -- bun test`. It keeps complete output in a
@@ -224,13 +228,10 @@ directories can make delegated agents stop for permission prompts.
    compatibility and infrastructure-preview gates. For a checkout without
    agent-tool, use the workspace's
    [plan helper](docs/dependency-upgrades.md#plan-helper-for-checkouts-without-agent-tool).
-   Keep top-level READMEs focused on purpose, setup, and normal usage. Put reusable
-   upgrade procedures and active constraints in the checkout's existing dependency
-   maintenance doc, linked briefly from README and AGENTS.md; create a focused doc
-   only when there is durable content. Reconcile constraints in place and remove
-   resolved entries. Put run-specific inventories, audits, validation, previews,
-   and skipped-group evidence in the upgrade PR and any requested sweep issue,
-   not an accumulating repository journal. See `docs/dependency-upgrades.md`.
+   Keep upgrade procedures, constraints, and evidence where
+   [dependency maintenance](docs/dependency-upgrades.md#where-information-belongs)
+   puts them: reusable procedure in the checkout's maintenance doc, run evidence
+   in the PR, never an accumulating journal.
 4. Use one branch name for the whole sweep in the `<type>/<topic>` form with a
    Conventional Commits type, such as `chore/<topic>`; several repositories
    reject other branch names. Create it from the synced default branch with
@@ -284,15 +285,11 @@ directories can make delegated agents stop for permission prompts.
    `bun run --cwd <workspace> sweep record`. Finish with
    `bun run sweep report <branch>`.
 8. After the PRs merge, use the `reset` skill in each checkout, then run
-   `bun run sync`. The shared `agent-tool repo cleanup <pr> <shipped-head> --apply`
-   verifies that the merge commit is on the default branch and the feature refs
-   match the shipped head, then prunes the shipped local branch even after a
-   squash merge or when its remote branch is already gone. Verify the local
-   feature ref is absent before reporting cleanup complete; keep-branch preserves
-   the feature refs. Remote ref deletion uses REST to avoid full pre-push gates
-   but cannot atomically bind deletion to an expected SHA. A checkout requiring an
-   atomic lease must retain its stronger cleanup procedure. Reinstall documented
-   dependencies and hooks after returning to the default branch.
+   `bun run sync`. Its `agent-tool repo cleanup <pr> <shipped-head> --apply`
+   prunes the shipped branches; verify the local feature ref is gone unless the
+   request keeps it. A checkout requiring an atomic lease keeps its stronger
+   cleanup procedure. Reinstall documented dependencies and hooks after
+   returning to the default branch.
 9. Before the final report, run `bun run sweep retro`. Give each recurring
    cause a resolution in the repository that owns it: a fix, guidance, or a
    recorded decision, shipped as its own PR or listed as a follow-up in the

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
 import { git } from "./git";
 import { checkoutPath } from "./manifest";
+import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 
 const AGENT_TOOL = "@a2f0/agent-tool";
 /**
@@ -70,60 +71,6 @@ function compareVersions(left: string, right: string): number {
   const b = right.split(".").map(Number);
   for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index]! - b[index]!;
   return 0;
-}
-
-function nonBlankLines(source: string): string[] { return source.split("\n").map(line => line.trim()).filter(Boolean); }
-
-/**
- * Markdown headings outside fenced code blocks. As in CommonMark, a fence closes
- * only on the same character repeated at least as many times, so a longer fence
- * can show shorter ones as examples.
- */
-interface Heading { readonly level: number; readonly text: string; readonly line: number }
-
-function headings(source: string): Heading[] {
-  let fence: string | undefined;
-  // The lines of the paragraph being read, which a Setext underline turns into a heading.
-  let paragraph: { lines: string[]; start: number } | undefined;
-  const found: Heading[] = [];
-  for (const [index, line] of source.split("\n").entries()) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence === undefined) {
-      const heading = /^ {0,3}(#{1,6})(?:\s+(.*?))?(?:\s+#+)?\s*$/.exec(line);
-      const underline = /^ {0,3}(=+|-+)\s*$/.exec(line)?.[1];
-      if (marker) fence = marker;
-      // An ATX heading may end with closing hashes, which are not part of its text.
-      else if (heading) found.push({ level: heading[1]!.length, text: heading[2] ?? "", line: index });
-      // = underlines a level 1 heading and - a level 2 one; the heading is the whole paragraph.
-      else if (underline && paragraph) found.push({ level: underline[0] === "=" ? 1 : 2, text: paragraph.lines.join(" "), line: paragraph.start });
-      if (marker || heading || underline || !line.trim()) paragraph = undefined;
-      else if (paragraph) paragraph.lines.push(line.trim());
-      else paragraph = { lines: [line.trim()], start: index };
-    } else if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) {
-      fence = undefined;
-    }
-  }
-  return found;
-}
-
-function hasSection(source: string, name: string): boolean { return section(source, name) !== undefined; }
-
-/** A section's body: the lines after its heading, up to the next heading at its level or above. */
-function section(source: string, name: string): string | undefined {
-  const all = headings(source);
-  const start = all.findIndex(heading => heading.level >= 2 && heading.text.toLowerCase() === name.toLowerCase());
-  if (start === -1) return undefined;
-  const end = all.slice(start + 1).find(heading => heading.level <= all[start]!.level)?.line;
-  return source.split("\n").slice(all[start]!.line + 1, end).join("\n");
-}
-
-/** Inline, reference, and autolinks, and shortcut references the document defines. */
-function hasLink(text: string, document: string): boolean {
-  if (/\]\(|\]\[|<https?:|https?:\/\//.test(text)) return true;
-  return [...text.matchAll(/\[([^\]]+)\]/g)].some(([, label]) => {
-    const escaped = label!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`^ {0,3}\\[${escaped}\\]:`, "im").test(document);
-  });
 }
 
 /**
@@ -282,31 +229,37 @@ export const RULES: readonly Rule[] = [
     id: "superseded-guidance",
     summary: "Markdown outside managed skills names no command a shared command replaced",
     source: "docs/audit.md#superseded-guidance",
-    check: checkout => {
-      const exclusions = managedSkills(checkout).map(file => `:(exclude,literal)${file}`);
-      const found: string[] = [];
-      for (const entry of SUPERSEDED) {
-        // -z separates path, line number, and text with NUL, so a path may contain colons.
-        const result = git(checkout.directory, ["grep", "-z", "-n", "-I", "-E", "-e", entry.pattern, "--", "*.md", ...exclusions]);
-        if (result.status === 1) continue;
-        if (result.status !== 0) throw new Error(`git grep failed in ${checkout.repo}: ${result.stderr}`);
-        const hits = result.stdout.split("\n")
-          .map(line => line.split("\0"))
-          .filter(([, , ...text]) => !entry.exempt?.test(text.join("\0")))
-          .map(([file, line]) => `${file}:${line}`);
-        if (hits.length === 0) continue;
-        found.push(`${entry.id} at ${hits.slice(0, 5).join(", ")}${hits.length > 5 ? ` and ${hits.length - 5} more` : ""} (use ${entry.replacement})`);
-      }
-      return problems(found);
-    },
+    check: checkout => problems(supersededGuidance(checkout)),
   },
 ];
+
+/**
+ * Superseded commands in a checkout's tracked Markdown, skipping managed skills
+ * and any other paths given, one finding per pattern.
+ */
+export function supersededGuidance(checkout: Checkout, skip: string[] = []): string[] {
+  const exclusions = [...managedSkills(checkout), ...skip].map(file => `:(exclude,literal)${file}`);
+  const found: string[] = [];
+  for (const entry of SUPERSEDED) {
+    // -z separates path, line number, and text with NUL, so a path may contain colons.
+    const result = git(checkout.directory, ["grep", "-z", "-n", "-I", "-E", "-e", entry.pattern, "--", "*.md", ...exclusions]);
+    if (result.status === 1) continue;
+    if (result.status !== 0) throw new Error(`git grep failed in ${checkout.repo}: ${result.stderr}`);
+    const hits = result.stdout.split("\n")
+      .map(line => line.split("\0"))
+      .filter(([, , ...text]) => !entry.exempt?.test(text.join("\0")))
+      .map(([file, line]) => `${file}:${line}`);
+    if (hits.length === 0) continue;
+    found.push(`${entry.id} at ${hits.slice(0, 5).join(", ")}${hits.length > 5 ? ` and ${hits.length - 5} more` : ""} (use ${entry.replacement})`);
+  }
+  return found;
+}
 
 function isFile(file: string): boolean {
   try { return lstatSync(file).isFile(); } catch { return false; }
 }
 
-function openCheckout(repo: string, directory: string): Checkout {
+export function openCheckout(repo: string, directory: string): Checkout {
   const read = (file: string) => (isFile(path.join(directory, file)) ? readFileSync(path.join(directory, file), "utf8") : undefined);
   return {
     repo,
