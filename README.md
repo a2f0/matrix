@@ -34,6 +34,7 @@ bun run status
 | `bun run status [repo...]` | Report branch, local changes, and distance from origin's default branch |
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
 | `bun run audit [repo...] [--rule <id>]... [--remote]` | Check checkouts against the shared standards; `--remote` also compares agent-tool pins with the latest release |
+| `bun run health [--remote] [--markdown]` | Combine status, audit, discovery, and sweep friction into suggested next steps |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 | `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |
@@ -65,7 +66,9 @@ reinstall that checkout's dependencies, which `sync` never does.
 agent guidance, ignore rules, agent-tool adoption, output capture, README
 structure, brand images, and stale copies of commands that agent-tool replaced.
 It reports failing repositories by rule and never changes a checkout; see
-[checkout audit](docs/audit.md).
+[checkout audit](docs/audit.md). `health` rolls status, the audit, discovery,
+and recurring sweep friction into one report of suggested next steps, meant to
+run on a schedule; see [health report](docs/health.md).
 
 ## Managed repositories
 

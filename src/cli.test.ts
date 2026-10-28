@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { main, type Services } from "./cli";
 
 let root: string;
 
@@ -43,6 +44,8 @@ beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), "matrix-cli-"));
   const manifest = { schemaVersion: 1, protocol: "ssh", discover: { owner: "a2f0", visibility: "public", exclude: [] }, repos: ["a2f0/good", "a2f0/missing"] };
   writeFileSync(path.join(root, "matrix.json"), `${JSON.stringify(manifest)}\n`);
+  // Sweep ledgers live in the workspace's Git directory.
+  git(root, "init", "-q");
   checkout("good");
 });
 
@@ -53,4 +56,46 @@ test("audit exits zero only when every selected checkout passes", () => {
   expect(matrix("audit")).toMatchObject({ status: 1, output: { ok: false } });
   writeFileSync(path.join(root, "checkouts", "good", ".gitignore"), "node_modules/\n");
   expect(matrix("audit", "good", "--rule", "ds-store-ignored")).toMatchObject({ status: 1, output: { failures: { "ds-store-ignored": ["a2f0/good"] } } });
+});
+
+/** Services that record output and stand in for GitHub and the registry. */
+function fakeServices(overrides: Partial<Services> = {}) {
+  const writes: string[] = [];
+  const calls = { discover: 0, registry: 0 };
+  const services: Services = {
+    write: text => { writes.push(text); },
+    listOwnerRepos: () => { calls.discover++; return ["a2f0/good", "a2f0/missing", "a2f0/new"]; },
+    registryLatest: () => { calls.registry++; return "0.1.23"; },
+    ...overrides,
+  };
+  return { services, writes, calls };
+}
+
+test("health reports findings without the network unless asked, and exits zero", () => {
+  const offline = fakeServices({
+    listOwnerRepos: () => { throw new Error("health asked GitHub without --remote"); },
+    registryLatest: () => { throw new Error("health asked the registry without --remote"); },
+  });
+  expect(main(["health"], root, undefined, offline.services)).toBe(0);
+  const report = JSON.parse(offline.writes.join("")) as Record<string, unknown>;
+  expect(report).toMatchObject({ ok: false, remote: false, checkouts: { total: 2, ready: 1 }, audit: { failures: {}, unaudited: ["a2f0/missing"] } });
+  expect(report).not.toHaveProperty("discovery");
+  expect(report.suggestions).toEqual([
+    "Inspect a2f0/missing before the next sweep: checkout missing; run sync.",
+    // The fixture pins agent-tool without installing it.
+    "Reinstall dependencies in a2f0/good; their node_modules hold a different agent-tool than they pin.",
+  ]);
+
+  const online = fakeServices();
+  expect(main(["health", "--remote", "--markdown"], root, undefined, online.services)).toBe(0);
+  const markdown = online.writes.join("");
+  expect(online.calls).toEqual({ discover: 1, registry: 1 });
+  expect(markdown).toContain("- Audit (11 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
+  expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
+});
+
+test("health rejects arguments it does not take", () => {
+  expect(() => main(["health", "dnbm"], root, undefined, fakeServices().services)).toThrow("Usage: matrix health");
+  expect(() => main(["health", "--apply"], root, undefined, fakeServices().services)).toThrow("Unknown health option '--apply'.");
 });

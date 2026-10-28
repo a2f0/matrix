@@ -66,6 +66,10 @@ agent-tool pin; [docs/audit.md](docs/audit.md) maps each rule to its standard.
 When a change here adds such a standard, add its rule in the same change, or
 say in the PR why files cannot show it. When agent-tool replaces a documented
 command, add the old spelling to the audit's superseded patterns.
+`bun run health [--remote]` combines status, the audit, discovery, and sweep
+retro into suggested next steps ([docs/health.md](docs/health.md)); start there
+when a session has no specific task. Its suggestions are proposals: acting on
+one still needs a request that authorizes it.
 
 ## Onboarding a repository
 
