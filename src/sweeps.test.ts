@@ -75,6 +75,18 @@ describe("startSweep", () => {
     expect(start("chore/demo", ["a2f0/one", "a2f0/two", "A2F0/one"]).sweep.repos).toEqual(["a2f0/one", "a2f0/two"]);
   });
 
+  test("never reads another branch's ledger where the filesystem ignores case", () => {
+    start("chore/Fix", ["a2f0/one"]);
+    const folded = existsSync(path.join(sweepsDirectory(root), encodeURIComponent("chore/fix")));
+    if (folded) {
+      expect(() => recordEntry(root, "chore/fix", "one", { status: "merged" })).toThrow("belongs to 'chore/Fix', not 'chore/fix'");
+      expect(() => start("chore/fix", ["a2f0/one"])).toThrow("differs by more than case");
+    } else {
+      expect(() => recordEntry(root, "chore/fix", "one", { status: "merged" })).toThrow("No sweep ledger");
+    }
+    expect(sweepReport(root, "chore/Fix").repos[0]!.status).toBe("pending");
+  });
+
   test("keeps branches that differ only in separators apart", () => {
     start("chore/a-b", ["a2f0/one"]);
     start("chore-a/b", ["a2f0/two"], 1);

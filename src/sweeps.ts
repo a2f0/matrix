@@ -193,6 +193,8 @@ function loadSweep(root: string, branch: string): { directory: string; sweep: Sw
   if (!existsSync(file)) throw new Error(`No sweep ledger for '${branch}'; run sweep start.`);
   const sweep = readJson<Sweep>(file);
   if (sweep.schemaVersion !== 1) throw new Error(`${file} has unsupported schemaVersion ${String(sweep.schemaVersion)}.`);
+  // Case-insensitive filesystems, such as macOS's default, map chore/Fix and chore/fix to one directory.
+  if (sweep.branch !== branch) throw new Error(`The ledger at ${directory} belongs to '${sweep.branch}', not '${branch}'.`);
   return { directory, sweep };
 }
 
@@ -257,7 +259,7 @@ export function startSweep(root: string, branch: string, selected: string[], sta
   });
   mkdirSync(path.dirname(directory), { recursive: true, mode: 0o700 });
   try { mkdirSync(directory, { mode: 0o700 }); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`A sweep ledger for '${branch}' already exists at ${directory}; use sweep record or sweep report.`);
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`A sweep ledger already exists at ${directory}; use sweep record or sweep report, or choose a branch name that differs by more than case.`);
     throw error;
   }
   try {
