@@ -33,7 +33,7 @@ bun run status
 | `bun run sync [repo...]` | Clone missing checkouts, fetch all, fast-forward clean default branches |
 | `bun run status [repo...]` | Report branch, local changes, and distance from origin's default branch |
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
-| `bun run audit [repo...] [--rule id]... [--remote]` | Check checkouts against the shared standards; `--remote` also compares agent-tool pins with the latest release |
+| `bun run audit [repo...] [--rule <id>]... [--remote]` | Check checkouts against the shared standards; `--remote` also compares agent-tool pins with the latest release |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 | `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |
