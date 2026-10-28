@@ -72,6 +72,16 @@ describe("audit", () => {
       "agents-md": "no tracked AGENTS.md at the root",
       "no-claude-md": "tracked CLAUDE.md, packages/web/CLAUDE.md",
       "ds-store-ignored": "root .gitignore does not list .DS_Store",
+      "output-capture": "no AGENTS.md for the Output capture section",
+    });
+  });
+
+  test("reads the working tree, so an unstaged deletion fails", () => {
+    const repo = checkout("deleted");
+    rmSync(path.join(root, "checkouts", "deleted", "AGENTS.md"));
+    expect(failures(repo)).toMatchObject({
+      "agents-md": "AGENTS.md is tracked but missing from the working tree",
+      "output-capture": "no AGENTS.md for the Output capture section",
     });
   });
 
@@ -104,6 +114,8 @@ describe("audit", () => {
     expect(failures(checkout("linked", { "README.md": "# [demo](https://demo.example)\n\n## Quick start\n" }))["readme-title"]).toBe("H1 '# [demo](https://demo.example)' contains a link");
     expect(failures(checkout("link-line", { "README.md": "# demo\n<https://demo.example>\n\n## Quick start\n" }))["readme-title"]).toBe("a standalone link line follows the H1: '<https://demo.example>'");
     expect(failures(checkout("no-start", { "README.md": "# demo\n\n```md\n## Quick start\n```\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
+    expect(failures(checkout("nested", { "README.md": "# demo\n\n````md\n```sh\nbun install\n```\n## Quick start\n````\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
+    expect(failures(checkout("tilde", { "README.md": "# demo\n\n~~~\n```\n~~~\n\n## Quick start\n" }))).toEqual({});
     expect(failures(checkout("agentic", { "README.md": `${README}\n## Output capture\n\nUse agent:run.\n` }))["readme-agent-free"]).toBe("README.md mentions Output capture, agent:run");
   });
 

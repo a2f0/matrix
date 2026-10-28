@@ -74,13 +74,22 @@ function compareVersions(left: string, right: string): number {
 
 function nonBlankLines(source: string): string[] { return source.split("\n").map(line => line.trim()).filter(Boolean); }
 
-/** Markdown headings outside fenced code blocks. */
+/**
+ * Markdown headings outside fenced code blocks. As in CommonMark, a fence closes
+ * only on the same character repeated at least as many times, so a longer fence
+ * can show shorter ones as examples.
+ */
 function headings(source: string): string[] {
-  let fenced = false;
+  let fence: string | undefined;
   const found: string[] = [];
   for (const line of source.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    else if (!fenced && /^#{1,6}\s/.test(line)) found.push(line.trim());
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence === undefined) {
+      if (marker) fence = marker;
+      else if (/^ {0,3}#{1,6}\s/.test(line)) found.push(line.trim());
+    } else if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) {
+      fence = undefined;
+    }
   }
   return found;
 }
@@ -111,7 +120,10 @@ export const RULES: readonly Rule[] = [
     id: "agents-md",
     summary: "AGENTS.md holds the repository's agent guidance",
     source: ONBOARDING,
-    check: checkout => (checkout.tracked("AGENTS.md").length > 0 ? pass : fail("no tracked AGENTS.md at the root")),
+    check: checkout => {
+      if (checkout.tracked("AGENTS.md").length === 0) return fail("no tracked AGENTS.md at the root");
+      return checkout.read("AGENTS.md") === undefined ? fail("AGENTS.md is tracked but missing from the working tree") : pass;
+    },
   },
   {
     id: "no-claude-md",
@@ -170,7 +182,8 @@ export const RULES: readonly Rule[] = [
       if (checkout.packageJson === undefined) found.push("no root package.json for the agent:run and agent:logs scripts");
       else for (const name of ["agent:run", "agent:logs"]) if (typeof scripts[name] !== "string") found.push(`no ${name} script`);
       const guidance = checkout.read("AGENTS.md");
-      if (guidance !== undefined) {
+      if (guidance === undefined) found.push("no AGENTS.md for the Output capture section");
+      else {
         const sections = headings(guidance).filter(heading => /^#{2,}\s/.test(heading));
         // An AGENTS.md without sections carries the same text as a paragraph.
         if (sections.length > 0 && !sections.some(heading => /^#{2,}\s+Output capture\s*$/i.test(heading))) found.push("AGENTS.md has no Output capture section");
