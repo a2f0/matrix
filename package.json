@@ -14,6 +14,7 @@
     "status": "bun src/index.ts status",
     "discover": "bun src/index.ts discover",
     "audit": "bun src/index.ts audit",
+    "health": "bun src/index.ts health",
     "sweep": "bun src/index.ts sweep",
     "secrets:backup": "bash scripts/secrets/backupSecrets.sh",
     "secrets:deploy": "bun src/index.ts deploy-secrets",

@@ -1,8 +1,9 @@
 import { existsSync, writeSync } from "node:fs";
 import path from "node:path";
 import { audit, registryLatest, selectRules } from "./audit";
-import { checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
+import { type CheckoutStatus, checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
+import { assessHealth, markdownHealth } from "./health";
 import { cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
 import { deployAll, type Gh, runGh, secretsRoot } from "./secrets";
@@ -17,6 +18,8 @@ export const HELP = `Usage: matrix <command>
   discover [--apply]    Compare matrix.json with the owner's repositories; --apply adds new ones
   audit [repo...] [--rule id]... [--remote]
                         Check checkouts against matrix standards; --remote adds registry rules
+  health [--remote] [--markdown]
+                        Status, audit, discovery (--remote), and sweep retro as next steps
   deploy-secrets [repo...] [--apply]
                         Compare each repo's matrix-secrets ci/ files with its GitHub Actions
                         secrets and variables; --apply sets them (nothing is deleted)
@@ -38,6 +41,18 @@ common directory and are never committed.
 `;
 
 function output(value: unknown): void { writeSync(1, `${JSON.stringify(value, null, 2)}\n`); }
+
+/** Read each checkout's status once, however many reports ask for it. */
+function statusReader(root: string, manifest: Manifest): (repo: string) => CheckoutStatus {
+  const cache = new Map<string, CheckoutStatus>();
+  return repo => cache.get(repo) ?? cache.set(repo, checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol))).get(repo)!;
+}
+
+/** Ask the registry once per package, and only when a remote rule needs it. */
+function registry(): { latest(name: string): string } {
+  const latest = new Map<string, string>();
+  return { latest: name => latest.get(name) ?? latest.set(name, registryLatest(name)).get(name)! };
+}
 function usage(condition: boolean, message: string): void { if (!condition) throw new Error(message); }
 
 const RECORD_FLAGS = {
@@ -139,13 +154,25 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
   if (command === "audit") {
     const { positional, lists, booleans } = parseOptions(args, { rule: "list", remote: "boolean" }, "audit");
     const rules = selectRules(lists.rule ?? [], booleans.has("remote"));
-    const repos = selectRepos(manifest, positional);
-    const statusOf = (repo: string) => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol));
-    // Ask the registry once per package, and only when a remote rule needs it.
-    const latest = new Map<string, string>();
-    const result = audit(root, repos, rules, statusOf, { latest: name => latest.get(name) ?? latest.set(name, registryLatest(name)).get(name)! });
+    const result = audit(root, selectRepos(manifest, positional), rules, statusReader(root, manifest), registry());
     output(result);
     return result.ok ? 0 : 1;
+  }
+  if (command === "health") {
+    const { positional, booleans } = parseOptions(args, { remote: "boolean", markdown: "boolean" }, "health");
+    usage(positional.length === 0, "Usage: matrix health [--remote] [--markdown]");
+    const remote = booleans.has("remote");
+    const statusOf = statusReader(root, manifest);
+    const health = assessHealth({
+      statuses: manifest.repos.map(statusOf),
+      unmanaged: unmanagedCheckouts(root, manifest.repos),
+      audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry()),
+      retro: retro(root),
+      ...(remote && { discovery: planDiscovery(manifest, listOwnerRepos(manifest.discover)) }),
+    });
+    if (booleans.has("markdown")) writeSync(1, markdownHealth(health));
+    else output(health);
+    return 0;
   }
   if (command === "sweep") return sweepCommand(args, root, manifest);
   throw new Error(`Unknown command '${command}'. Run matrix --help.`);
