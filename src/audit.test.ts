@@ -117,6 +117,7 @@ describe("audit", () => {
     const repo = checkout("stale", {
       "AGENTS.md": `${GUIDANCE}\nReply with \`POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies\`.\n`,
       "docs/shipping.md": "Run `git push -u origin HEAD`, then `gh pr checks --watch`.\nOr `git push origin --delete feat/x`.\n",
+      "docs/cleanup.md": "Delete atomically: `git push --force-with-lease=refs/heads/x:abc --delete origin x`.\n",
       "scripts/ship.sh": "gh pr checks --watch\n",
     });
     expect(failures(repo)["superseded-guidance"]).toBe([

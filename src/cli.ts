@@ -143,8 +143,9 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
     const statusOf = (repo: string) => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol));
     // Ask the registry once per package, and only when a remote rule needs it.
     const latest = new Map<string, string>();
-    output(audit(root, repos, rules, statusOf, { latest: name => latest.get(name) ?? latest.set(name, registryLatest(name)).get(name)! }));
-    return 0;
+    const result = audit(root, repos, rules, statusOf, { latest: name => latest.get(name) ?? latest.set(name, registryLatest(name)).get(name)! });
+    output(result);
+    return result.ok ? 0 : 1;
   }
   if (command === "sweep") return sweepCommand(args, root, manifest);
   throw new Error(`Unknown command '${command}'. Run matrix --help.`);

@@ -11,7 +11,8 @@ bun run audit [repo...] [--rule <id>]... [--remote]
 
 The JSON result lists the rules that ran, `failures` as failing repositories by
 rule, and for each checkout its `branch`, `head`, `failed` and `skipped` rules
-with details. `ok` is true when no checkout failed a rule or errored. A missing
+with details. `ok` is true when no checkout failed a rule or errored, and the
+command exits 1 otherwise, so scripts and scheduled runs see drift. A missing
 checkout, or one `status` rejects, reports `error` and runs no rules. The audit
 reads whatever is checked out, local changes included, so run `bun run sync`
 first and check `branch` for checkouts that are not on their default branch.
@@ -48,7 +49,7 @@ which the agent-tool pin updates:
 | `git switch --no-track` | `agent-tool branch create` |
 | `gh pr checks --watch` | `agent-tool pr checks --wait` |
 | `git push -u origin HEAD` | `agent-tool branch push <reviewed-head> --remote origin` |
-| `git push ... --delete` | `agent-tool repo cleanup` |
+| `git push ... --delete`, except a `--force-with-lease` deletion that a checkout requires | `agent-tool repo cleanup` |
 
 ## Changing the audit
 

@@ -91,13 +91,14 @@ function headings(source: string): string[] {
  * checkout's own Markdown is stale guidance. Patterns are POSIX extended
  * regular expressions for `git grep -E`.
  */
-export const SUPERSEDED = [
+export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: string; exempt?: RegExp }> = [
   { id: "review-reply-endpoint", pattern: "pulls/([^/[:space:]`]+/)?comments/[^/[:space:]`]+/replies", replacement: "agent-tool pr threads reply" },
   { id: "untracked-branch-switch", pattern: "git switch --no-track", replacement: "agent-tool branch create" },
   { id: "pr-checks-watch", pattern: "gh pr checks --watch", replacement: "agent-tool pr checks --wait" },
   { id: "push-head-upstream", pattern: "git push (-u|--set-upstream) origin HEAD", replacement: "agent-tool branch push <reviewed-head> --remote origin" },
-  { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup" },
-] as const;
+  // A leased deletion is the stronger cleanup some checkouts require, not the hook-running push it replaced.
+  { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
+];
 
 function managedSkills(checkout: Checkout): string[] {
   return Object.keys(object(json(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
@@ -237,10 +238,15 @@ export const RULES: readonly Rule[] = [
       const exclusions = managedSkills(checkout).map(file => `:(exclude,literal)${file}`);
       const found: string[] = [];
       for (const entry of SUPERSEDED) {
-        const result = git(checkout.directory, ["grep", "-n", "-I", "-E", "-e", entry.pattern, "--", "*.md", ...exclusions]);
+        // -z separates path, line number, and text with NUL, so a path may contain colons.
+        const result = git(checkout.directory, ["grep", "-z", "-n", "-I", "-E", "-e", entry.pattern, "--", "*.md", ...exclusions]);
         if (result.status === 1) continue;
         if (result.status !== 0) throw new Error(`git grep failed in ${checkout.repo}: ${result.stderr}`);
-        const hits = result.stdout.split("\n").map(line => line.split(":").slice(0, 2).join(":"));
+        const hits = result.stdout.split("\n")
+          .map(line => line.split("\0"))
+          .filter(([, , ...text]) => !entry.exempt?.test(text.join("\0")))
+          .map(([file, line]) => `${file}:${line}`);
+        if (hits.length === 0) continue;
         found.push(`${entry.id} at ${hits.slice(0, 5).join(", ")}${hits.length > 5 ? ` and ${hits.length - 5} more` : ""} (use ${entry.replacement})`);
       }
       return problems(found);
