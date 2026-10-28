@@ -40,7 +40,17 @@ Checkouts are never reset, stashed, or deleted. Sweep ledgers live in Git's
 common directory and are never committed.
 `;
 
-function output(value: unknown): void { writeSync(1, `${JSON.stringify(value, null, 2)}\n`); }
+/** What commands reach outside the workspace for; tests replace them. */
+export interface Services {
+  /** Writes command output, stdout by default. */
+  write(text: string): void;
+  listOwnerRepos(discover: Manifest["discover"]): string[];
+  registryLatest(name: string): string;
+}
+
+const SERVICES: Services = { write: text => { writeSync(1, text); }, listOwnerRepos, registryLatest };
+
+function json(services: Services, value: unknown): void { services.write(`${JSON.stringify(value, null, 2)}\n`); }
 
 /** Read each checkout's status once, however many reports ask for it. */
 function statusReader(root: string, manifest: Manifest): (repo: string) => CheckoutStatus {
@@ -49,10 +59,11 @@ function statusReader(root: string, manifest: Manifest): (repo: string) => Check
 }
 
 /** Ask the registry once per package, and only when a remote rule needs it. */
-function registry(): { latest(name: string): string } {
+function registry(services: Services): { latest(name: string): string } {
   const latest = new Map<string, string>();
-  return { latest: name => latest.get(name) ?? latest.set(name, registryLatest(name)).get(name)! };
+  return { latest: name => latest.get(name) ?? latest.set(name, services.registryLatest(name)).get(name)! };
 }
+
 function usage(condition: boolean, message: string): void { if (!condition) throw new Error(message); }
 
 const RECORD_FLAGS = {
@@ -61,7 +72,8 @@ const RECORD_FLAGS = {
   note: "list", retry: "list", fallback: "list", declined: "list", manual: "list",
 } as const;
 
-function sweepCommand(args: string[], root: string, manifest: Manifest): number {
+function sweepCommand(args: string[], root: string, manifest: Manifest, services: Services): number {
+  const output = (value: unknown) => json(services, value);
   const [action, ...rest] = args;
   if (action === "start") {
     const { positional, values } = parseOptions(rest, { topic: "value", issue: "value" }, "sweep start");
@@ -83,7 +95,7 @@ function sweepCommand(args: string[], root: string, manifest: Manifest): number 
     const { positional, booleans } = parseOptions(rest, { markdown: "boolean" }, "sweep report");
     usage(positional.length === 1, "Usage: matrix sweep report <branch> [--markdown]");
     const result = sweepReport(root, positional[0]!);
-    if (booleans.has("markdown")) writeSync(1, markdownReport(result));
+    if (booleans.has("markdown")) services.write(markdownReport(result));
     else output(result);
     return 0;
   }
@@ -106,9 +118,10 @@ function sweepCommand(args: string[], root: string, manifest: Manifest): number 
   throw new Error("Usage: matrix sweep <start|record|report|list|retro>; see matrix --help.");
 }
 
-export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh): number {
+export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, services: Services = SERVICES): number {
+  const output = (value: unknown) => json(services, value);
   const [command, ...args] = argv;
-  if (!command || command === "--help" || command === "-h") { writeSync(1, HELP); return 0; }
+  if (!command || command === "--help" || command === "-h") { services.write(HELP); return 0; }
   const manifest = loadManifest(root);
   if (command === "sync" || command === "status") {
     const option = args.find(arg => arg.startsWith("-"));
@@ -132,7 +145,7 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
   if (command === "discover") {
     usage(args.length === 0 || (args.length === 1 && args[0] === "--apply"), "Usage: matrix discover [--apply]");
     const apply = args[0] === "--apply";
-    const plan = planDiscovery(manifest, listOwnerRepos(manifest.discover));
+    const plan = planDiscovery(manifest, services.listOwnerRepos(manifest.discover));
     if (apply && plan.added.length > 0) {
       // Round-trip through validation so a discovered name collision fails before writing.
       saveManifest(root, parseManifest(JSON.stringify({ ...manifest, repos: [...manifest.repos, ...plan.added].sort(byName) })));
@@ -154,7 +167,7 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
   if (command === "audit") {
     const { positional, lists, booleans } = parseOptions(args, { rule: "list", remote: "boolean" }, "audit");
     const rules = selectRules(lists.rule ?? [], booleans.has("remote"));
-    const result = audit(root, selectRepos(manifest, positional), rules, statusReader(root, manifest), registry());
+    const result = audit(root, selectRepos(manifest, positional), rules, statusReader(root, manifest), registry(services));
     output(result);
     return result.ok ? 0 : 1;
   }
@@ -166,14 +179,14 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh):
     const health = assessHealth({
       statuses: manifest.repos.map(statusOf),
       unmanaged: unmanagedCheckouts(root, manifest.repos),
-      audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry()),
+      audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry(services)),
       retro: retro(root),
-      ...(remote && { discovery: planDiscovery(manifest, listOwnerRepos(manifest.discover)) }),
+      ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
     });
-    if (booleans.has("markdown")) writeSync(1, markdownHealth(health));
+    if (booleans.has("markdown")) services.write(markdownHealth(health));
     else output(health);
     return 0;
   }
-  if (command === "sweep") return sweepCommand(args, root, manifest);
+  if (command === "sweep") return sweepCommand(args, root, manifest, services);
   throw new Error(`Unknown command '${command}'. Run matrix --help.`);
 }

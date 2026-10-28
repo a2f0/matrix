@@ -22,7 +22,8 @@ export interface Health {
     readonly staleInstalls: string[];
     readonly unmanaged: string[];
   };
-  readonly audit: { readonly rules: string[]; readonly failures: Record<string, string[]> };
+  /** `unaudited` lists checkouts the audit could not read; `status` explains why. */
+  readonly audit: { readonly rules: string[]; readonly failures: Record<string, string[]>; readonly unaudited: string[] };
   readonly discovery?: { added: string[]; notDiscovered: string[] };
   readonly sweeps: {
     readonly read: string[];
@@ -63,7 +64,11 @@ export function assessHealth(inputs: HealthInputs): Health {
     ok: suggestions.length === 0,
     remote: inputs.discovery !== undefined,
     checkouts: { total: inputs.statuses.length, ready: inputs.statuses.filter(status => status.ready).length, notReady: notReadyList, staleInstalls, unmanaged: inputs.unmanaged },
-    audit: { rules: inputs.audit.rules.map(rule => rule.id), failures: inputs.audit.failures },
+    audit: {
+      rules: inputs.audit.rules.map(rule => rule.id),
+      failures: inputs.audit.failures,
+      unaudited: inputs.audit.checkouts.filter(checkout => checkout.error).map(checkout => checkout.repo),
+    },
     ...(inputs.discovery && { discovery: inputs.discovery }),
     sweeps: {
       read: inputs.retro.sweeps,
@@ -84,7 +89,10 @@ export function markdownHealth(health: Health, at = new Date()): string {
     `Checked ${at.toISOString()}${health.remote ? ", including GitHub discovery and the npm registry" : " from local checkouts"}.`,
     "",
     `- Checkouts: ${checkouts.ready} of ${checkouts.total} ready; ${checkouts.staleInstalls.length > 0 ? `stale installs in ${list(checkouts.staleInstalls)}` : "no stale installs"}; ${checkouts.unmanaged.length > 0 ? `unmanaged ${list(checkouts.unmanaged)}` : "no unmanaged entries"}.`,
-    `- Audit (${plural(audit.rules.length, "rule")}): ${failing.length === 0 ? "every checkout passes" : failing.map(([rule, repos]) => `\`${rule}\` fails in ${repos.length}`).join(", ")}.`,
+    `- Audit (${plural(audit.rules.length, "rule")}): ${[
+      failing.length === 0 ? (audit.unaudited.length === 0 ? "every checkout passes" : "every audited checkout passes") : failing.map(([rule, repos]) => `\`${rule}\` fails in ${repos.length}`).join(", "),
+      ...(audit.unaudited.length > 0 ? [`${list(audit.unaudited)} not audited`] : []),
+    ].join("; ")}.`,
     `- Discovery: ${discovery ? (discovery.added.length + discovery.notDiscovered.length === 0 ? "matrix.json matches the owner's repositories" : `${plural(discovery.added.length, "new repository", "new repositories")}, ${discovery.notDiscovered.length} no longer found`) : "not checked; run with --remote"}.`,
     `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`,
     "",
