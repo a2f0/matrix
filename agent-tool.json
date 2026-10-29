@@ -26,5 +26,66 @@
       "main"
     ],
     "maxLength": null
+  },
+  "graph": {
+    "include": [
+      "src/**",
+      "skills/**",
+      "scripts/**"
+    ],
+    "tests": [
+      "**/*.test.ts"
+    ],
+    "layers": [
+      {
+        "name": "primitives",
+        "include": [
+          "src/git.ts",
+          "src/manifest.ts",
+          "src/markdown.ts",
+          "src/options.ts"
+        ]
+      },
+      {
+        "name": "checkouts",
+        "include": [
+          "src/checkouts.ts"
+        ]
+      },
+      {
+        "name": "commands",
+        "include": [
+          "src/audit.ts",
+          "src/discover.ts",
+          "src/secrets.ts",
+          "src/sweeps.ts"
+        ]
+      },
+      {
+        "name": "health",
+        "include": [
+          "src/health.ts"
+        ]
+      },
+      {
+        "name": "cli",
+        "include": [
+          "src/cli.ts"
+        ]
+      },
+      {
+        "name": "entry",
+        "include": [
+          "src/index.ts"
+        ]
+      },
+      {
+        "name": "scripts",
+        "include": [
+          "skills/**",
+          "scripts/**"
+        ]
+      }
+    ]
   }
 }

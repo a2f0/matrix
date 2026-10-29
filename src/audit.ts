@@ -148,7 +148,38 @@ function typescriptGuarded(checkout: Checkout): boolean {
   if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
   const candidates = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
   if (candidates.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return true;
+  if (agentToolGraphChecked(checkout)) return true;
   return checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts").length > 0;
+}
+
+/** Whether a run-group command array (any `command` field) runs `graph check`. */
+function commandRunsGraphCheck(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(commandRunsGraphCheck);
+  const record = object(value);
+  if (!record) return false;
+  const command = record.command;
+  if (Array.isArray(command) && command.some((part, index) => part === "graph" && command[index + 1] === "check")) return true;
+  return Object.values(record).some(commandRunsGraphCheck);
+}
+
+/**
+ * agent-tool's shared check: a `graph` section in agent-tool.json, run as
+ * `graph check` by a package script, a run group's command, a workflow step,
+ * or a runner script under scripts/. Generated permission rules name the command too, so they never count.
+ */
+function agentToolGraphChecked(checkout: Checkout): boolean {
+  const graph = object(json(checkout.read("agent-tool.json"))?.graph);
+  if (!Array.isArray(graph?.include) || graph.include.length === 0) return false;
+  const runsIt = (text: string) => /\bgraph\s+check\b/.test(text);
+  const scripts = Object.values(object(checkout.packageJson?.scripts) ?? {});
+  if (scripts.some(script => typeof script === "string" && runsIt(script))) return true;
+  const workflows = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => checkout.read(file) ?? "");
+  if (workflows.some(text => text.split("\n").some(line => /^\s*(-\s*)?run:/.test(line) && runsIt(line)))) return true;
+  if (checkout.tracked(":(glob)scripts/**/*.json").some(file => commandRunsGraphCheck(json(checkout.read(file))))) return true;
+  // A repository's own runner script passing the arguments (skyline's scripts/testing/check.ts).
+  return checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)scripts/**/*.${extension}`))
+    .filter(file => !/\.(test|spec)\.[cm]?[jt]s$/.test(file))
+    .some(file => /["'`]graph["'`]\s*,\s*["'`]check["'`]/.test(checkout.read(file) ?? ""));
 }
 
 function managedSkills(checkout: Checkout): string[] {
@@ -329,7 +360,7 @@ export const RULES: readonly Rule[] = [
       if (!typescript && !python) return skip("no TypeScript sources or Python package");
       // Each language needs a guard that can read it: Biome and dependency-cruiser cannot check Python.
       const missing: string[] = [];
-      if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test");
+      if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test");
       if (python && checkout.tracked(":(glob)**/test_module_graph.py").length === 0) missing.push("the Python package has no test_module_graph.py");
       return problems(missing);
     },
