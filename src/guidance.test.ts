@@ -105,7 +105,7 @@ describe("guidance", () => {
 
   test("matrix meets the standards it audits", () => {
     const checkout = openCheckout("a2f0/matrix", ROOT);
-    const context = { latest: () => { throw new Error("remote rules do not run here"); } };
+    const context = { releases: () => { throw new Error("remote rules do not run here"); } };
     const failures = RULES
       // Matrix, like agent-tool, is agent tooling, so its README describes the skills it installs.
       .filter(rule => !rule.remote && !["superseded-guidance", "readme-agent-free"].includes(rule.id))

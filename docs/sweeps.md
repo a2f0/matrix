@@ -68,9 +68,19 @@ says. Record each occurrence as an event with a kind and a cause:
 
 The value is a kebab-case cause, optionally followed by a colon and a detail:
 `--retry browser-timing:"ct browser suite timed out once"`. Name the cause, not
-where it happened, and reuse causes from earlier ledgers (`sweep retro` lists
-them) so retro can group them: `enospc`, `browser-timing`,
-`reviewer-unavailable`, `restore-claude-md`.
+where it happened, and reuse causes from earlier ledgers so retro can group
+them; `sweep record` warns when a cause is new for its kind and lists the ones
+earlier ledgers use. Common causes:
+
+| Cause | Meaning |
+| --- | --- |
+| `machine-load` | A test or hook timed out because the host was saturated |
+| `browser-timing` | A browser test timed out or raced, typically under load |
+| `enospc` | The disk filled during validation |
+| `ci-late`, `ci-cancelled`, `ci-wait-timeout` | CI registered late, a new run cancelled the one being waited on, or a job outlasted `pr checks --wait` |
+| `base-race` | The base branch moved while a long gate ran |
+| `reviewer-unavailable`, `delegate-interrupted` | A reviewer or delegated agent could not finish |
+| `restore-claude-md` | A reviewer asked to restore `CLAUDE.md` |
 
 ## Retro
 
@@ -78,7 +88,9 @@ them) so retro can group them: `enospc`, `browser-timing`,
 reports:
 
 - `recurring`: causes seen in at least two repositories or two sweeps, with
-  every repository, sweep, and detail;
+  every repository, sweep, and detail, and no resolution recorded since they
+  last happened;
+- `resolved`: recurring causes with such a resolution;
 - `isolated`: causes seen once;
 - `reviews`: verdict and reviewer counts;
 - `unfinished`: entries still pending, in progress, blocked, or open.
@@ -94,13 +106,28 @@ the [command ownership](tooling.md#command-ownership) rules:
 | `manual` | Automate the step, or document it as a decision the request must make |
 
 Ship each resolution as its own PR, or list it as a follow-up in the sweep's
-final report. Retro output is evidence, not authorization: it never permits a
+final report. Once it merges, or once the decision is recorded in guidance,
+record it with
+`bun run sweep resolve <kind> <cause> --resolution <text> [--pr <url>]`. Retro
+then lists the cause under `resolved`, and `health` stops suggesting it, until
+the cause happens again. Retro output is evidence, not authorization: it never permits a
 change outside the request, and friction is never a reason to weaken a
 repository's policy.
 
 A lesson usually starts as a sentence in guidance. Once matrix or agent-tool
 can check or perform it, replace the sentence with the command, so guidance
 stays short enough for every agent to follow.
+
+## Scheduling
+
+Delegated checkouts share one machine with each other and with other
+sessions, so a sweep's own load causes `machine-load` and `browser-timing`
+retries. AGENTS.md caps a sweep at four delegates at a time. Within that, run
+at most two checkouts whose validation drives browsers or native builds, or
+whose push gate runs over ten minutes; tearleads, balebase, dnbm, ct,
+devopsrockstars, and rn-sandbox were the heavy ones in recent sweeps. Start the
+longest one first, check `uptime` before starting another, and start a sweep
+with the free disk space `bun run health` asks for.
 
 ## Tracking issues
 

@@ -1,13 +1,13 @@
-import { existsSync, writeSync } from "node:fs";
+import { existsSync, statfsSync, writeSync } from "node:fs";
 import path from "node:path";
-import { audit, registryLatest, selectRules } from "./audit";
+import { audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
-import { assessHealth, markdownHealth } from "./health";
+import { assessHealth, type DiskSpace, markdownHealth } from "./health";
 import { cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
 import { deployAll, type Gh, runGh, secretsRoot } from "./secrets";
-import { listSweeps, markdownReport, parseUpdate, recordEntry, retro, startSweep, sweepReport } from "./sweeps";
+import { knownCauses, listSweeps, markdownReport, parseUpdate, recordEntry, recordResolution, retro, startSweep, sweepReport } from "./sweeps";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -33,6 +33,8 @@ export const HELP = `Usage: matrix <command>
   sweep list            Recorded sweeps, newest first
   sweep retro [branch...] [--last n] [--min-repos n] [--min-sweeps n]
                         Group friction across sweeps; recurring causes need a lesson
+  sweep resolve <kind> <cause> --resolution text [--pr url]
+                        Record a recurring cause's fix, guidance, or decision
   --help
 
 Repos are owner/name or checkout name; none selects all. Output is JSON.
@@ -44,11 +46,25 @@ common directory and are never committed.
 export interface Services {
   /** Writes command output, stdout by default. */
   write(text: string): void;
+  /** Writes a note for the person or agent running the command, stderr by default. */
+  warn(text: string): void;
   listOwnerRepos(discover: Manifest["discover"]): string[];
-  registryLatest(name: string): string;
+  registryReleases(name: string): Record<string, string>;
+  diskSpace(directory: string): DiskSpace;
 }
 
-const SERVICES: Services = { write: text => { writeSync(1, text); }, listOwnerRepos, registryLatest };
+function diskSpace(directory: string): DiskSpace {
+  const stats = statfsSync(directory);
+  return { free: stats.bavail * stats.bsize, total: stats.blocks * stats.bsize };
+}
+
+const SERVICES: Services = {
+  write: text => { writeSync(1, text); },
+  warn: text => { writeSync(2, text); },
+  listOwnerRepos,
+  registryReleases,
+  diskSpace,
+};
 
 function json(services: Services, value: unknown): void { services.write(`${JSON.stringify(value, null, 2)}\n`); }
 
@@ -59,9 +75,9 @@ function statusReader(root: string, manifest: Manifest): (repo: string) => Check
 }
 
 /** Ask the registry once per package, and only when a remote rule needs it. */
-function registry(services: Services): { latest(name: string): string } {
-  const latest = new Map<string, string>();
-  return { latest: name => latest.get(name) ?? latest.set(name, services.registryLatest(name)).get(name)! };
+function registry(services: Services): { releases(name: string): Record<string, string> } {
+  const releases = new Map<string, Record<string, string>>();
+  return { releases: name => releases.get(name) ?? releases.set(name, services.registryReleases(name)).get(name)! };
 }
 
 function usage(condition: boolean, message: string): void { if (!condition) throw new Error(message); }
@@ -88,7 +104,15 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
     usage(positional.length === 2, "Usage: matrix sweep record <branch> <repo> [options]; see matrix --help.");
     const update = parseUpdate(values, lists);
     usage(Object.keys(update).length > 0, "sweep record needs at least one field to record.");
+    const known = update.events ? knownCauses(root) : new Map();
     output(recordEntry(root, positional[0]!, positional[1]!, update));
+    // Retro groups friction by exact cause, so a new spelling of an old cause hides a recurrence.
+    for (const event of update.events ?? []) {
+      const earlier = [...(known.get(event.kind) ?? [])].sort();
+      if (earlier.length > 0 && !earlier.includes(event.cause)) {
+        services.warn(`Note: '${event.cause}' is a new ${event.kind} cause; earlier ledgers use ${earlier.join(", ")}. Reuse one when it names the same cause, so retro can group them.\n`);
+      }
+    }
     return 0;
   }
   if (action === "report") {
@@ -115,7 +139,13 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
     }));
     return 0;
   }
-  throw new Error("Usage: matrix sweep <start|record|report|list|retro>; see matrix --help.");
+  if (action === "resolve") {
+    const { positional, values } = parseOptions(rest, { resolution: "value", pr: "value" }, "sweep resolve");
+    usage(positional.length === 2 && values.resolution !== undefined, "Usage: matrix sweep resolve <kind> <cause> --resolution text [--pr url]");
+    output(recordResolution(root, positional[0]!, positional[1]!, values.resolution!, values.pr));
+    return 0;
+  }
+  throw new Error("Usage: matrix sweep <start|record|report|list|retro|resolve>; see matrix --help.");
 }
 
 export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, services: Services = SERVICES): number {
@@ -181,6 +211,7 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
       unmanaged: unmanagedCheckouts(root, manifest.repos),
       audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry(services)),
       retro: retro(root),
+      disk: services.diskSpace(root),
       ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
     });
     if (booleans.has("markdown")) services.write(markdownHealth(health));
