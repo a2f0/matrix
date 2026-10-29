@@ -62,8 +62,23 @@ export interface Candidate {
   bytes: number;
 }
 
+// From `git rev-parse --local-env-vars`: variables that bind Git to one repository,
+// such as those a hook sets, and that would override `-C`.
+const REPOSITORY_VARIABLES = [
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+  "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
+  "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
+  "GIT_COMMON_DIR",
+];
+
+export function gitEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = { ...env, GIT_TERMINAL_PROMPT: "0" };
+  for (const name of REPOSITORY_VARIABLES) delete clean[name];
+  return clean;
+}
+
 function git(root: string, args: string[]): { ok: boolean; stdout: string } {
-  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, env: gitEnvironment() });
   return { ok: result.status === 0, stdout: result.stdout ?? "" };
 }
 
@@ -134,13 +149,14 @@ export function selected(candidates: Candidate[], tiers: ReadonlySet<Tier>): Can
 export interface Proc {
   readonly pid: number;
   readonly ppid: number;
-  /** Process group: members of the caller's pipeline share it. */
+  /** Process group: members of the caller's shell pipeline share it. */
   readonly pgid?: number;
   readonly name: string;
   readonly args: string;
   cwd?: string;
 }
 
+const PIPELINE_FILTERS = new Set(["head", "tail", "less", "more", "cat", "tee", "grep", "rg", "sed", "awk", "jq", "sort", "uniq", "wc", "cut", "tr", "column"]);
 const SHELLS = new Set(["zsh", "-zsh", "bash", "-bash", "sh", "fish", "dash", "login", "tmux"]);
 
 /** Every process's cwd; throws when it cannot list them, so busy repositories are never mistaken for idle ones. */
@@ -174,8 +190,10 @@ export function processes(): Proc[] {
 
 /**
  * Processes working in each root, other than this script, its ancestors (the
- * agent or shell that ran it), its children, its process group (the rest of
- * the caller's pipeline), and idle shells. A process in a
+ * agent or shell that ran it), its children, idle shells, and text filters
+ * in its process group (`| head`, `| jq`: the rest of the caller's pipeline).
+ * A build or server in the same group still counts: non-interactive shells
+ * put background jobs there too. A process in a
  * nested root counts only for the deepest root containing it.
  */
 export function busyRoots(procs: Proc[], roots: string[], self = process.pid): Map<string, Proc[]> {
@@ -186,7 +204,8 @@ export function busyRoots(procs: Proc[], roots: string[], self = process.pid): M
   const busy = new Map<string, Proc[]>();
   const byDepth = roots.toSorted((a, b) => b.length - a.length);
   for (const proc of procs) {
-    if (!proc.cwd || ancestors.has(proc.pid) || proc.ppid === self || (group !== undefined && proc.pgid === group) || SHELLS.has(proc.name)) continue;
+    const pipeline = group !== undefined && proc.pgid === group && PIPELINE_FILTERS.has(proc.name);
+    if (!proc.cwd || ancestors.has(proc.pid) || proc.ppid === self || pipeline || SHELLS.has(proc.name)) continue;
     const root = byDepth.find(candidate => proc.cwd === candidate || proc.cwd!.startsWith(`${candidate}/`));
     if (root) busy.set(root, [...(busy.get(root) ?? []), proc]);
   }
@@ -244,22 +263,36 @@ export interface MachineItem {
   apply?: () => string;
 }
 
-function has(command: string): boolean {
-  return spawnSync("sh", ["-c", `command -v ${command}`], { encoding: "utf8" }).status === 0;
+/** What `--machine` needs from the host; tests substitute a fake one. */
+export interface Host {
+  readonly home: string;
+  has(command: string): boolean;
+  /** Combined output of a read-only command, empty when it fails. */
+  output(command: string, args: string[]): string;
+  /** Runs a cleaning command; throws when it fails. */
+  run(command: string, args: string[]): string;
 }
 
-function run(command: string, args: string[]): string {
-  const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} exited ${result.status}: ${(result.stderr ?? "").trim().split("\n").pop()}`);
-  return (result.stdout ?? "").trim();
-}
+export const HOST: Host = {
+  home: os.homedir(),
+  has: command => spawnSync("sh", ["-c", 'command -v "$1"', "sh", command], { encoding: "utf8" }).status === 0,
+  output: (command, args) => {
+    const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    return `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  },
+  run: (command, args) => {
+    const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} exited ${result.status}: ${(result.stderr ?? "").trim().split("\n").pop()}`);
+    return (result.stdout ?? "").trim();
+  },
+};
 
 /** Running installs read the package caches, so those caches wait for them. */
-const INSTALLING = /(^|[\s/])(bun|npm|pnpm|yarn)(\s+run\s+agent-tool\s+bun)?\s+(install|ci|add|i)(\s|$)/;
+const INSTALLING = /(^|[\s/])(bun|npm|pnpm|yarn|brew)(\s+run\s+agent-tool\s+bun)?\s+(install|ci|add|i|upgrade)(\s|$)/;
 
 /** Developer caches outside any repository, for `--machine`. */
-function machineItems(procs: Proc[]): MachineItem[] {
-  const home = os.homedir();
+export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
+  const { home, has, run } = host;
   const items: MachineItem[] = [];
   const dir = (id: string, description: string, location: string, reportOnly: boolean, apply?: () => string) => {
     if (existsSync(location)) items.push({ id, description: `${description} (${location.replace(home, "~")})`, reportOnly, bytes: measure([location]).get(location), apply });
@@ -275,19 +308,20 @@ function machineItems(procs: Proc[]): MachineItem[] {
   });
   if (xcode && items.at(-1)?.id === "xcode-derived-data") items.at(-1)!.skipped = `${xcode.name} is running (pid ${xcode.pid})`;
   if (has("xcrun")) {
-    const listing = spawnSync("xcrun", ["simctl", "list", "devices", "unavailable"], { encoding: "utf8" }).stdout ?? "";
+    const listing = host.output("xcrun", ["simctl", "list", "devices", "unavailable"]);
     const count = listing.split("\n").filter(line => /\(unavailable/.test(line)).length;
     // Their app data returns if the runtime is reinstalled, so deleting them is the owner's call.
     if (count > 0) items.push({ id: "unavailable-simulators", description: `${count} simulators whose runtime is no longer installed; \`xcrun simctl delete unavailable\` removes them and their app data`, reportOnly: true });
   }
   if (has("brew")) {
-    const dry = spawnSync("brew", ["cleanup", "-n"], { encoding: "utf8" });
-    const match = /free approximately ([\d.]+)([KMGT]?B)/.exec(`${dry.stdout}${dry.stderr}`);
+    const match = /free approximately ([\d.]+)([KMGT]?B)/.exec(host.output("brew", ["cleanup", "-n"]));
     const unit: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
     if (match) items.push({ id: "homebrew-cleanup", description: "Old Homebrew versions and downloads (`brew cleanup`)", reportOnly: false, bytes: Number(match[1]) * unit[match[2]!]!, apply: () => { run("brew", ["cleanup"]); return "cleaned"; } });
+    // brew cleanup removes downloads an install in progress is using.
+    if (busyInstall && items.at(-1)?.id === "homebrew-cleanup") items.at(-1)!.skipped = busyInstall;
   }
   if (has("bun")) {
-    const cache = spawnSync("bun", ["pm", "cache"], { encoding: "utf8" }).stdout?.trim();
+    const cache = host.output("bun", ["pm", "cache"]).trim().split("\n")[0];
     if (cache) dir("bun-cache", "Bun install cache", cache, false, () => run("bun", ["pm", "cache", "rm"]) || "removed");
     if (busyInstall && items.at(-1)?.id === "bun-cache") items.at(-1)!.skipped = busyInstall;
   }
@@ -304,11 +338,21 @@ function machineItems(procs: Proc[]): MachineItem[] {
   dir("ios-device-support", "iOS DeviceSupport; versions for devices no longer used can go", path.join(home, "Library/Developer/Xcode/iOS DeviceSupport"), true);
   dir("simulator-devices", "Simulator devices; `xcrun simctl erase` or delete ones no project uses", path.join(home, "Library/Developer/CoreSimulator/Devices"), true);
   if (has("tmutil")) {
-    const snapshots = (spawnSync("tmutil", ["listlocalsnapshots", "/"], { encoding: "utf8" }).stdout ?? "").split("\n").filter(line => line.includes("com.apple")).length;
+    const snapshots = host.output("tmutil", ["listlocalsnapshots", "/"]).split("\n").filter(line => line.includes("com.apple")).length;
     if (snapshots > 0) items.push({ id: "local-snapshots", description: `${snapshots} Time Machine local snapshots hold deleted files' space until macOS thins them`, reportOnly: true });
   }
   if (has("docker")) items.push({ id: "docker", description: "Docker images, containers, and volumes; `docker system df` sizes them, and pruning is the owner's call", reportOnly: true });
   return items;
+}
+
+/** Runs every machine item that is neither report-only nor skipped; returns the number that failed. */
+export function applyMachine(items: MachineItem[]): number {
+  let failures = 0;
+  for (const item of items) {
+    if (item.reportOnly || item.skipped || !item.apply) continue;
+    try { item.result = item.apply(); } catch (error) { item.result = `failed: ${(error as Error).message}`; failures++; }
+  }
+  return failures;
 }
 
 interface RepoReport {
@@ -413,10 +457,7 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
       }
       failures += repo.failed.length;
     }
-    for (const item of machine) {
-      if (item.reportOnly || item.skipped || !item.apply) continue;
-      try { item.result = item.apply(); } catch (error) { item.result = `failed: ${(error as Error).message}`; failures++; }
-    }
+    failures += applyMachine(machine);
   }
   const after = options.apply ? free(volume) : undefined;
 

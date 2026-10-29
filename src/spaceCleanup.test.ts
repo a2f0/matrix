@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
+import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -116,23 +116,24 @@ describe("space cleanup", () => {
     expect(inside.targets.map(target => target.root)).toEqual([checkout]);
   });
 
-  test("counts other processes as busy, but not this one, its ancestors, its pipeline, or idle shells", () => {
+  test("counts other processes as busy, but not this one, its ancestors, pipeline filters, or idle shells", () => {
     const procs: Proc[] = [
       { pid: 1, ppid: 0, name: "launchd", args: "", cwd: "/" },
       { pid: 10, ppid: 1, name: "claude", args: "claude", cwd: "/w" },
       { pid: 11, ppid: 10, pgid: 11, name: "bun", args: "bun space", cwd: "/w/checkouts/a" },
       { pid: 12, ppid: 10, pgid: 11, name: "head", args: "head", cwd: "/w/checkouts/a" },
+      { pid: 13, ppid: 10, pgid: 11, name: "node", args: "vite build --watch", cwd: "/w/checkouts/a" },
       { pid: 20, ppid: 1, name: "zsh", args: "-zsh", cwd: "/w/checkouts/b" },
       { pid: 21, ppid: 1, name: "node", args: "vite", cwd: "/w/checkouts/b/web" },
       { pid: 22, ppid: 1, name: "bun", args: "bun test", cwd: "/w/checkouts/a" },
       { pid: 23, ppid: 1, name: "codex", args: "codex", cwd: "/w" },
     ];
     const busy = busyRoots(procs, ["/w", "/w/checkouts/a", "/w/checkouts/b"], 11);
-    expect([...busy].map(([root, list]) => [root, list.map(proc => proc.pid)])).toEqual([
-      ["/w/checkouts/b", [21]],
-      ["/w/checkouts/a", [22]],
-      ["/w", [23]],
-    ]);
+    expect(Object.fromEntries([...busy].map(([root, list]) => [root, list.map(proc => proc.pid)]))).toEqual({
+      "/w/checkouts/a": [13, 22],
+      "/w/checkouts/b": [21],
+      "/w": [23],
+    });
   });
 
   test("rechecks tracked files at removal time", () => {
@@ -150,6 +151,75 @@ describe("space cleanup", () => {
     const root = fixture();
     expect(() => main([root, "--apply"], root, () => { throw new Error("cannot list processes with lsof"); })).toThrow("cannot list processes");
     expect(existsSync(path.join(root, ".turbo"))).toBe(true);
+  });
+
+  test("ignores inherited variables that bind git to another repository", () => {
+    const root = fixture();
+    const other = fixture();
+    write(other, ".turbo/tracked");
+    git(other, "add", "-f", ".turbo/tracked");
+    const saved = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE };
+    process.env.GIT_DIR = path.join(other, ".git");
+    process.env.GIT_WORK_TREE = other;
+    try {
+      expect(gitEnvironment().GIT_DIR).toBeUndefined();
+      expect(unsafeReason(root, ".turbo")).toBeUndefined();
+      expect(findCandidates(root).map(candidate => candidate.path)).toContain(".turbo");
+      expect(unsafeReason(other, ".turbo")).toBe("tracked");
+    } finally {
+      for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+
+  describe("--machine", () => {
+    function host(commands: string[]) {
+      const home = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-home-"));
+      temps.push(home);
+      write(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x");
+      write(home, ".bun/install/cache/pkg/x");
+      write(home, ".gradle/caches/x");
+      const ran: string[] = [];
+      const fake: Host = {
+        home,
+        has: command => commands.includes(command),
+        output: command => {
+          if (command === "bun") return path.join(home, ".bun/install/cache");
+          if (command === "xcrun") return "    iPhone 8 (ABC) (Shutdown) (unavailable, runtime profile not found)\n";
+          if (command === "brew") return "==> This operation would free approximately 1.5GB of disk space.";
+          return "";
+        },
+        run: (command, args) => { ran.push(`${command} ${args.join(" ")}`); return ""; },
+      };
+      return { home, ran, fake };
+    }
+
+    test("empties DerivedData, runs cache commands, and leaves report-only items alone", () => {
+      const { home, ran, fake } = host(["bun", "xcrun", "brew"]);
+      const items = machineItems([], fake);
+      expect(items.filter(item => item.reportOnly).map(item => item.id).toSorted()).toEqual(["gradle-caches", "unavailable-simulators"]);
+      expect(applyMachine(items)).toBe(0);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData"))).toBe(true);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc"))).toBe(false);
+      expect(ran.toSorted()).toEqual(["brew cleanup", "bun pm cache rm"]);
+      expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
+    });
+
+    test("waits for running installs and Xcode builds", () => {
+      const { home, ran, fake } = host(["bun", "brew"]);
+      const procs: Proc[] = [
+        { pid: 5, ppid: 1, name: "bun", args: "bun install --frozen-lockfile", cwd: "/x" },
+        { pid: 6, ppid: 1, name: "xcodebuild", args: "xcodebuild -workspace App", cwd: "/x" },
+      ];
+      const items = machineItems(procs, fake);
+      expect(Object.fromEntries(items.map(item => [item.id, item.skipped]))).toMatchObject({
+        "xcode-derived-data": "xcodebuild is running (pid 6)",
+        "bun-cache": "an install is running (pid 5)",
+        "homebrew-cleanup": "an install is running (pid 5)",
+      });
+      expect(applyMachine(items)).toBe(0);
+      expect(ran).toEqual([]);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x"))).toBe(true);
+    });
   });
 
   test("rejects unknown options", () => {
