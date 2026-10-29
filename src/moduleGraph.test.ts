@@ -37,6 +37,12 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
+/** Whether a `/` after this code starts a regex literal rather than a division. */
+function startsRegex(before: string): boolean {
+  const code = before.trimEnd();
+  return code === "" || /[(,=:[!&|?{};+\-*%<>~^]$/.test(code) || /\b(return|typeof|case|in|of|delete|void|throw|new|yield|await)$/.test(code);
+}
+
 /**
  * Blanks comments, template-literal text, and every string that is not an import
  * specifier, keeping the code inside `${...}` interpolations, which can import too.
@@ -62,6 +68,19 @@ function stripNonCode(source: string): string {
     const char = source[i]!;
     if (char === "/" && source[i + 1] === "/") { const end = source.indexOf("\n", i); blank(i, end === -1 ? source.length : end); i = end === -1 ? source.length : end; }
     else if (char === "/" && source[i + 1] === "*") { const end = source.indexOf("*/", i + 2); const stop = end === -1 ? source.length : end + 2; blank(i, stop); i = stop; }
+    else if (char === "/" && startsRegex(out.slice(Math.max(0, i - 40), i).join(""))) {
+      // A regex literal: skip to its closing slash, honoring escapes and character classes.
+      const start = ++i;
+      let inClass = false;
+      while (i < source.length && source[i] !== "\n" && (inClass || source[i] !== "/")) {
+        if (source[i] === "\\") i++;
+        else if (source[i] === "[") inClass = true;
+        else if (source[i] === "]") inClass = false;
+        i++;
+      }
+      blank(start, Math.min(i, source.length));
+      i++;
+    }
     else if (char === "\"" || char === "'") {
       // Only a string right after `from` or `import` is a specifier; blank the text of any other.
       const specifier = /(?:\bfrom|\bimport\s*\(?)\s*$/.test(out.slice(Math.max(0, i - 40), i).join(""));
@@ -161,8 +180,10 @@ describe("module graph", () => {
       'const spaced = await import ("./q");',
       'const fixture = \'import "./r";\'; const other = "export * from \'./s\'";',
       'const literal = await import(`./t`); const dynamic = await import(`./${name}`);',
+      'const quote = /"/; import "./u"; const tick = /`/g; import "./v"; const half = 4 / 2; import "./w";',
+      'const klass = /[/"]/; import "./x";',
     ].join("\n");
-    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p", "./q", "./t"]);
+    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p", "./q", "./t", "./u", "./v", "./w", "./x"]);
   });
 
   test("resolves extensionless, TypeScript-style .js, and index specifiers", () => {

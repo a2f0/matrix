@@ -101,7 +101,9 @@ export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacemen
 
 /** Biome's noImportCycles as an error that counts type-only imports, which the rule's default skips. */
 function biomeGuardsCycles(config: string): boolean {
-  const rule = /"noImportCycles"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})/.exec(config)?.[1];
+  // JSONC: drop comments outside strings, so a commented-out rule does not count.
+  const active = config.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_match, quoted: string | undefined) => quoted ?? "");
+  const rule = /"noImportCycles"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})/.exec(active)?.[1];
   return rule !== undefined && /"level"\s*:\s*"error"/.test(rule) && /"ignoreTypes"\s*:\s*false/.test(rule);
 }
 
