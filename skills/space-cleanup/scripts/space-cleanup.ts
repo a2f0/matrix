@@ -260,10 +260,23 @@ export function parseProcesses(table: string, argsOutput: string, lsofOutput: st
  * Processes working in each root, other than this script, its ancestors (the
  * agent or shell that ran it), its children, idle shells, and text filters
  * in its process group (`| head`, `| jq`: the rest of the caller's pipeline).
+ * A process counts for the root holding its cwd and for every root a path in
+ * its arguments points into.
  * A build or server in the same group still counts: non-interactive shells
  * put background jobs there too. A process in a
  * nested root counts only for the deepest root containing it.
  */
+/** Absolute paths that a command line's path-like arguments (`a/b`, `--flag=./x`, `-C dir`) resolve to. */
+export function argumentPaths(args: string, cwd: string): string[] {
+  const paths: string[] = [];
+  for (const token of args.split(/\s+/).slice(1)) {
+    const value = token.startsWith("-") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
+    if (value === "" || value.startsWith("-")) continue;
+    if (value.includes("/") || value === "." || value === "..") paths.push(path.resolve(cwd, value));
+  }
+  return paths;
+}
+
 export function busyRoots(procs: Proc[], roots: string[], self = process.pid): Map<string, Proc[]> {
   const parent = new Map(procs.map(proc => [proc.pid, proc.ppid]));
   const ancestors = new Set<number>();
@@ -274,8 +287,16 @@ export function busyRoots(procs: Proc[], roots: string[], self = process.pid): M
   for (const proc of procs) {
     const pipeline = group !== undefined && proc.pgid === group && PIPELINE_FILTERS.has(proc.name);
     if (!proc.cwd || ancestors.has(proc.pid) || proc.ppid === self || pipeline || idleShell(proc)) continue;
-    const root = byDepth.find(candidate => proc.cwd === candidate || proc.cwd!.startsWith(`${candidate}/`));
-    if (root) busy.set(root, [...(busy.get(root) ?? []), proc]);
+    const deepest = (location: string) => byDepth.find(candidate => location === candidate || location.startsWith(`${candidate}/`));
+    const touched = new Set<string>();
+    const home = deepest(proc.cwd);
+    if (home) touched.add(home);
+    // A process can work in a root it is not in: `cargo build --manifest-path checkouts/app/Cargo.toml`.
+    for (const location of argumentPaths(proc.args, proc.cwd)) {
+      const root = deepest(location);
+      if (root) touched.add(root);
+    }
+    for (const root of touched) busy.set(root, [...(busy.get(root) ?? []), proc]);
   }
   return busy;
 }

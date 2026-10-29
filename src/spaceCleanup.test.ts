@@ -129,12 +129,16 @@ describe("space cleanup", () => {
       { pid: 23, ppid: 1, name: "codex", args: "codex", cwd: "/w" },
       { pid: 24, ppid: 1, name: "bash", args: "bash build.sh", cwd: "/w/checkouts/b" },
       { pid: 25, ppid: 1, name: "zsh", args: "/bin/zsh -il", cwd: "/w/checkouts/b" },
+      { pid: 26, ppid: 1, name: "cargo", args: "cargo build --manifest-path checkouts/c/Cargo.toml", cwd: "/w" },
+      { pid: 27, ppid: 1, name: "bun", args: "bun --cwd=checkouts/d run build", cwd: "/w" },
     ];
-    const busy = busyRoots(procs, ["/w", "/w/checkouts/a", "/w/checkouts/b"], 11);
+    const busy = busyRoots(procs, ["/w", "/w/checkouts/a", "/w/checkouts/b", "/w/checkouts/c", "/w/checkouts/d"], 11);
     expect(Object.fromEntries([...busy].map(([root, list]) => [root, list.map(proc => proc.pid)]))).toEqual({
       "/w/checkouts/a": [13, 22],
       "/w/checkouts/b": [21, 24],
-      "/w": [23],
+      "/w": [23, 26, 27],
+      "/w/checkouts/c": [26],
+      "/w/checkouts/d": [27],
     });
   });
 
