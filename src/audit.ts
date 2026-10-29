@@ -160,6 +160,7 @@ export const RULES: readonly Rule[] = [
       if (pin === undefined) return skip("does not pin agent-tool");
       if (!EXACT_VERSION.test(pin)) return skip(`pin '${pin}' is not exact; see agent-tool-pin`);
       const releases = context.releases(AGENT_TOOL);
+      if (!(pin in releases)) return fail(`pins ${pin}, which the registry has not published`);
       const newer = Object.keys(releases).filter(version => EXACT_VERSION.test(version) && compareVersions(version, pin) > 0).sort(compareVersions);
       if (newer.length === 0) return pass;
       const detail = `pins ${pin}; latest is ${newer.at(-1)}`;
