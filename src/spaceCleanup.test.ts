@@ -181,6 +181,8 @@ describe("space cleanup", () => {
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD");
       write(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD");
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/Packages/checkouts/Custom/.git/HEAD");
+      write(home, "Library/Developer/Xcode/DerivedData/clone/.git/HEAD");
+      write(home, "Library/Developer/Xcode/DerivedData/clone/src/main.swift");
       write(home, ".bun/install/cache/pkg/x");
       write(home, ".gradle/caches/x");
       const ran: string[] = [];
@@ -207,6 +209,7 @@ describe("space cleanup", () => {
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD"))).toBe(true);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD"))).toBe(true);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Packages/checkouts/Custom/.git/HEAD"))).toBe(true);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/clone/src/main.swift"))).toBe(true);
       expect(ran.toSorted()).toEqual(["brew cleanup", "bun pm cache rm"]);
       expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
     });
@@ -323,6 +326,8 @@ describe("space cleanup", () => {
     expect(protectedName(".secrets")).toBe(true);
     expect(protectedName("app.sqlite3")).toBe(true);
     expect(protectedName(".env.example")).toBe(false);
+    expect(protectedName(".envrc")).toBe(true);
+    expect(protectedName(".env-production")).toBe(true);
     expect(protectedName("dist")).toBe(false);
   });
 
@@ -342,6 +347,27 @@ describe("space cleanup", () => {
     const quiet = console.log;
     console.log = () => {};
     try { expect(main([root], root, () => [])).toBe(1); } finally { console.log = quiet; }
+  });
+
+  test("refuses trees holding credentials or bare repositories", () => {
+    const root = fixture();
+    write(root, "dist/.envrc", "export TOKEN=1");
+    expect(unsafeReason(root, "dist")).toBe("contains dist/.envrc");
+    rmSync(path.join(root, "dist/.envrc"));
+    for (const part of ["HEAD", "objects/x", "refs/heads/main"]) write(root, `dist/mirror.git/${part}`);
+    expect(unsafeReason(root, "dist")).toBe("contains repository dist/mirror.git");
+  });
+
+  test("sizes a nested cache even when its parent is measured too", () => {
+    const root = fixture();
+    writeFileSync(path.join(root, "node_modules/.cache/babel/a"), "x".repeat(64 * 1024));
+    const quiet = console.log;
+    let output = "";
+    console.log = (text: string) => { output += text; };
+    try { main([root, "--json", "--include-busy"], root, () => []); } finally { console.log = quiet; }
+    const report = JSON.parse(output) as { repos: Array<{ candidates: Array<{ path: string; bytes: number }> }> };
+    const cache = report.repos[0]!.candidates.find(candidate => candidate.path === "node_modules/.cache");
+    expect(cache!.bytes).toBeGreaterThanOrEqual(64 * 1024);
   });
 
   test("rejects unknown options", () => {

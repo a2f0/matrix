@@ -83,15 +83,34 @@ function git(root: string, args: string[]): { ok: boolean; stdout: string } {
 }
 
 /** Names that mark a tree as holding work or data rather than regenerable output. */
-const PROTECTED = [".git", ".env", ".env.*", ".secrets", "*.sqlite", "*.sqlite3", "*.db"];
+// `.env*` covers `.envrc` and `.env-production` as well as `.env.local`.
+const PROTECTED = [".git", ".env*", ".secrets", "*.sqlite", "*.sqlite3", "*.db"];
 const TEMPLATE = /\.(example|sample|template)$/;
 
 /** Whether one path component is protected, by the same patterns `find` applies below. */
 export function protectedName(name: string): boolean {
   if (TEMPLATE.test(name)) return false;
   return PROTECTED.some(pattern => pattern.startsWith("*.") ? name.endsWith(pattern.slice(1))
-    : pattern.endsWith(".*") ? name.startsWith(pattern.slice(0, -1))
+    : pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1))
     : name === pattern);
+}
+
+/** A working tree (`.git` inside) or a bare repository (`HEAD`, `objects`, `refs`). */
+export function isRepository(directory: string): boolean {
+  return existsSync(path.join(directory, ".git"))
+    || (existsSync(path.join(directory, "HEAD")) && existsSync(path.join(directory, "objects")) && existsSync(path.join(directory, "refs")));
+}
+
+/** The first repository at or under `directory`, undefined when there is none; throws when it cannot search. */
+export function findRepository(directory: string): string | undefined {
+  if (isRepository(directory)) return directory;
+  const result = spawnSync("find", [directory, "(", "-name", ".git", "-o", "-name", "HEAD", ")", "-print"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(`could not search ${directory} for repositories`);
+  for (const found of result.stdout.split("\n").filter(Boolean)) {
+    if (path.basename(found) === ".git") return path.dirname(found);
+    if (isRepository(path.dirname(found))) return path.dirname(found);
+  }
+  return undefined;
 }
 
 /** Why a path must not be removed, or undefined when it is safe to. */
@@ -112,6 +131,9 @@ export function unsafeReason(root: string, rel: string): string | undefined {
   if (protectedFile.status !== 0) return "could not search for protected files";
   const found = protectedFile.stdout.trim();
   if (found !== "") return `contains ${path.relative(root, found)}`;
+  let repository: string | undefined;
+  try { repository = findRepository(current); } catch { return "could not search for repositories"; }
+  if (repository) return `contains repository ${path.relative(root, repository) || rel}`;
   // Checked here, not only at scan time: a file can be force-added between scan and removal.
   const tracked = git(root, ["ls-files", "-z", "--", rel]);
   if (!tracked.ok) return "could not list tracked files";
@@ -360,11 +382,12 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
       // Xcode can share one SourcePackages directory across projects at the top level.
       if (entry.name === "SourcePackages") continue;
       if (!entry.isDirectory()) { rmSync(project, { force: true }); continue; }
+      // Something cloned straight into DerivedData is a repository, not a project's build data.
+      if (isRepository(project)) continue;
       for (const child of readdirSync(project)) {
         if (child === "SourcePackages") continue;
         // A package directory moved with -clonedSourcePackagesDirPath still holds clones.
-        const repository = spawnSync("find", [path.join(project, child), "-name", ".git", "-print", "-quit"], { encoding: "utf8" });
-        if (repository.status !== 0 || repository.stdout.trim() !== "") continue;
+        try { if (findRepository(path.join(project, child))) continue; } catch { continue; }
         rmSync(path.join(project, child), { recursive: true, force: true });
       }
     }
@@ -504,8 +527,13 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
     const workers = busy.get(target.root);
     if (workers) report.busy = workers.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
     try { report.candidates = findCandidates(target.root); } catch (error) { report.error = (error as Error).message; }
-    const sizes = measure(report.candidates.map(candidate => path.join(target.root, candidate.path)));
-    for (const candidate of report.candidates) candidate.bytes = sizes.get(path.join(target.root, candidate.path)) ?? 0;
+    // du counts a directory once per call, so a nested cache measured alongside its parent
+    // would read as empty: measure outer paths and nested ones in separate calls.
+    const nested = (candidate: Candidate) => report.candidates.some(other => candidate.path.startsWith(`${other.path}/`));
+    for (const group of [report.candidates.filter(candidate => !nested(candidate)), report.candidates.filter(nested)]) {
+      const sizes = measure(group.map(candidate => path.join(target.root, candidate.path)));
+      for (const candidate of group) candidate.bytes = sizes.get(path.join(target.root, candidate.path)) ?? 0;
+    }
     return report;
   });
   const machine = options.machine ? machineItems(procs) : [];
