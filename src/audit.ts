@@ -99,6 +99,18 @@ export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacemen
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
 ];
 
+/** Biome's noImportCycles as an error that counts type-only imports, which the rule's default skips. */
+function biomeGuardsCycles(config: string): boolean {
+  const rule = /"noImportCycles"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})/.exec(config)?.[1];
+  return rule !== undefined && /"level"\s*:\s*"error"/.test(rule) && /"ignoreTypes"\s*:\s*false/.test(rule);
+}
+
+/** A dependency-cruiser rule set (a named config or a module importing dependency-cruiser) with a no-circular rule. */
+function cruiserGuardsCycles(file: string, text: string): boolean {
+  const config = /(^|\/)(\.dependency-cruiser|dependency-cruiser\.config)\.[a-z]+$/.test(file) || /["']dependency-cruiser["']/.test(text);
+  return config && /["']no-circular["']/.test(text);
+}
+
 function managedSkills(checkout: Checkout): string[] {
   return Object.keys(object(json(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
 }
@@ -275,11 +287,12 @@ export const RULES: readonly Rule[] = [
       if (sources.length === 0) return skip("no TypeScript sources or Python package");
       const guarded = (patterns: string[], test: (text: string) => boolean) =>
         checkout.tracked(...patterns).some(file => test(checkout.read(file) ?? ""));
-      if (guarded([":(glob)**/biome.json", ":(glob)**/biome.jsonc"], text => /"noImportCycles"/.test(text) && /"ignoreTypes"\s*:\s*false/.test(text))) return pass;
+      if (guarded([":(glob)**/biome.json", ":(glob)**/biome.jsonc"], biomeGuardsCycles)) return pass;
       // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
-      const cruiser = git(checkout.directory, ["grep", "-l", "-I", "-E", "-e", "circular[\"']?[[:space:]]*:[[:space:]]*true", "--", "*.ts", "*.js", "*.cjs", "*.mjs", "*.json"]);
-      if (cruiser.status === 0) return pass;
-      if (cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
+      const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-E", "-e", "circular[\"']?[[:space:]]*:[[:space:]]*true", "--", "*.ts", "*.js", "*.cjs", "*.mjs", "*.json"]);
+      if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
+      const configs = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
+      if (configs.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return pass;
       if (checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts", ":(glob)**/test_module_graph.py").length > 0) return pass;
       return fail("no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test");
     },

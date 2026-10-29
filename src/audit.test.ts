@@ -181,7 +181,12 @@ describe("audit", () => {
     expect(guard("biome-default", { "biome.json": '{ "linter": { "rules": { "suspicious": { "noImportCycles": "error" } } } }' })).toBe(missing);
     expect(guard("biome", { "packages/web/biome.jsonc": '{ "suspicious": { "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } } }' })).toBeUndefined();
     expect(guard("cruiser", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", to: { circular: true } }] };' })).toBeUndefined();
-    expect(guard("cruiser-policy", { "scripts/checks/architecturePolicy.ts": 'export const rules = [{ name: "no-circular", to: {\n  circular: true,\n} }];' })).toBeUndefined();
+    expect(guard("cruiser-policy", { "scripts/checks/architecturePolicy.ts": 'import type { IForbiddenRuleType } from "dependency-cruiser";\nexport const rules = [{ name: "no-circular", to: {\n  circular: true,\n} }];' })).toBeUndefined();
+    // Disabled rules, test fixtures, and unrelated data are not guards.
+    expect(guard("biome-off", { "biome.json": '{ "suspicious": { "noImportCycles": { "level": "off", "options": { "ignoreTypes": false } } } }' })).toBe(missing);
+    expect(guard("cruiser-fixture", { "tests/fixtures/depcruise.ts": 'import "dependency-cruiser";\nconst rule = { name: "no-circular", to: { circular: true } };' })).toBe(missing);
+    expect(guard("cruiser-test", { "src/policy.test.ts": 'import "dependency-cruiser";\nconst rule = { name: "no-circular", to: { circular: true } };' })).toBe(missing);
+    expect(guard("circular-data", { "data/graph.json": '{ "name": "no-circular", "circular": true }' })).toBe(missing);
     expect(guard("cruiser-json", { ".dependency-cruiser.json": '{ "forbidden": [{ "name": "no-circular", "to": { "circular": true } }] }' })).toBeUndefined();
     expect(guard("graph-test", { "tests/module-graph.test.ts": "test('acyclic', () => {});\n" })).toBeUndefined();
     expect(failures(checkout("python", { "plugin/__init__.py": "", "tests/test_module_graph.py": "" }), ["import-cycle-guard"])).toEqual({});

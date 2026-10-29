@@ -37,10 +37,46 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
-/** Blanks comments and template literals; keeps quoted strings, which carry specifiers. */
+/**
+ * Blanks comments and template-literal text, keeping quoted strings (which carry
+ * specifiers) and the code inside `${...}` interpolations, which can import too.
+ */
 function stripNonCode(source: string): string {
-  return source.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|`(?:\\[\s\S]|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
-    (match, quoted: string | undefined) => quoted ?? match.replace(/[^\n]/g, " "));
+  const out = source.split("");
+  const blank = (from: number, to: number) => { for (let i = from; i < to; i++) if (out[i] !== "\n") out[i] = " "; };
+  // Each entry is the brace depth of an open interpolation; template text resumes when it closes.
+  const interpolations: number[] = [];
+  let depth = 0;
+  let i = 0;
+  const skipTemplateText = () => {
+    const start = i;
+    while (i < source.length) {
+      if (source[i] === "\\") { i += 2; continue; }
+      if (source[i] === "`") { blank(start, i); i++; return; }
+      if (source[i] === "$" && source[i + 1] === "{") { blank(start, i); interpolations.push(depth); depth++; i += 2; return; }
+      i++;
+    }
+    blank(start, i);
+  };
+  while (i < source.length) {
+    const char = source[i]!;
+    if (char === "/" && source[i + 1] === "/") { const end = source.indexOf("\n", i); blank(i, end === -1 ? source.length : end); i = end === -1 ? source.length : end; }
+    else if (char === "/" && source[i + 1] === "*") { const end = source.indexOf("*/", i + 2); const stop = end === -1 ? source.length : end + 2; blank(i, stop); i = stop; }
+    else if (char === "\"" || char === "'") {
+      i++;
+      while (i < source.length && source[i] !== char && source[i] !== "\n") i += source[i] === "\\" ? 2 : 1;
+      i++;
+    }
+    else if (char === "`") { i++; skipTemplateText(); }
+    else if (char === "{") { depth++; i++; }
+    else if (char === "}") {
+      depth--;
+      i++;
+      if (interpolations.at(-1) === depth) { interpolations.pop(); skipTemplateText(); }
+    }
+    else i++;
+  }
+  return out.join("");
 }
 
 const SPECIFIER = /\b(?:import|export)(?:\s+type\b)?\s*(?:[\w*{}\s,$]*?\bfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
@@ -110,8 +146,10 @@ describe("module graph", () => {
       'const preload = `import { i } from "./i";`;',
       'import { j } from "node:fs";',
       'const url = "https://example.com"; import{k}from"./k";',
+      'const lazy = `${(await import("./l")).name} and ${`nested ${await import("./m")}`} import "./n"`;',
+      'const brace = `${ { o: 1 }.o }`; import "./p";',
     ].join("\n");
-    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k"]);
+    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p"]);
   });
 
   test("detects a planted cycle and a planted layer violation", () => {
