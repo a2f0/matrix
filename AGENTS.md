@@ -275,8 +275,9 @@ directories can make delegated agents stop for permission prompts.
    waits and is reported as blocked; never pin it to an unpublished build.
 7. When the harness supports subagents, delegate one checkout per subagent with
    its checkout path and these rules; do not edit a delegated checkout yourself.
-   Run at most four at a time: concurrent validation suites saturate the machine
-   and cause timing failures.
+   Run at most four at a time, and at most two heavy suites
+   ([scheduling](docs/sweeps.md#scheduling)): concurrent validation saturates
+   the machine and causes timing failures.
    Record each repository in the ledger as its state changes with
    `bun run sweep record <branch> <repo>`: status, commits, PR, validation,
    reviewer and verdict, publish or deploy, cleanup, or the reason it was
@@ -297,7 +298,8 @@ directories can make delegated agents stop for permission prompts.
 9. Before the final report, run `bun run sweep retro`. Give each recurring
    cause a resolution in the repository that owns it: a fix, guidance, or a
    recorded decision, shipped as its own PR or listed as a follow-up in the
-   report ([docs/sweeps.md](docs/sweeps.md#retro)). Friction never justifies
+   report, and record it with `bun run sweep resolve`
+   ([docs/sweeps.md](docs/sweeps.md#retro)). Friction never justifies
    weakening a repository's policy. When a lesson becomes something matrix or
    agent-tool can check or perform, replace its prose with the command.
 
