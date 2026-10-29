@@ -13,6 +13,15 @@ const AGENT_TOOL = "@a2f0/agent-tool";
  * guidance no longer carries fallbacks for older pins.
  */
 export const MINIMUM_AGENT_TOOL = "0.1.21";
+/**
+ * How long a pin may trail a newer agent-tool release before the remote audit
+ * fails. agent-tool can release several times a day, and each pin sweep runs
+ * every checkout's validation, so upgrades batch weekly instead of chasing
+ * every release.
+ */
+export const AGENT_TOOL_GRACE_DAYS = 7;
+const DAY_MS = 86_400_000;
+const EXACT_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 
 export type Outcome = { readonly status: "pass" } | { readonly status: "fail" | "skip"; readonly detail: string };
 
@@ -27,8 +36,10 @@ export interface Checkout {
 }
 
 export interface AuditContext {
-  /** The registry's latest version of a package; only remote rules call it. */
-  latest(name: string): string;
+  /** When each published release of a package appeared, by exact version; only remote rules call it. */
+  releases(name: string): Record<string, string>;
+  /** The time release ages are measured against; defaults to now. */
+  readonly now?: Date;
 }
 
 export interface Rule {
@@ -131,7 +142,7 @@ export const RULES: readonly Rule[] = [
       const found: string[] = [];
       const pin = dependency(checkout.packageJson, AGENT_TOOL);
       if (pin === undefined) found.push("package.json does not depend on @a2f0/agent-tool");
-      else if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(pin)) found.push(`pin '${pin}' is not an exact version`);
+      else if (!EXACT_VERSION.test(pin)) found.push(`pin '${pin}' is not an exact version`);
       else if (compareVersions(pin, MINIMUM_AGENT_TOOL) < 0) found.push(`pins ${pin}, older than ${MINIMUM_AGENT_TOOL}`);
       if (!checkout.exists("agent-tool.json")) found.push("no agent-tool.json");
       if (!checkout.exists(".agent-tool-skills.json")) found.push("no .agent-tool-skills.json; run agent-tool skills install --apply");
@@ -140,15 +151,26 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "agent-tool-latest",
-    summary: "The agent-tool pin is the latest published release",
+    summary: `The agent-tool pin has trailed newer releases for under ${AGENT_TOOL_GRACE_DAYS} days`,
     source: "docs/dependency-upgrades.md",
     remote: true,
     check: (checkout, context) => {
       if (isProducer(checkout)) return skip("publishes agent-tool");
       const pin = dependency(checkout.packageJson, AGENT_TOOL);
       if (pin === undefined) return skip("does not pin agent-tool");
-      const latest = context.latest(AGENT_TOOL);
-      return pin === latest ? pass : fail(`pins ${pin}; latest is ${latest}`);
+      if (!EXACT_VERSION.test(pin)) return skip(`pin '${pin}' is not exact; see agent-tool-pin`);
+      const releases = context.releases(AGENT_TOOL);
+      if (!(pin in releases)) return fail(`pins ${pin}, which the registry has not published`);
+      const newer = Object.keys(releases).filter(version => EXACT_VERSION.test(version) && compareVersions(version, pin) > 0).sort(compareVersions);
+      if (newer.length === 0) return pass;
+      const detail = `pins ${pin}; latest is ${newer.at(-1)}`;
+      const undated = newer.find(version => Number.isNaN(Date.parse(releases[version]!)));
+      if (undated) return fail(`${detail}; the registry gives no release time for ${undated}`);
+      // Age counts from the first newer release published, which a later backport cannot reset.
+      const first = newer.reduce((oldest, version) => (Date.parse(releases[version]!) < Date.parse(releases[oldest]!) ? version : oldest));
+      const age = Math.floor(((context.now ?? new Date()).getTime() - Date.parse(releases[first]!)) / DAY_MS);
+      const trailing = `${first} has been out ${age} day${age === 1 ? "" : "s"}`;
+      return age < AGENT_TOOL_GRACE_DAYS ? skip(`${detail}; ${trailing}, inside the ${AGENT_TOOL_GRACE_DAYS}-day grace`) : fail(`${detail}; ${trailing}`);
     },
   },
   {
@@ -344,12 +366,13 @@ export function audit(root: string, repos: string[], rules: Rule[], statusOf: (r
   };
 }
 
-/** Ask the registry through Bun, which matrix already requires, for a package's latest version. */
-export function registryLatest(name: string): string {
-  const result = spawnSync(process.execPath, ["info", name, "version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const version = result.stdout?.trim().split("\n").pop()?.trim();
-  if (result.error || result.status !== 0 || !version || !/^[0-9]+\.[0-9]+\.[0-9]+/.test(version)) {
-    throw new Error(`Could not read the latest ${name} from the registry: ${result.error?.message ?? (result.stderr.trim() || `exit ${result.status}`)}`);
+/** Ask the registry through Bun, which matrix already requires, when each release of a package appeared. */
+export function registryReleases(name: string): Record<string, string> {
+  const result = spawnSync(process.execPath, ["info", name, "time", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const times = result.error || result.status !== 0 ? undefined : json(result.stdout);
+  const releases = Object.fromEntries(Object.entries(times ?? {}).filter((entry): entry is [string, string] => EXACT_VERSION.test(entry[0]) && typeof entry[1] === "string"));
+  if (Object.keys(releases).length === 0) {
+    throw new Error(`Could not read ${name}'s releases from the registry: ${result.error?.message ?? (result.stderr?.trim() || `exit ${result.status}`)}`);
   }
-  return version;
+  return releases;
 }

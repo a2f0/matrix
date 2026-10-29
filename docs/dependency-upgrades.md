@@ -30,8 +30,12 @@ issues. A useful report records the outcome and safe evidence, not raw secrets.
 
 For matrix itself, keep the Bun version in `.mise.toml` aligned with
 `package.json`'s `packageManager`. CI installs the toolchain from `.mise.toml`.
-`bun run audit --rule agent-tool-latest` lists the checkouts whose exact
-agent-tool pin trails the latest published release.
+`bun run audit --remote --rule agent-tool-latest` fails a checkout whose exact
+agent-tool pin has lacked a newer release for 7 days or more, and reports a pin
+inside that grace as skipped, naming the release it lacks. agent-tool can
+release several times a day, while a pin sweep runs every checkout's validation
+and some merges deploy or publish, so upgrade every pin in one sweep once the
+rule fails, to the latest release then, rather than once per release.
 
 The skill inventories package and toolchain pins, follows upstream migrations,
 checks compatibility groups and resolved dependency advisories, and validates

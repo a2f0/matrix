@@ -33,8 +33,8 @@ bun run status
 | `bun run sync [repo...]` | Clone missing checkouts, fetch all, fast-forward clean default branches |
 | `bun run status [repo...]` | Report branch, local changes, and distance from origin's default branch |
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
-| `bun run audit [repo...] [--rule <id>]... [--remote]` | Check checkouts against the shared standards; `--remote` also compares agent-tool pins with the latest release |
-| `bun run health [--remote] [--markdown]` | Combine status, audit, discovery, and sweep friction into suggested next steps |
+| `bun run audit [repo...] [--rule <id>]... [--remote]` | Check checkouts against the shared standards; `--remote` also fails agent-tool pins that trail a release by a week |
+| `bun run health [--remote] [--markdown]` | Combine disk space, status, audit, discovery, and sweep friction into suggested next steps |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 | `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |
@@ -124,7 +124,8 @@ overrides a repository's rules.
 along with the friction each repository hit: retries, fallbacks, declined
 review findings, and steps that needed a person. `bun run sweep retro` groups
 friction across sweeps, so a cause that recurs becomes a fix or a lesson
-instead of a surprise next time. See [sweep ledgers](docs/sweeps.md).
+instead of a surprise next time, and `bun run sweep resolve` records that
+resolution until the cause comes back. See [sweep ledgers](docs/sweeps.md).
 
 Dependency sweeps follow the shared `update-dependencies` skill and the
 [dependency maintenance guide](docs/dependency-upgrades.md). They ship through

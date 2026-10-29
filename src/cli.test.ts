@@ -65,37 +65,46 @@ test("audit exits zero only when every selected checkout passes", () => {
 });
 
 /** Services that record output and stand in for GitHub and the registry. */
+const GIB = 1024 ** 3;
+
 function fakeServices(overrides: Partial<Services> = {}) {
   const writes: string[] = [];
+  const warnings: string[] = [];
   const calls = { discover: 0, registry: 0 };
   const services: Services = {
     write: text => { writes.push(text); },
+    warn: text => { warnings.push(text); },
     listOwnerRepos: () => { calls.discover++; return ["a2f0/good", "a2f0/missing", "a2f0/new"]; },
-    registryLatest: () => { calls.registry++; return "0.1.23"; },
+    // Released long enough ago that a pin without it is past the grace period.
+    registryReleases: () => { calls.registry++; return { "0.1.21": "2026-01-01T00:00:00.000Z", "0.1.23": "2026-02-01T00:00:00.000Z" }; },
+    diskSpace: () => ({ free: 200 * GIB, total: 500 * GIB }),
     ...overrides,
   };
-  return { services, writes, calls };
+  return { services, writes, warnings, calls };
 }
 
 test("health reports findings without the network unless asked, and exits zero", () => {
   const offline = fakeServices({
     listOwnerRepos: () => { throw new Error("health asked GitHub without --remote"); },
-    registryLatest: () => { throw new Error("health asked the registry without --remote"); },
+    registryReleases: () => { throw new Error("health asked the registry without --remote"); },
   });
   expect(main(["health"], root, undefined, offline.services)).toBe(0);
   const report = JSON.parse(offline.writes.join("")) as Record<string, unknown>;
   expect(report).toMatchObject({ ok: false, remote: false, checkouts: { total: 2, ready: 1 }, audit: { failures: {}, unaudited: ["a2f0/missing"] } });
   expect(report).not.toHaveProperty("discovery");
+  expect(report.disk).toEqual({ free: 200 * GIB, total: 500 * GIB, low: false });
   expect(report.suggestions).toEqual([
     "Inspect a2f0/missing before the next sweep: checkout missing; run sync.",
     // The fixture pins agent-tool without installing it.
     "Reinstall dependencies in a2f0/good; their node_modules hold a different agent-tool than they pin.",
   ]);
 
-  const online = fakeServices();
+  const online = fakeServices({ diskSpace: () => ({ free: 31.5 * GIB, total: 926 * GIB }) });
   expect(main(["health", "--remote", "--markdown"], root, undefined, online.services)).toBe(0);
   const markdown = online.writes.join("");
   expect(online.calls).toEqual({ discover: 1, registry: 1 });
+  expect(markdown).toContain("- Disk: 31 GiB free of 926 GiB, under the 50 GiB a sweep needs.");
+  expect(markdown).toContain("1. Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB.");
   expect(markdown).toContain("- Audit (12 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
@@ -104,4 +113,32 @@ test("health reports findings without the network unless asked, and exits zero",
 test("health rejects arguments it does not take", () => {
   expect(() => main(["health", "dnbm"], root, undefined, fakeServices().services)).toThrow("Usage: matrix health");
   expect(() => main(["health", "--apply"], root, undefined, fakeServices().services)).toThrow("Unknown health option '--apply'.");
+});
+
+test("sweep record warns about a new cause, and resolve quiets a recurring one", () => {
+  const { services, warnings } = fakeServices();
+  expect(main(["sweep", "start", "chore/one", "good", "missing"], root, undefined, services)).toBe(0);
+  expect(main(["sweep", "record", "chore/one", "good", "--retry", "machine-load:suite timed out"], root, undefined, services)).toBe(0);
+  // The first ledger has nothing to compare with.
+  expect(warnings).toEqual([]);
+  expect(main(["sweep", "start", "chore/two", "good"], root, undefined, services)).toBe(0);
+  expect(main(["sweep", "record", "chore/two", "good", "--retry", "host-load", "--retry", "machine-load"], root, undefined, services)).toBe(0);
+  expect(warnings).toEqual(["Note: 'host-load' is a new retry cause; earlier ledgers use machine-load. Reuse one when it names the same cause, so retro can group them.\n"]);
+
+  const retroOf = () => {
+    const run = fakeServices();
+    main(["sweep", "retro"], root, undefined, run.services);
+    return JSON.parse(run.writes.join("")) as { recurring: Array<{ cause: string }>; resolved: Array<{ cause: string; resolution: { resolution: string } }> };
+  };
+  expect(retroOf().recurring.map(group => group.cause)).toEqual(["machine-load"]);
+  expect(main(["sweep", "resolve", "retry", "machine-load", "--resolution", "Run at most two heavy suites at once", "--pr", "https://github.com/a2f0/matrix/pull/41"], root, undefined, services)).toBe(0);
+  expect(retroOf()).toMatchObject({ recurring: [], resolved: [{ cause: "machine-load", resolution: { resolution: "Run at most two heavy suites at once" } }] });
+
+  // A cause that happens again after its resolution recurs again.
+  expect(main(["sweep", "record", "chore/two", "good", "--retry", "machine-load"], root, undefined, services)).toBe(0);
+  expect(retroOf().recurring.map(group => group.cause)).toEqual(["machine-load"]);
+
+  expect(() => main(["sweep", "resolve", "retry", "machine-load"], root, undefined, services)).toThrow("Usage: matrix sweep resolve");
+  expect(() => main(["sweep", "resolve", "rerun", "machine-load", "--resolution", "x"], root, undefined, services)).toThrow("--kind must be one of");
+  expect(() => main(["sweep", "resolve", "retry", "machine-load:detail", "--resolution", "x"], root, undefined, services)).toThrow("without a detail");
 });

@@ -11,10 +11,12 @@ bun run health --remote --markdown
 ```
 
 It reads and reports only, and always exits 0; `bun run audit` is the check
-that fails. Suggestions come in this order: checkouts that are not ready, stale
-installs, repositories to onboard or that discovery lost, failing audit rules,
-recurring sweep friction, unfinished sweep entries, and unmanaged checkout
-entries. JSON output has the same parts for agents; `--markdown` is for people.
+that fails. Suggestions come in this order: free disk space below 50 GiB on the
+volume holding the checkouts, checkouts that are not ready, stale installs,
+repositories to onboard or that discovery lost, failing audit rules, recurring
+sweep friction without a recorded resolution, unfinished sweep entries, and
+unmanaged checkout entries. JSON output has the same parts for agents;
+`--markdown` is for people.
 
 A suggestion is a proposal. Acting on one is a normal change under the request
 that authorizes it: a sweep for a failing rule, a lesson PR for recurring

@@ -3,11 +3,12 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
+import { AGENT_TOOL_GRACE_DAYS, type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
 
 let root: string;
-const context: AuditContext = { latest: () => "0.1.23" };
+const RELEASES = { "0.1.9": "2026-10-01T00:00:00.000Z", [MINIMUM_AGENT_TOOL]: "2026-10-10T00:00:00.000Z", "0.1.22": "2026-10-20T00:00:00.000Z", "0.1.23": "2026-10-27T00:00:00.000Z" };
+const context: AuditContext = { releases: () => RELEASES, now: new Date("2026-10-28T12:00:00.000Z") };
 
 const GUIDANCE = "# Repository guidance\n\n## Output capture\n\nRun `bun run agent:run` and read `bun run agent:logs <log>`.\n";
 const README = "# demo\n\nA demo project.\n\n## Quick start\n\n```sh\nbun install\n```\n";
@@ -108,9 +109,31 @@ describe("audit", () => {
 
   test("compares the pin with the registry only for remote rules", () => {
     const repo = checkout("current");
-    expect(failures(repo, [], true)["agent-tool-latest"]).toBe(`pins ${MINIMUM_AGENT_TOOL}; latest is 0.1.23`);
-    expect(failures(repo, ["agent-tool-latest"])["agent-tool-latest"]).toBe(`pins ${MINIMUM_AGENT_TOOL}; latest is 0.1.23`);
-    expect(() => audit(root, [repo], selectRules([], true), statusOf, { latest: () => { throw new Error("offline"); } })).toThrow("offline");
+    const expected = `pins ${MINIMUM_AGENT_TOOL}; latest is 0.1.23; 0.1.22 has been out 8 days`;
+    expect(failures(repo, [], true)["agent-tool-latest"]).toBe(expected);
+    expect(failures(repo, ["agent-tool-latest"])["agent-tool-latest"]).toBe(expected);
+    expect(() => audit(root, [repo], selectRules([], true), statusOf, { releases: () => { throw new Error("offline"); } })).toThrow("offline");
+  });
+
+  test(`lets the agent-tool pin trail newer releases for ${AGENT_TOOL_GRACE_DAYS} days`, () => {
+    const latest = checkout("latest", { "package.json": JSON.stringify({ scripts: { "agent:run": "x", "agent:logs": "y" }, devDependencies: { "@a2f0/agent-tool": "0.1.23" } }) });
+    const trailing = checkout("trailing", { "package.json": JSON.stringify({ scripts: { "agent:run": "x", "agent:logs": "y" }, devDependencies: { "@a2f0/agent-tool": "0.1.22" } }) });
+    const result = audit(root, [latest, trailing], selectRules(["agent-tool-latest"], true), statusOf, context);
+    expect(result.ok).toBe(true);
+    expect(result.checkouts[0]).toMatchObject({ failed: [], skipped: [] });
+    expect(result.checkouts[1]!.skipped).toEqual([{ rule: "agent-tool-latest", detail: `pins 0.1.22; latest is 0.1.23; 0.1.23 has been out 1 day, inside the ${AGENT_TOOL_GRACE_DAYS}-day grace` }]);
+    // The age that counts is the oldest release the pin lacks, so frequent releases cannot keep a pin current forever.
+    const later = audit(root, [trailing], selectRules(["agent-tool-latest"], true), statusOf, { ...context, now: new Date("2026-11-03T00:00:00.000Z") });
+    expect(later.checkouts[0]!.failed).toEqual([{ rule: "agent-tool-latest", detail: "pins 0.1.22; latest is 0.1.23; 0.1.23 has been out 7 days" }]);
+    // A fresh patch on an older line does not hide a newer release that has been out longer.
+    const backport = checkout("backport", { "package.json": JSON.stringify({ scripts: { "agent:run": "x", "agent:logs": "y" }, devDependencies: { "@a2f0/agent-tool": "0.1.20" } }) });
+    const backported = audit(root, [backport], selectRules(["agent-tool-latest"], true), statusOf, { releases: () => ({ "0.1.20": "2026-10-01T00:00:00.000Z", "0.1.20-1": "x", "0.1.21": "2026-10-27T00:00:00.000Z", "0.2.0": "2026-10-10T00:00:00.000Z" }), now: context.now });
+    expect(backported.checkouts[0]!.failed).toEqual([{ rule: "agent-tool-latest", detail: "pins 0.1.20; latest is 0.2.0; 0.2.0 has been out 18 days" }]);
+    const typo = checkout("typo", { "package.json": JSON.stringify({ scripts: { "agent:run": "x", "agent:logs": "y" }, devDependencies: { "@a2f0/agent-tool": "0.1.230" } }) });
+    expect(audit(root, [typo], selectRules(["agent-tool-latest"], true), statusOf, context).checkouts[0]!.failed)
+      .toEqual([{ rule: "agent-tool-latest", detail: "pins 0.1.230, which the registry has not published" }]);
+    const undated = audit(root, [trailing], selectRules(["agent-tool-latest"], true), statusOf, { releases: () => ({ "0.1.22": "2026-10-01T00:00:00.000Z", "0.1.23": "soon" }) });
+    expect(undated.checkouts[0]!.failed).toEqual([{ rule: "agent-tool-latest", detail: "pins 0.1.22; latest is 0.1.23; the registry gives no release time for 0.1.23" }]);
   });
 
   test("checks output capture scripts and guidance, including AGENTS.md without sections", () => {
