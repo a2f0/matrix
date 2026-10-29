@@ -23,7 +23,7 @@ the repository you are in). It is a dry run until `--apply`.
   `~/.agents/skills/space-cleanup` or `~/.claude/skills/space-cleanup`). With
   no paths it covers only the repository holding the working directory.
 
-Flags add tiers; each includes the ones above it in cost:
+Caches are always included; each other flag adds its own tier independently:
 
 | Flag | Removes | Cost to restore |
 | --- | --- | --- |
@@ -60,8 +60,9 @@ are your own or finished.
 The script enforces these; keep them when cleaning by hand:
 
 - Remove a repository path only when git reports it ignored, nothing under it
-  is tracked, its name is on the tier's list, no repository is nested anywhere
-  under it, and neither it nor any parent inside the repository is a symlink. Untracked files that are not ignored
+  is tracked (rechecked just before removal), its name is on the tier's list,
+  nothing under it is a repository, `.env` file, `.secrets`, or SQLite
+  database, and neither it nor any parent inside the repository is a symlink. Untracked files that are not ignored
   belong to someone: never remove them.
 - Never run `git clean` (`-X` included), `rm -rf` on a whole ignored tree, or
   delete `.env*`, `.secrets`, `.wrangler/state`, local databases, or anything

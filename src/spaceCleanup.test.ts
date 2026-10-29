@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
+import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -27,6 +27,10 @@ function fixture(root = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-"))): 
   write(root, "src/index.ts");
   write(root, ".turbo/cache/a");
   write(root, "dist/index.js");
+  // Build-named trees holding credentials or a local database.
+  write(root, "packages/app/dist/.env", "SECRET=1");
+  write(root, "packages/app/out/data.sqlite");
+  write(root, "packages/app/.turbo/.env.example");
   // A clone nested deep inside a cache directory.
   mkdirSync(path.join(root, "test-results/vendor/clone/.git"), { recursive: true });
   write(root, "test-results/vendor/clone/notes.md");
@@ -71,6 +75,7 @@ describe("space cleanup", () => {
       "node_modules/.cache": "caches",
       "packages/app/node_modules": "deps",
       ".wrangler/tmp": "caches",
+      "packages/app/.turbo": "caches",
     });
   });
 
@@ -93,8 +98,8 @@ describe("space cleanup", () => {
       expect(existsSync(path.join(root, ".turbo"))).toBe(true);
       expect(main([root, "--apply", "--include-busy"])).toBe(0);
     } finally { console.log = quiet; }
-    for (const gone of [".turbo", "node_modules/.cache", ".wrangler/tmp"]) expect(existsSync(path.join(root, gone))).toBe(false);
-    for (const kept of ["test-results/vendor/clone/notes.md", "dist", "node_modules/pkg", ".wrangler/state/d1/db.sqlite", ".env", "scratch/notes.md", "coverage/lcov.info", "build/keep.txt", "out/file", ".secrets/prod/key", "src/index.ts"]) {
+    for (const gone of ["packages/app/.turbo", ".turbo", "node_modules/.cache", ".wrangler/tmp"]) expect(existsSync(path.join(root, gone))).toBe(false);
+    for (const kept of ["packages/app/dist/.env", "packages/app/out/data.sqlite", "test-results/vendor/clone/notes.md", "dist", "node_modules/pkg", ".wrangler/state/d1/db.sqlite", ".env", "scratch/notes.md", "coverage/lcov.info", "build/keep.txt", "out/file", ".secrets/prod/key", "src/index.ts"]) {
       expect(existsSync(path.join(root, kept))).toBe(true);
     }
   });
@@ -128,6 +133,17 @@ describe("space cleanup", () => {
       ["/w/checkouts/a", [22]],
       ["/w", [23]],
     ]);
+  });
+
+  test("rechecks tracked files at removal time", () => {
+    const root = fixture();
+    expect(unsafeReason(root, ".turbo")).toBeUndefined();
+    git(root, "add", "-f", ".turbo/cache/a");
+    expect(unsafeReason(root, ".turbo")).toBe("tracked");
+  });
+
+  test("--deps alone adds only dependencies", () => {
+    expect(parseOptions(["--deps"]).tiers).toEqual(new Set(["caches", "deps"]));
   });
 
   test("fails closed when processes cannot be listed", () => {

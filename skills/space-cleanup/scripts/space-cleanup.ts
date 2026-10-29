@@ -67,6 +67,9 @@ function git(root: string, args: string[]): { ok: boolean; stdout: string } {
   return { ok: result.status === 0, stdout: result.stdout ?? "" };
 }
 
+/** Names that mark a tree as holding work or data rather than regenerable output. */
+const PROTECTED = [".git", ".env", ".env.*", ".secrets", "*.sqlite", "*.sqlite3", "*.db"];
+
 /** Why a path must not be removed, or undefined when it is safe to. */
 export function unsafeReason(root: string, rel: string): string | undefined {
   if (rel === "" || path.isAbsolute(rel) || rel.split("/").some(part => part === ".." || part === "." || part === ".git")) return "outside the repository";
@@ -77,10 +80,16 @@ export function unsafeReason(root: string, rel: string): string | undefined {
     try { stats = lstatSync(current); } catch { return "missing"; }
     if (stats.isSymbolicLink()) return "symlink";
   }
-  // A repository anywhere inside (a git dependency, a scratch clone) is someone's work.
-  const nested = spawnSync("find", [current, "-name", ".git", "-print", "-quit"], { encoding: "utf8" });
-  if (nested.status !== 0) return "could not search for nested repositories";
-  if (nested.stdout.trim() !== "") return "contains a repository";
+  // A repository, credentials, or a local database anywhere inside is someone's work or data.
+  const protectedFile = spawnSync("find", [current, "(", ...PROTECTED.flatMap((name, index) => [...(index ? ["-o"] : []), "-name", name]), ")",
+    "!", "-name", "*.example", "!", "-name", "*.sample", "!", "-name", "*.template", "-print", "-quit"], { encoding: "utf8" });
+  if (protectedFile.status !== 0) return "could not search for protected files";
+  const found = protectedFile.stdout.trim();
+  if (found !== "") return `contains ${path.relative(root, found)}`;
+  // Checked here, not only at scan time: a file can be force-added between scan and removal.
+  const tracked = git(root, ["ls-files", "-z", "--", rel]);
+  if (!tracked.ok) return "could not list tracked files";
+  if (tracked.stdout !== "") return "tracked";
   if (!git(root, ["check-ignore", "-q", "--", rel]).ok) return "not ignored";
   return undefined;
 }
@@ -99,11 +108,7 @@ export function findCandidates(root: string): Candidate[] {
       if (existsSync(path.join(root, childRel))) found.push({ path: childRel, tier: childTier, bytes: 0 });
     }
   }
-  if (found.length === 0) return [];
-  const tracked = git(root, ["ls-files", "-z", "--", ...found.map(candidate => candidate.path)]).stdout.split("\0").filter(Boolean);
-  return found.filter(candidate =>
-    !tracked.some(file => file === candidate.path || file.startsWith(`${candidate.path}/`))
-    && unsafeReason(root, candidate.path) === undefined);
+  return found.filter(candidate => unsafeReason(root, candidate.path) === undefined);
 }
 
 /** Kilobyte-accurate sizes from du, which counts each hard link once per call. */
