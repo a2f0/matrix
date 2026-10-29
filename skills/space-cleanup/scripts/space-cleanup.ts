@@ -370,6 +370,33 @@ const OPTIONS = String.raw`(?:\s+-\S+(?:\s+[^\s-]\S*)?)*`;
 const CACHE_WRITERS = "install|i|ci|add|update|up|upgrade|remove|rm|uninstall|reinstall|link|dedupe|fetch|x|dlx|exec";
 export const INSTALLING = new RegExp(String.raw`(^|[\s/])((bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?${OPTIONS}(\s+run\s+agent-tool\s+bun${OPTIONS})?\s+(${CACHE_WRITERS})|(bunx|npx|pnpx)(\.(?:c|m)?js)?)(\s|$)`);
 
+/**
+ * DerivedData entries safe to delete: each project's build products and
+ * indexes. Keeps SourcePackages (Swift package clones someone may have
+ * edited), anything holding a repository, credentials, or a database, and
+ * everything when DerivedData itself is a symlink or a repository.
+ */
+export function derivedDataRemovals(derived: string): string[] {
+  if (lstatSync(derived).isSymbolicLink() || isRepository(derived)) throw new Error(`${derived} is a symlink or a repository; clean it by hand`);
+  const removals: string[] = [];
+  const keep = (entry: string, name: string) => name === "SourcePackages" || protectedName(name) || holdsProtected(entry, derived) !== undefined;
+  for (const entry of readdirSync(derived, { withFileTypes: true })) {
+    const project = path.join(derived, entry.name);
+    if (!entry.isDirectory()) {
+      if (!keep(project, entry.name)) removals.push(project);
+      continue;
+    }
+    // A shared SourcePackages, a clone made straight into DerivedData, or a protected directory stays whole.
+    if (entry.name === "SourcePackages" || protectedName(entry.name) || isRepository(project)) continue;
+    for (const child of readdirSync(project)) {
+      const entryPath = path.join(project, child);
+      // A package directory moved with -clonedSourcePackagesDirPath still holds clones.
+      if (!keep(entryPath, child)) removals.push(entryPath);
+    }
+  }
+  return removals;
+}
+
 /** Developer caches outside any repository, for `--machine`. */
 export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
   const { home, has, run } = host;
@@ -387,27 +414,24 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
   };
 
   const derived = path.join(home, "Library/Developer/Xcode/DerivedData");
-  dir("xcode-derived-data", "Xcode DerivedData, keeping each project's SourcePackages", derived, false, () => {
-    // A relocated or hand-made DerivedData could be a link to, or itself be, someone's repository.
-    if (lstatSync(derived).isSymbolicLink() || isRepository(derived)) throw new Error(`${derived} is a symlink or a repository; clean it by hand`);
-    // SourcePackages/checkouts are Swift package clones someone may have edited; builds and indexes go.
-    for (const entry of readdirSync(derived, { withFileTypes: true })) {
-      const project = path.join(derived, entry.name);
-      // Xcode can share one SourcePackages directory across projects at the top level.
-      if (entry.name === "SourcePackages") continue;
-      if (!entry.isDirectory()) { rmSync(project, { force: true }); continue; }
-      // Something cloned straight into DerivedData is a repository, not a project's build data.
-      if (isRepository(project)) continue;
-      for (const child of readdirSync(project)) {
-        if (child === "SourcePackages") continue;
-        // A package directory moved with -clonedSourcePackagesDirPath still holds clones;
-        // credentials and databases get the same protection as in repositories.
-        if (holdsProtected(path.join(project, child), derived)) continue;
-        rmSync(path.join(project, child), { recursive: true, force: true });
-      }
-    }
-    return "cleaned";
-  }, building);
+  if (existsSync(derived)) {
+    // A DerivedData that must not be touched sizes as nothing; applying it reports why.
+    let removable: string[] = [];
+    try { removable = derivedDataRemovals(derived); } catch { /* reported by apply */ }
+    const sizes = measure(removable);
+    items.push({
+      id: "xcode-derived-data",
+      description: `Xcode DerivedData builds and indexes, keeping SourcePackages, repositories, and data files (${derived.replace(home, "~")})`,
+      reportOnly: false,
+      bytes: removable.reduce((sum, entry) => sum + (sizes.get(entry) ?? 0), 0),
+      // Recomputed at apply time: the tree may have changed since the report.
+      apply: () => {
+        for (const entry of derivedDataRemovals(derived)) rmSync(entry, { recursive: true, force: true });
+        return "cleaned";
+      },
+      guard: building,
+    });
+  }
   if (has("xcrun")) {
     const listing = host.output("xcrun", ["simctl", "list", "devices", "unavailable"]);
     const count = listing.split("\n").filter(line => /\(unavailable/.test(line)).length;

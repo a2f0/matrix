@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, INSTALLING, parseProcesses, protectedName, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
+import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, derivedDataRemovals, INSTALLING, parseProcesses, protectedName, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -184,6 +184,10 @@ describe("space cleanup", () => {
       write(home, "Library/Developer/Xcode/DerivedData/clone/.git/HEAD");
       write(home, "Library/Developer/Xcode/DerivedData/clone/src/main.swift");
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/Tools/.env", "TOKEN=1");
+      write(home, "Library/Developer/Xcode/DerivedData/.env", "TOKEN=1");
+      write(home, "Library/Developer/Xcode/DerivedData/notes.sqlite");
+      write(home, "Library/Developer/Xcode/DerivedData/.secrets/Build/key");
+      write(home, "Library/Developer/Xcode/DerivedData/info.plist");
       write(home, ".bun/install/cache/pkg/x");
       write(home, ".gradle/caches/x");
       const ran: string[] = [];
@@ -211,7 +215,10 @@ describe("space cleanup", () => {
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD"))).toBe(true);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Packages/checkouts/Custom/.git/HEAD"))).toBe(true);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/clone/src/main.swift"))).toBe(true);
-      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Tools/.env"))).toBe(true);
+      for (const kept of ["App-abc/Tools/.env", ".env", "notes.sqlite", ".secrets/Build/key"]) {
+        expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData", kept))).toBe(true);
+      }
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/info.plist"))).toBe(false);
       expect(ran.toSorted()).toEqual(["brew cleanup", "bun pm cache rm"]);
       expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
     });
@@ -417,6 +424,17 @@ describe("space cleanup", () => {
     write(root, "node_modules/.git/HEAD");
     expect(unsafeReason(root, "node_modules/.cache")).toBe("inside repository node_modules");
     expect(findCandidates(root).map(candidate => candidate.path)).not.toContain("node_modules/.cache");
+  });
+
+  test("sizes DerivedData by what it would remove", () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-home-"));
+    temps.push(home);
+    const derived = path.join(home, "Library/Developer/Xcode/DerivedData");
+    write(derived, "App-abc/Build/x", "x".repeat(8 * 1024));
+    write(derived, "App-abc/SourcePackages/checkouts/Lib/big", "x".repeat(512 * 1024));
+    expect(derivedDataRemovals(derived)).toEqual([path.join(derived, "App-abc/Build")]);
+    const item = machineItems([], { home, has: () => false, output: () => "", run: () => "" })[0]!;
+    expect(item.bytes!).toBeLessThan(512 * 1024);
   });
 
   test("rejects unknown options", () => {
