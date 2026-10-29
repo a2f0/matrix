@@ -59,7 +59,10 @@ describe("audit", () => {
   test("passes a conforming checkout and ignores superseded text in managed skills", () => {
     const repo = checkout("good");
     const result = audit(root, [repo, "a2f0/missing"], selectRules([], false), statusOf, context);
-    expect(result.checkouts[0]).toMatchObject({ repo, failed: [], skipped: [{ rule: "brand-images", detail: "no assets/brand" }] });
+    expect(result.checkouts[0]).toMatchObject({ repo, failed: [], skipped: [
+      { rule: "brand-images", detail: "no assets/brand" },
+      { rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" },
+    ] });
     expect(result.checkouts[1]).toMatchObject({ repo: "a2f0/missing", error: "checkout missing; run sync" });
     expect(result.ok).toBe(false);
     expect(result.rules.map(rule => rule.id)).not.toContain("agent-tool-latest");
@@ -169,6 +172,41 @@ describe("audit", () => {
     expect(failures(checkout("brand", { "assets/brand/logo.svg": "<svg/>", "assets/brand/icon.png": "png", "agent-tool.json": "{}" }))["brand-images"])
       .toBe("agent-tool.json declares no images; committed rasters: assets/brand/icon.png");
     expect(failures(checkout("brand-ok", { "assets/brand/logo.svg": "<svg/>", "agent-tool.json": JSON.stringify({ images: { targets: {} } }) }))).toEqual({});
+  });
+
+  test("requires an import-cycle guard that counts type-only imports wherever TypeScript or a Python package exists", () => {
+    const guard = (name: string, files: Record<string, string>) => failures(checkout(name, { "src/a.ts": "export const a = 1;\n", ...files }), ["import-cycle-guard"])["import-cycle-guard"];
+    const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test";
+    const pythonMissing = "the Python package has no test_module_graph.py";
+    expect(guard("unguarded", {})).toBe(missing);
+    expect(guard("biome-default", { "biome.json": '{ "linter": { "rules": { "suspicious": { "noImportCycles": "error" } } } }' })).toBe(missing);
+    expect(guard("biome", { "packages/web/biome.jsonc": '{ "suspicious": { "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } } }' })).toBeUndefined();
+    expect(guard("cruiser", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "error", from: {}, to: { circular: true } }], options: { tsPreCompilationDeps: "specify" } };' })).toBeUndefined();
+    expect(guard("cruiser-policy", { "scripts/checks/architecturePolicy.ts": 'import type { IForbiddenRuleType } from "dependency-cruiser";\nexport const rules = [{ name: "no-circular", severity: "error", to: {\n  circular: true,\n} }];\nexport const options = { parser: "swc" };' })).toBeUndefined();
+    expect(guard("cruiser-multiline", { ".dependency-cruiser.cjs": 'require("dependency-cruiser");\nmodule.exports = { forbidden: [{\n  name: "no-circular",\n  severity: "error",\n  to: { circular:\n    true },\n}], options: { tsPreCompilationDeps: true } };' })).toBeUndefined();
+    // Disabled rules, test fixtures, and unrelated data are not guards.
+    expect(guard("biome-commented", { "biome.jsonc": '{\n  // "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } }\n  /* "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } */\n}' })).toBe(missing);
+    expect(guard("biome-url", { "biome.jsonc": '{ "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json", "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } }' })).toBeUndefined();
+    expect(guard("biome-off", { "biome.json": '{ "suspicious": { "noImportCycles": { "level": "off", "options": { "ignoreTypes": false } } } }' })).toBe(missing);
+    expect(guard("cruiser-fixture", { "tests/fixtures/depcruise.ts": 'import "dependency-cruiser";\nconst rule = { name: "no-circular", severity: "error", to: { circular: true } };\nconst options = { tsPreCompilationDeps: true };' })).toBe(missing);
+    expect(guard("cruiser-test", { "src/policy.test.ts": 'import "dependency-cruiser";\nconst rule = { name: "no-circular", severity: "error", to: { circular: true } };\nconst options = { tsPreCompilationDeps: true };' })).toBe(missing);
+    expect(guard("circular-data", { "data/graph.json": '{ "name": "no-circular", "circular": true }' })).toBe(missing);
+    expect(guard("cruiser-json", { ".dependency-cruiser.json": '{ "forbidden": [{ "name": "no-circular", "severity": "error", "to": { "circular": true } }], "options": { "tsPreCompilationDeps": true } }' })).toBeUndefined();
+    // A rule that skips type-only imports, or only warns, does not gate a merge.
+    expect(guard("cruiser-untyped", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "error", to: { circular: true } }] };' })).toBe(missing);
+    expect(guard("cruiser-ignored", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "ignore", to: { circular: true } }], options: { tsPreCompilationDeps: true } };' })).toBe(missing);
+    expect(guard("cruiser-default", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", to: { circular: true } }], options: { tsPreCompilationDeps: true } };' })).toBe(missing);
+    expect(guard("graph-test", { "tests/module-graph.test.ts": "test('acyclic', () => {});\n" })).toBeUndefined();
+    expect(failures(checkout("python", { "plugin/__init__.py": "", "tests/test_module_graph.py": "" }), ["import-cycle-guard"])).toEqual({});
+    expect(failures(checkout("python-bare", { "plugin/__init__.py": "" }), ["import-cycle-guard"])["import-cycle-guard"]).toBe(pythonMissing);
+    // Each language needs its own guard: a Biome config cannot check Python.
+    const biome = '{ "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } }';
+    expect(guard("mixed", { "biome.json": biome, "plugin/__init__.py": "" })).toBe(pythonMissing);
+    expect(guard("mixed-ok", { "biome.json": biome, "plugin/__init__.py": "", "tests/test_module_graph.py": "" })).toBeUndefined();
+    expect(failures(checkout("mts-only", { "src/main.mts": "export {};\n" }), ["import-cycle-guard"])["import-cycle-guard"]).toBe(missing);
+    // Declarations and managed skills are not sources.
+    const skipped = audit(root, [checkout("types-only", { "types/env.d.ts": "declare const x: 1;\n" })], selectRules(["import-cycle-guard"], false), statusOf, context);
+    expect(skipped.checkouts[0]!.skipped).toEqual([{ rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" }]);
   });
 
   test("finds superseded commands in Markdown, every spelling, outside managed skills", () => {

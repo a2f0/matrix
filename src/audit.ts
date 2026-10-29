@@ -99,6 +99,58 @@ export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacemen
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
 ];
 
+/** Biome's noImportCycles as an error that counts type-only imports, which the rule's default skips. */
+function biomeGuardsCycles(config: string): boolean {
+  // JSONC: drop comments outside strings, so a commented-out rule does not count.
+  const active = config.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_match, quoted: string | undefined) => quoted ?? "");
+  const rule = /"noImportCycles"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})/.exec(active)?.[1];
+  return rule !== undefined && /"level"\s*:\s*"error"/.test(rule) && /"ignoreTypes"\s*:\s*false/.test(rule);
+}
+
+/** The text of the innermost `{...}` object enclosing `index`, or undefined. */
+function enclosingObject(text: string, index: number): string | undefined {
+  let depth = 0;
+  let start = index;
+  for (; start >= 0; start--) {
+    if (text[start] === "}") depth++;
+    else if (text[start] === "{" && depth-- === 0) break;
+  }
+  if (start < 0) return undefined;
+  depth = 0;
+  for (let end = start; end < text.length; end++) {
+    if (text[end] === "{") depth++;
+    else if (text[end] === "}" && --depth === 0) return text.slice(start, end + 1);
+  }
+  return undefined;
+}
+
+/**
+ * A dependency-cruiser rule set (a named config or a module importing
+ * dependency-cruiser) with an error-level no-circular rule that sees type-only
+ * imports: those are dropped unless tsPreCompilationDeps is true or "specify",
+ * or the swc parser, which keeps them, reads the sources.
+ */
+function cruiserGuardsCycles(file: string, text: string): boolean {
+  const config = /(^|\/)(\.dependency-cruiser|dependency-cruiser\.config)\.[a-z]+$/.test(file) || /["']dependency-cruiser["']/.test(text);
+  const typeAware = /tsPreCompilationDeps["']?\s*:\s*(true|["']specify["'])/.test(text) || /parser["']?\s*:\s*["']swc["']/.test(text);
+  if (!config || !typeAware) return false;
+  return [...text.matchAll(/["']no-circular["']/g)].some(match => {
+    const rule = enclosingObject(text, match.index);
+    return rule !== undefined && /severity["']?\s*:\s*["']error["']/.test(rule) && /circular["']?\s*:\s*true/.test(rule);
+  });
+}
+
+function typescriptGuarded(checkout: Checkout): boolean {
+  const configs = (patterns: string[]) => checkout.tracked(...patterns).map(file => ({ file, text: checkout.read(file) ?? "" }));
+  if (configs([":(glob)**/biome.json", ":(glob)**/biome.jsonc"]).some(({ text }) => biomeGuardsCycles(text))) return true;
+  // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
+  const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-F", "-e", "no-circular", "--", "*.ts", "*.mts", "*.cts", "*.js", "*.cjs", "*.mjs", "*.json"]);
+  if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
+  const candidates = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
+  if (candidates.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return true;
+  return checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts").length > 0;
+}
+
 function managedSkills(checkout: Checkout): string[] {
   return Object.keys(object(json(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
 }
@@ -263,6 +315,23 @@ export const RULES: readonly Rule[] = [
         found.push("neither the agents:check script nor a workflow runs agent-tool permissions check");
       }
       return problems(found);
+    },
+  },
+  {
+    id: "import-cycle-guard",
+    summary: "TypeScript or Python sources have a merge-gating guard against import cycles, type-only imports included",
+    source: "docs/tooling.md#import-cycles-and-layering",
+    check: checkout => {
+      const exclusions = managedSkills(checkout).map(file => `:(exclude,literal)${file}`);
+      const typescript = checkout.tracked(...["ts", "tsx", "mts", "cts"].map(extension => `:(glob)**/*.${extension}`), ...exclusions)
+        .some(file => !/\.d\.[cm]?ts$/.test(file));
+      const python = checkout.tracked(":(glob)**/__init__.py", ...exclusions).length > 0;
+      if (!typescript && !python) return skip("no TypeScript sources or Python package");
+      // Each language needs a guard that can read it: Biome and dependency-cruiser cannot check Python.
+      const missing: string[] = [];
+      if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test");
+      if (python && checkout.tracked(":(glob)**/test_module_graph.py").length === 0) missing.push("the Python package has no test_module_graph.py");
+      return problems(missing);
     },
   },
   {

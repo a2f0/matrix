@@ -138,6 +138,23 @@ Retain behavioral fixtures for repository-specific guarantees, and move generic
 guard coverage upstream with the shared implementation. Tests for a script move
 must exercise its relocated default paths as well as explicit path overrides.
 
+## Import cycles and layering
+
+Every repository with TypeScript sources or a Python package enforces an
+acyclic module graph in a check that already gates merges, counting type-only
+imports, and writes its intended layering down beside its other layout
+guidance. Use whichever mechanism the repository already runs: Biome's
+`suspicious.noImportCycles` with `ignoreTypes: false` (the default skips
+type-only imports, and most cycles found in the matrix were type-only),
+dependency-cruiser's `no-circular` rule at severity `error` with
+`tsPreCompilationDeps` or the `swc` parser, or, without either, a module-graph
+test named `moduleGraph.test.ts` or `module-graph.test.ts`. A Python package
+needs its own `test_module_graph.py`, since neither tool reads Python. Express layers with the same tool:
+`style/noRestrictedImports` overrides scoped to `**/<pkg>/src/**`,
+dependency-cruiser rules, or the test's layer table. Prove a new guard fails on
+a planted violation before relying on it. The audit's `import-cycle-guard` rule
+checks that one of these exists.
+
 ## Shared command entrypoints
 
 | Workflow | Shared command |

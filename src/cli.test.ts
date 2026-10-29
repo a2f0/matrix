@@ -105,7 +105,7 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(online.calls).toEqual({ discover: 1, registry: 1 });
   expect(markdown).toContain("- Disk: 31 GiB free of 926 GiB, under the 50 GiB a sweep needs.");
   expect(markdown).toContain("1. Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB; `bun run space` lists what is safe to remove.");
-  expect(markdown).toContain("- Audit (12 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain("- Audit (13 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
 });
