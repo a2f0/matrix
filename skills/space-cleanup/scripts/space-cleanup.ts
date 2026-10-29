@@ -332,7 +332,9 @@ export const HOST: Host = {
 // Matches the launcher forms too: `brew.rb`, `pnpm.cjs`, `npm-cli.js`, `yarn.js`.
 // Options may come first (`bun --cwd /repo install`, `pnpm -C dir install`).
 const OPTIONS = String.raw`(?:\s+-\S+(?:\s+[^\s-]\S*)?)*`;
-export const INSTALLING = new RegExp(String.raw`(^|[\s/])(bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?${OPTIONS}(\s+run\s+agent-tool\s+bun${OPTIONS})?\s+(install|ci|add|i|upgrade|reinstall)(\s|$)`);
+// Anything that writes to a package cache: installs, updates, removals, and one-off runners.
+const CACHE_WRITERS = "install|i|ci|add|update|up|upgrade|remove|rm|uninstall|reinstall|link|dedupe|fetch|x|dlx|exec";
+export const INSTALLING = new RegExp(String.raw`(^|[\s/])((bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?${OPTIONS}(\s+run\s+agent-tool\s+bun${OPTIONS})?\s+(${CACHE_WRITERS})|(bunx|npx|pnpx)(\.(?:c|m)?js)?)(\s|$)`);
 
 /** Developer caches outside any repository, for `--machine`. */
 export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
@@ -358,7 +360,13 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
       // Xcode can share one SourcePackages directory across projects at the top level.
       if (entry.name === "SourcePackages") continue;
       if (!entry.isDirectory()) { rmSync(project, { force: true }); continue; }
-      for (const child of readdirSync(project)) if (child !== "SourcePackages") rmSync(path.join(project, child), { recursive: true, force: true });
+      for (const child of readdirSync(project)) {
+        if (child === "SourcePackages") continue;
+        // A package directory moved with -clonedSourcePackagesDirPath still holds clones.
+        const repository = spawnSync("find", [path.join(project, child), "-name", ".git", "-print", "-quit"], { encoding: "utf8" });
+        if (repository.status !== 0 || repository.stdout.trim() !== "") continue;
+        rmSync(path.join(project, child), { recursive: true, force: true });
+      }
     }
     return "cleaned";
   }, building);
@@ -502,7 +510,8 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
   });
   const machine = options.machine ? machineItems(procs) : [];
 
-  let failures = 0;
+  // A repository that could not be scanned was not cleaned: report it as a failure.
+  let failures = repos.filter(repo => repo.error).length;
   if (options.apply) {
     // Scans and sizing take a while; judge activity from a fresh process list.
     let fresh: Proc[];

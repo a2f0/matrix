@@ -180,6 +180,7 @@ describe("space cleanup", () => {
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x");
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD");
       write(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD");
+      write(home, "Library/Developer/Xcode/DerivedData/App-abc/Packages/checkouts/Custom/.git/HEAD");
       write(home, ".bun/install/cache/pkg/x");
       write(home, ".gradle/caches/x");
       const ran: string[] = [];
@@ -205,6 +206,7 @@ describe("space cleanup", () => {
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build"))).toBe(false);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD"))).toBe(true);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD"))).toBe(true);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Packages/checkouts/Custom/.git/HEAD"))).toBe(true);
       expect(ran.toSorted()).toEqual(["brew cleanup", "bun pm cache rm"]);
       expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
     });
@@ -283,6 +285,15 @@ describe("space cleanup", () => {
       "pnpm -C web install --frozen-lockfile",
       "bun --verbose install",
       "bun run agent-tool bun install --cwd packages/api",
+      "bun update",
+      "npm update react",
+      "pnpm up --latest",
+      "bun run agent-tool bun update typescript",
+      "bun run agent-tool bun remove left-pad",
+      "bunx prettier --check .",
+      "npx tsc",
+      "pnpm dlx create-vite",
+      "bun x eslint",
     ]) expect(INSTALLING.test(args)).toBe(true);
     for (const args of ["bun test", "npm run build", "brew list", "node install.js", "bun --cwd /repo test"]) expect(INSTALLING.test(args)).toBe(false);
   });
@@ -322,6 +333,15 @@ describe("space cleanup", () => {
     expect(() => parseProcesses(table, args, "", 501, alive)).toThrow("cannot read the working directory of node 10");
     const procs = parseProcesses(table, args, "p10\nfcwd\nn/repo\n", 501, alive);
     expect(procs.map(proc => [proc.pid, proc.cwd])).toEqual([[1, undefined], [10, "/repo"], [12, undefined]]);
+  });
+
+  test("exits nonzero when a repository cannot be scanned", () => {
+    const root = realpathSync(fixture());
+    // A corrupt index keeps the repository resolvable but makes `git status` fail.
+    writeFileSync(path.join(root, ".git", "index"), "not an index");
+    const quiet = console.log;
+    console.log = () => {};
+    try { expect(main([root], root, () => [])).toBe(1); } finally { console.log = quiet; }
   });
 
   test("rejects unknown options", () => {
