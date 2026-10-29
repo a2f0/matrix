@@ -297,7 +297,8 @@ export const HOST: Host = {
 };
 
 /** Running installs read the package caches, so those caches wait for them. */
-const INSTALLING = /(^|[\s/])(bun|npm|pnpm|yarn|brew)(\s+run\s+agent-tool\s+bun)?\s+(install|ci|add|i|upgrade)(\s|$)/;
+// Matches the launcher forms too: `brew.rb`, `pnpm.cjs`, `npm-cli.js`, `yarn.js`.
+export const INSTALLING = /(^|[\s/])(bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?(\s+run\s+agent-tool\s+bun)?\s+(install|ci|add|i|upgrade|reinstall)(\s|$)/;
 
 /** Developer caches outside any repository, for `--machine`. */
 export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
@@ -320,6 +321,8 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
     // SourcePackages/checkouts are Swift package clones someone may have edited; builds and indexes go.
     for (const entry of readdirSync(derived, { withFileTypes: true })) {
       const project = path.join(derived, entry.name);
+      // Xcode can share one SourcePackages directory across projects at the top level.
+      if (entry.name === "SourcePackages") continue;
       if (!entry.isDirectory()) { rmSync(project, { force: true }); continue; }
       for (const child of readdirSync(project)) if (child !== "SourcePackages") rmSync(path.join(project, child), { recursive: true, force: true });
     }
@@ -362,13 +365,16 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
 
 /**
  * Runs every machine item that is neither report-only nor waiting on a running
- * process, rechecking its guard against `procs`, a fresh process list.
+ * process, listing processes afresh just before each guarded item.
  * Returns the number that failed.
  */
-export function applyMachine(items: MachineItem[], procs: Proc[]): number {
+export function applyMachine(items: MachineItem[], discover: () => Proc[]): number {
   let failures = 0;
   for (const item of items) {
-    item.skipped = item.guard?.(procs);
+    if (item.reportOnly || !item.apply) continue;
+    if (item.guard) {
+      try { item.skipped = item.guard(discover()); } catch (error) { item.skipped = (error as Error).message; }
+    }
     if (item.reportOnly || item.skipped || !item.apply) continue;
     try { item.result = item.apply(); } catch (error) { item.result = `failed: ${(error as Error).message}`; failures++; }
   }
@@ -488,7 +494,9 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
       }
       failures += repo.failed.length;
     }
-    failures += applyMachine(machine, fresh);
+    failures += applyMachine(machine, () => {
+      try { return discover(); } catch (error) { if (options.includeBusy) return []; throw error; }
+    });
   }
   const after = options.apply ? free(volume) : undefined;
 

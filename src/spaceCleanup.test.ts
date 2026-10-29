@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
+import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, INSTALLING, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -179,6 +179,7 @@ describe("space cleanup", () => {
       temps.push(home);
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x");
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD");
+      write(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD");
       write(home, ".bun/install/cache/pkg/x");
       write(home, ".gradle/caches/x");
       const ran: string[] = [];
@@ -200,9 +201,10 @@ describe("space cleanup", () => {
       const { home, ran, fake } = host(["bun", "xcrun", "brew"]);
       const items = machineItems([], fake);
       expect(items.filter(item => item.reportOnly).map(item => item.id).toSorted()).toEqual(["gradle-caches", "unavailable-simulators"]);
-      expect(applyMachine(items, [])).toBe(0);
+      expect(applyMachine(items, () => [])).toBe(0);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build"))).toBe(false);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD"))).toBe(true);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD"))).toBe(true);
       expect(ran.toSorted()).toEqual(["brew cleanup", "bun pm cache rm"]);
       expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
     });
@@ -219,7 +221,7 @@ describe("space cleanup", () => {
         "bun-cache": "an install is running (pid 5)",
         "homebrew-cleanup": "an install is running (pid 5)",
       });
-      expect(applyMachine(items, procs)).toBe(0);
+      expect(applyMachine(items, () => procs)).toBe(0);
       expect(ran).toEqual([]);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x"))).toBe(true);
     });
@@ -232,7 +234,7 @@ describe("space cleanup", () => {
     const fake: Host = { home, has: () => false, output: () => "", run: () => "" };
     const items = machineItems([], fake);
     expect(items[0]?.skipped).toBeUndefined();
-    applyMachine(items, [{ pid: 7, ppid: 1, name: "xcodebuild", args: "xcodebuild", cwd: "/x" }]);
+    applyMachine(items, () => [{ pid: 7, ppid: 1, name: "xcodebuild", args: "xcodebuild", cwd: "/x" }]);
     expect(items[0]?.skipped).toBe("xcodebuild is running (pid 7)");
     expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x"))).toBe(true);
   });
@@ -265,6 +267,35 @@ describe("space cleanup", () => {
     const checkout = fixture(path.join(elsewhere, "app"));
     symlinkSync(elsewhere, path.join(workspace, "checkouts"));
     expect(resolveTargets(workspace, []).targets.map(target => target.root)).toEqual([workspace, realpathSync(checkout)]);
+  });
+
+  test("recognizes installs however they are launched", () => {
+    for (const args of [
+      "bun install --frozen-lockfile",
+      "bun run agent-tool bun install",
+      "/opt/homebrew/Library/Homebrew/brew.rb install ffmpeg",
+      "/opt/homebrew/Library/Homebrew/brew.rb upgrade",
+      "node /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs install",
+      "node /usr/local/lib/node_modules/npm/bin/npm-cli.js ci",
+      "node .yarn/releases/yarn.js add left-pad",
+    ]) expect(INSTALLING.test(args)).toBe(true);
+    for (const args of ["bun test", "npm run build", "brew list", "node install.js"]) expect(INSTALLING.test(args)).toBe(false);
+  });
+
+  test("lists processes again before each guarded machine item", () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-home-"));
+    temps.push(home);
+    write(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x");
+    write(home, ".npm/_cacache/x");
+    const ran: string[] = [];
+    const fake: Host = { home, has: command => command === "npm", output: () => "", run: (command, args) => { ran.push(`${command} ${args.join(" ")}`); return ""; } };
+    const items = machineItems([], fake);
+    let calls = 0;
+    // An install starts after DerivedData is cleaned and before the npm cache is.
+    applyMachine(items, () => calls++ === 0 ? [] : [{ pid: 8, ppid: 1, name: "node", args: "node /x/npm-cli.js install", cwd: "/x" }]);
+    expect(calls).toBe(2);
+    expect(ran).toEqual([]);
+    expect(items.find(item => item.id === "npm-cache")?.skipped).toBe("an install is running (pid 8)");
   });
 
   test("rejects unknown options", () => {
