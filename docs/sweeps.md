@@ -129,6 +129,13 @@ devopsrockstars, and rn-sandbox were the heavy ones in recent sweeps. Start the
 longest one first, check `uptime` before starting another, and start a sweep
 with the free disk space `bun run health` asks for.
 
+A delegate's brief names each checkout's commit limits: the subject length in
+its `agent-tool.json` or commitlint config (50 in several checkouts, 72 in
+others) and commitlint's 100-column body lines. Its `commit-msg` hook rejects
+a longer message before anything is pushed, so the cost is a rewrite, not a
+failed run. A brief also gives `pr checks --wait` a `--timeout` long enough
+for the checkout's slowest required job.
+
 ## Tracking issues
 
 `sweep report <branch> --markdown` renders the ledger as a table with each

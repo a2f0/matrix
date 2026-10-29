@@ -148,7 +148,20 @@ function typescriptGuarded(checkout: Checkout): boolean {
   if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
   const candidates = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
   if (candidates.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return true;
+  if (agentToolGraphChecked(checkout)) return true;
   return checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts").length > 0;
+}
+
+/**
+ * agent-tool's shared check: a `graph` section in agent-tool.json, run as
+ * `graph check` by a package script, a run group, or a workflow.
+ */
+function agentToolGraphChecked(checkout: Checkout): boolean {
+  const graph = object(json(checkout.read("agent-tool.json"))?.graph);
+  if (!Array.isArray(graph?.include) || graph.include.length === 0) return false;
+  const runs = git(checkout.directory, ["grep", "-l", "-I", "-E", "-e", "graph\"?,?[[:space:]]+\"?check", "--", "package.json", "*.json", ".github/workflows/*.yml", ".github/workflows/*.yaml"]);
+  if (runs.status !== 0 && runs.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${runs.stderr}`);
+  return runs.status === 0;
 }
 
 function managedSkills(checkout: Checkout): string[] {
@@ -329,7 +342,7 @@ export const RULES: readonly Rule[] = [
       if (!typescript && !python) return skip("no TypeScript sources or Python package");
       // Each language needs a guard that can read it: Biome and dependency-cruiser cannot check Python.
       const missing: string[] = [];
-      if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test");
+      if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test");
       if (python && checkout.tracked(":(glob)**/test_module_graph.py").length === 0) missing.push("the Python package has no test_module_graph.py");
       return problems(missing);
     },

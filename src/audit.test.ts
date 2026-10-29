@@ -176,7 +176,7 @@ describe("audit", () => {
 
   test("requires an import-cycle guard that counts type-only imports wherever TypeScript or a Python package exists", () => {
     const guard = (name: string, files: Record<string, string>) => failures(checkout(name, { "src/a.ts": "export const a = 1;\n", ...files }), ["import-cycle-guard"])["import-cycle-guard"];
-    const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test";
+    const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test";
     const pythonMissing = "the Python package has no test_module_graph.py";
     expect(guard("unguarded", {})).toBe(missing);
     expect(guard("biome-default", { "biome.json": '{ "linter": { "rules": { "suspicious": { "noImportCycles": "error" } } } }' })).toBe(missing);
@@ -197,6 +197,12 @@ describe("audit", () => {
     expect(guard("cruiser-ignored", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "ignore", to: { circular: true } }], options: { tsPreCompilationDeps: true } };' })).toBe(missing);
     expect(guard("cruiser-default", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", to: { circular: true } }], options: { tsPreCompilationDeps: true } };' })).toBe(missing);
     expect(guard("graph-test", { "tests/module-graph.test.ts": "test('acyclic', () => {});\n" })).toBeUndefined();
+    // agent-tool's graph check counts once a script, run group, or workflow runs it.
+    const graphConfig = JSON.stringify({ schemaVersion: 1, graph: { include: ["src/**"] } });
+    expect(guard("graph-command", { "agent-tool.json": graphConfig, "scripts/testing/verify.json": '{ "steps": [{ "label": "graph", "command": ["bun", "run", "agent-tool", "graph", "check"] }] }' })).toBeUndefined();
+    expect(guard("graph-workflow", { "agent-tool.json": graphConfig, ".github/workflows/ci.yml": "steps:\n  - run: bun run agent-tool graph check\n" })).toBeUndefined();
+    expect(guard("graph-unrun", { "agent-tool.json": graphConfig })).toBe(missing);
+    expect(guard("graph-empty", { "agent-tool.json": JSON.stringify({ schemaVersion: 1, graph: { include: [] } }), "package.json": JSON.stringify({ scripts: { graph: "agent-tool graph check" } }) })).toBe(missing);
     expect(failures(checkout("python", { "plugin/__init__.py": "", "tests/test_module_graph.py": "" }), ["import-cycle-guard"])).toEqual({});
     expect(failures(checkout("python-bare", { "plugin/__init__.py": "" }), ["import-cycle-guard"])["import-cycle-guard"]).toBe(pythonMissing);
     // Each language needs its own guard: a Biome config cannot check Python.

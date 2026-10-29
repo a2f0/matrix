@@ -10,6 +10,16 @@
       ]
     },
     {
+      "label": "graph",
+      "command": [
+        "bun",
+        "run",
+        "agent-tool",
+        "graph",
+        "check"
+      ]
+    },
+    {
       "label": "tests",
       "command": [
         "bun",
