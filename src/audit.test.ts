@@ -20,7 +20,10 @@ function checkout(name: string, files: Record<string, string | null> = {}): stri
     "AGENTS.md": GUIDANCE,
     "README.md": README,
     ".gitignore": "node_modules/\n.DS_Store\n",
-    "package.json": JSON.stringify({ name, scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs" }, devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }),
+    "package.json": JSON.stringify({ name, scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", "agents:check": "agent-tool skills check && agent-tool permissions check" }, devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }),
+    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }),
+    ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
+    ".codex/rules/agent-tool.rules": "prefix_rule(pattern=[\"agent-tool\", \"doctor\"], decision=\"allow\")\n",
     "agent-tool.json": JSON.stringify({ schemaVersion: 1 }),
     ".agent-tool-skills.json": JSON.stringify({ schemaVersion: 1, files: { ".agents/skills/ship-pr/SKILL.md": "x" } }),
     ".agents/skills/ship-pr/SKILL.md": "Reply via POST /repos/o/r/pulls/1/comments/2/replies.\n",
@@ -93,6 +96,14 @@ describe("audit", () => {
     const producer = checkout("agent-tool", { "package.json": JSON.stringify({ name: "@a2f0/agent-tool", scripts: { "agent:run": "x", "agent:logs": "y" } }), ".agent-tool-skills.json": null });
     expect(audit(root, [producer], selectRules(["agent-tool-pin", "agent-tool-latest"], false), statusOf, context).checkouts[0]!.skipped.map(entry => entry.rule))
       .toEqual(["agent-tool-pin", "agent-tool-latest"]);
+  });
+
+  test("checks generated harness permissions and a CI check for them", () => {
+    const missing = checkout("unprotected", { ".codex/rules/agent-tool.rules": null, "package.json": JSON.stringify({ scripts: { "agents:check": "agent-tool skills check" }, devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }) });
+    expect(failures(missing, ["harness-permissions"])["harness-permissions"])
+      .toBe("no .codex/rules/agent-tool.rules; run agent-tool permissions install --apply; neither the agents:check script nor a workflow runs agent-tool permissions check");
+    const workflow = checkout("workflow", { "package.json": JSON.stringify({ devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }), ".github/workflows/ci.yml": "steps:\n  - run: bun run agent-tool permissions check\n" });
+    expect(failures(workflow, ["harness-permissions"])).toEqual({});
   });
 
   test("compares the pin with the registry only for remote rules", () => {

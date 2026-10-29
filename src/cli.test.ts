@@ -19,11 +19,17 @@ function checkout(name: string): void {
     "AGENTS.md": "# Guidance\n\n## Output capture\n\nUse `bun run agent:run` and `bun run agent:logs`.\n",
     "README.md": `# ${name}\n\n## Quick start\n`,
     ".gitignore": ".DS_Store\n",
-    "package.json": JSON.stringify({ scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs" }, devDependencies: { "@a2f0/agent-tool": "0.1.21" } }),
+    "package.json": JSON.stringify({ scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", "agents:check": "agent-tool skills check && agent-tool permissions check" }, devDependencies: { "@a2f0/agent-tool": "0.1.21" } }),
+    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }),
+    ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
+    ".codex/rules/agent-tool.rules": "",
     "agent-tool.json": "{}",
     ".agent-tool-skills.json": JSON.stringify({ schemaVersion: 1, files: {} }),
   };
-  for (const [file, content] of Object.entries(files)) writeFileSync(path.join(directory, file), content);
+  for (const [file, content] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+    writeFileSync(path.join(directory, file), content);
+  }
   git(directory, "init", "-q", "-b", "main");
   git(directory, "add", "-A");
   git(directory, "commit", "-q", "-m", "init");
@@ -90,7 +96,7 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(main(["health", "--remote", "--markdown"], root, undefined, online.services)).toBe(0);
   const markdown = online.writes.join("");
   expect(online.calls).toEqual({ discover: 1, registry: 1 });
-  expect(markdown).toContain("- Audit (11 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain("- Audit (12 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
 });

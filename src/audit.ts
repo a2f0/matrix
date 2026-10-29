@@ -226,6 +226,24 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "harness-permissions",
+    summary: "Generated harness permission rules, checked wherever managed skills are",
+    source: "docs/tooling.md#harness-permissions",
+    check: checkout => {
+      if (isProducer(checkout)) return skip("runs its source CLI, which the generated rules do not name");
+      const found: string[] = [];
+      for (const file of [".agent-tool-permissions.json", ".claude/settings.json", ".codex/rules/agent-tool.rules"]) {
+        if (!checkout.exists(file)) found.push(`no ${file}; run agent-tool permissions install --apply`);
+      }
+      const script = object(checkout.packageJson?.scripts)?.["agents:check"];
+      const workflows = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => checkout.read(file) ?? "");
+      if (!(typeof script === "string" && script.includes("permissions check")) && !workflows.some(text => text.includes("permissions check"))) {
+        found.push("neither the agents:check script nor a workflow runs agent-tool permissions check");
+      }
+      return problems(found);
+    },
+  },
+  {
     id: "superseded-guidance",
     summary: "Markdown outside managed skills names no command a shared command replaced",
     source: "docs/audit.md#superseded-guidance",

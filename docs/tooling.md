@@ -118,6 +118,15 @@ Follow the [onboarding rules](../AGENTS.md#onboarding-a-repository) and
 [sweep rules](../AGENTS.md#sweeps-across-checkouts) for publication order, package
 pins, managed skills, validation, shipping scope, and checkout cleanup.
 
+Managed skill and permission checks run in a CI job that already gates merges,
+so drift blocks a merge without changing repository settings. Use a check that
+branch protection or a ruleset requires, or a dependency of a required
+aggregate job that runs with `if: always()` and fails unless every dependency
+succeeded; a plain `needs` is not enough, because GitHub accepts a skipped
+required check. Several default branches have no protection or rulesets, and
+there `agent-tool pr merge` is the only gate, so put the check in a job that
+`merge.requiredChecks` names.
+
 Preserve branch exemptions and length limits, signature verification modes,
 attribution restrictions, hook ownership, required CI jobs, conditional skip
 rules, and release tags. A common implementation does not require identical
@@ -227,9 +236,10 @@ output capture.
 ```markdown
 ## Output capture
 
-Run finite, noisy commands, such as installs, builds, tests, linters, and Git
-commands that run hooks, through
-`bun run agent:run --label <name> -- <command> [args...]`. It keeps complete
+Run Bun tests through `bun run agent-tool bun test --log [-- args...]`, and
+other finite, noisy commands, such as installs, builds, linters, package
+scripts, and Git commands that run hooks, through
+`bun run agent:run --label <name> -- <command> [args...]`. Each keeps complete
 output in a private log, preserves the exit status, and prints a compact
 receipt, with a bounded excerpt of the log on failure. Read more with
 `bun run agent:logs <log-path>`, raising `--tail-lines` or `--max-bytes` as
@@ -240,3 +250,34 @@ run-group checks directly so their results stay visible, and run interactive
 tools and servers directly too. Never narrow a suite or silence warnings to
 reduce output.
 ```
+
+Repositories that do not use Bun's test runner keep `agent:run` for their tests;
+`agent-tool bun test` is what harness permission rules allow without a prompt
+([harness permissions](#harness-permissions)).
+
+## Harness permissions
+
+Agents can work without blanket approval when routine commands run freely and
+consequential ones ask. agent-tool assigns each of its commands a permission
+class and generates Claude Code and Codex rules from them, as its
+[permissions guide](https://github.com/a2f0/agent-tool/blob/ca698ad954ed489dbeba618e20887448f1e2a5cd/docs/permissions.md)
+describes. Every managed repository that pins agent-tool:
+
+- commits the generated `.claude/settings.json`, `.codex/rules/agent-tool.rules`,
+  and `.agent-tool-permissions.json`, written by
+  `agent-tool permissions install --apply`, which `agents:sync` runs after
+  installing skills;
+- runs `agent-tool permissions check` wherever it checks managed skills,
+  usually in the `agents:check` script, so a new script that asks, or a stale
+  rule, fails CI;
+- classifies, in the `permissions.executables` section of `agent-tool.json`,
+  the installed CLIs its guidance tells agents to run through `bun x`:
+  `local` for linters and compilers, `release` for deploy tools, `exec` for
+  runners such as `tsx`.
+
+Agents then run tests and classified executables through
+`agent-tool bun test|x`, and change dependencies through
+`agent-tool bun update|remove`; adding a dependency, merges, and publishing
+ask. Package scripts are not classified, so `bun run` and `agent:run` keep the
+harness default. `bun run audit --rule harness-permissions` reports
+repositories that lack the files or the check.
