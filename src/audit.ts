@@ -162,10 +162,12 @@ export const RULES: readonly Rule[] = [
       const releases = context.releases(AGENT_TOOL);
       const newer = Object.keys(releases).filter(version => EXACT_VERSION.test(version) && compareVersions(version, pin) > 0).sort(compareVersions);
       if (newer.length === 0) return pass;
-      const [first] = newer;
-      const age = Math.floor(((context.now ?? new Date()).getTime() - Date.parse(releases[first!]!)) / DAY_MS);
       const detail = `pins ${pin}; latest is ${newer.at(-1)}`;
-      if (Number.isNaN(age)) return fail(`${detail}; the registry gives no release time for ${first}`);
+      const undated = newer.find(version => Number.isNaN(Date.parse(releases[version]!)));
+      if (undated) return fail(`${detail}; the registry gives no release time for ${undated}`);
+      // Age counts from the first newer release published, which a later backport cannot reset.
+      const first = newer.reduce((oldest, version) => (Date.parse(releases[version]!) < Date.parse(releases[oldest]!) ? version : oldest));
+      const age = Math.floor(((context.now ?? new Date()).getTime() - Date.parse(releases[first]!)) / DAY_MS);
       const trailing = `${first} has been out ${age} day${age === 1 ? "" : "s"}`;
       return age < AGENT_TOOL_GRACE_DAYS ? skip(`${detail}; ${trailing}, inside the ${AGENT_TOOL_GRACE_DAYS}-day grace`) : fail(`${detail}; ${trailing}`);
     },
