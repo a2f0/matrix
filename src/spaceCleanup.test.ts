@@ -183,6 +183,7 @@ describe("space cleanup", () => {
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/Packages/checkouts/Custom/.git/HEAD");
       write(home, "Library/Developer/Xcode/DerivedData/clone/.git/HEAD");
       write(home, "Library/Developer/Xcode/DerivedData/clone/src/main.swift");
+      write(home, "Library/Developer/Xcode/DerivedData/App-abc/Tools/.env", "TOKEN=1");
       write(home, ".bun/install/cache/pkg/x");
       write(home, ".gradle/caches/x");
       const ran: string[] = [];
@@ -210,6 +211,7 @@ describe("space cleanup", () => {
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/SourcePackages/checkouts/Shared/.git/HEAD"))).toBe(true);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Packages/checkouts/Custom/.git/HEAD"))).toBe(true);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/clone/src/main.swift"))).toBe(true);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Tools/.env"))).toBe(true);
       expect(ran.toSorted()).toEqual(["brew cleanup", "bun pm cache rm"]);
       expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
     });
@@ -408,6 +410,13 @@ describe("space cleanup", () => {
     try { main([first, second, "--apply"], first, discover); } finally { console.log = quiet; }
     expect(existsSync(path.join(first, ".turbo"))).toBe(false);
     expect(existsSync(path.join(second, ".turbo"))).toBe(true);
+  });
+
+  test("refuses candidates inside a nested repository", () => {
+    const root = fixture();
+    write(root, "node_modules/.git/HEAD");
+    expect(unsafeReason(root, "node_modules/.cache")).toBe("inside repository node_modules");
+    expect(findCandidates(root).map(candidate => candidate.path)).not.toContain("node_modules/.cache");
   });
 
   test("rejects unknown options", () => {

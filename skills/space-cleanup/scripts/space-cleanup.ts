@@ -113,6 +113,23 @@ export function findRepository(directory: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Why a directory must be kept because a repository, credentials, or a local
+ * database is somewhere inside it; undefined when nothing is. Paths in the
+ * reason are relative to `base`.
+ */
+export function holdsProtected(directory: string, base: string): string | undefined {
+  const protectedFile = spawnSync("find", [directory, "(", ...PROTECTED.flatMap((name, index) => [...(index ? ["-o"] : []), "-name", name]), ")",
+    "!", "-name", "*.example", "!", "-name", "*.sample", "!", "-name", "*.template", "-print", "-quit"], { encoding: "utf8" });
+  if (protectedFile.status !== 0) return "could not search for protected files";
+  const found = protectedFile.stdout.trim();
+  if (found !== "") return `contains ${path.relative(base, found)}`;
+  let repository: string | undefined;
+  try { repository = findRepository(directory); } catch { return "could not search for repositories"; }
+  if (repository) return `contains repository ${path.relative(base, repository) || "."}`;
+  return undefined;
+}
+
 /** Why a path must not be removed, or undefined when it is safe to. */
 export function unsafeReason(root: string, rel: string): string | undefined {
   if (rel === "" || path.isAbsolute(rel) || rel.split("/").some(part => part === ".." || part === "." || part === ".git")) return "outside the repository";
@@ -122,18 +139,13 @@ export function unsafeReason(root: string, rel: string): string | undefined {
     let stats;
     try { stats = lstatSync(current); } catch { return "missing"; }
     if (stats.isSymbolicLink()) return "symlink";
+    // A nested clone above the candidate owns it (an ignored node_modules that is a repository).
+    if (isRepository(current)) return `inside repository ${path.relative(root, current)}`;
     // An ignored `.secrets/build` is still inside credentials.
     if (protectedName(part)) return `inside ${path.relative(root, current)}`;
   }
-  // A repository, credentials, or a local database anywhere inside is someone's work or data.
-  const protectedFile = spawnSync("find", [current, "(", ...PROTECTED.flatMap((name, index) => [...(index ? ["-o"] : []), "-name", name]), ")",
-    "!", "-name", "*.example", "!", "-name", "*.sample", "!", "-name", "*.template", "-print", "-quit"], { encoding: "utf8" });
-  if (protectedFile.status !== 0) return "could not search for protected files";
-  const found = protectedFile.stdout.trim();
-  if (found !== "") return `contains ${path.relative(root, found)}`;
-  let repository: string | undefined;
-  try { repository = findRepository(current); } catch { return "could not search for repositories"; }
-  if (repository) return `contains repository ${path.relative(root, repository) || rel}`;
+  const held = holdsProtected(current, root);
+  if (held) return held;
   // Checked here, not only at scan time: a file can be force-added between scan and removal.
   const tracked = git(root, ["ls-files", "-z", "--", rel]);
   if (!tracked.ok) return "could not list tracked files";
@@ -388,8 +400,9 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
       if (isRepository(project)) continue;
       for (const child of readdirSync(project)) {
         if (child === "SourcePackages") continue;
-        // A package directory moved with -clonedSourcePackagesDirPath still holds clones.
-        try { if (findRepository(path.join(project, child))) continue; } catch { continue; }
+        // A package directory moved with -clonedSourcePackagesDirPath still holds clones;
+        // credentials and databases get the same protection as in repositories.
+        if (holdsProtected(path.join(project, child), derived)) continue;
         rmSync(path.join(project, child), { recursive: true, force: true });
       }
     }
