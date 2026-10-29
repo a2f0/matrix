@@ -152,16 +152,34 @@ function typescriptGuarded(checkout: Checkout): boolean {
   return checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts").length > 0;
 }
 
+/** Whether a run-group command array (any `command` field) runs `graph check`. */
+function commandRunsGraphCheck(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(commandRunsGraphCheck);
+  const record = object(value);
+  if (!record) return false;
+  const command = record.command;
+  if (Array.isArray(command) && command.some((part, index) => part === "graph" && command[index + 1] === "check")) return true;
+  return Object.values(record).some(commandRunsGraphCheck);
+}
+
 /**
  * agent-tool's shared check: a `graph` section in agent-tool.json, run as
- * `graph check` by a package script, a run group, or a workflow.
+ * `graph check` by a package script, a run group's command, a workflow step,
+ * or a runner script under scripts/. Generated permission rules name the command too, so they never count.
  */
 function agentToolGraphChecked(checkout: Checkout): boolean {
   const graph = object(json(checkout.read("agent-tool.json"))?.graph);
   if (!Array.isArray(graph?.include) || graph.include.length === 0) return false;
-  const runs = git(checkout.directory, ["grep", "-l", "-I", "-E", "-e", "graph\"?,?[[:space:]]+\"?check", "--", "package.json", "*.json", ".github/workflows/*.yml", ".github/workflows/*.yaml"]);
-  if (runs.status !== 0 && runs.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${runs.stderr}`);
-  return runs.status === 0;
+  const runsIt = (text: string) => /\bgraph\s+check\b/.test(text);
+  const scripts = Object.values(object(checkout.packageJson?.scripts) ?? {});
+  if (scripts.some(script => typeof script === "string" && runsIt(script))) return true;
+  const workflows = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => checkout.read(file) ?? "");
+  if (workflows.some(text => text.split("\n").some(line => /^\s*(-\s*)?run:/.test(line) && runsIt(line)))) return true;
+  if (checkout.tracked(":(glob)scripts/**/*.json").some(file => commandRunsGraphCheck(json(checkout.read(file))))) return true;
+  // A repository's own runner script passing the arguments (skyline's scripts/testing/check.ts).
+  return checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)scripts/**/*.${extension}`))
+    .filter(file => !/\.(test|spec)\.[cm]?[jt]s$/.test(file))
+    .some(file => /["'`]graph["'`]\s*,\s*["'`]check["'`]/.test(checkout.read(file) ?? ""));
 }
 
 function managedSkills(checkout: Checkout): string[] {

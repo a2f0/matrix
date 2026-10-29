@@ -32,7 +32,7 @@ first and check `branch` for checkouts that are not on their default branch.
 | `readme-agent-free` | No output capture or skill paths in the README; agent-tool, whose product is agent tooling, is exempt | [README files](tooling.md#readme-files) |
 | `brand-images` | With `assets/brand/`: `logo.svg`, an `images` section in `agent-tool.json`, and no committed raster there | [Brand images](../AGENTS.md#brand-images) |
 | `harness-permissions` | `.agent-tool-permissions.json`, `.claude/settings.json`, and `.codex/rules/agent-tool.rules`, and `permissions check` in the `agents:check` script or a workflow; agent-tool itself is exempt | [Harness permissions](tooling.md#harness-permissions) |
-| `import-cycle-guard` | TypeScript sources have Biome `noImportCycles` at `error` with `ignoreTypes: false`, a type-aware error-level dependency-cruiser `no-circular` rule, agent-tool `graph check` configured and run by a script, run group, or workflow, or a module-graph test; a Python package has `test_module_graph.py` | [Import cycles and layering](tooling.md#import-cycles-and-layering) |
+| `import-cycle-guard` | TypeScript sources have Biome `noImportCycles` at `error` with `ignoreTypes: false`, a type-aware error-level dependency-cruiser `no-circular` rule, agent-tool `graph check` configured and run by a package script, run group, workflow step, or runner under `scripts/`, or a module-graph test; a Python package has `test_module_graph.py` | [Import cycles and layering](tooling.md#import-cycles-and-layering) |
 | `superseded-guidance` | No tracked Markdown, outside managed skills, names a command a shared command replaced | [Superseded guidance](#superseded-guidance) |
 
 A rule checks the evidence a standard leaves in files. It does not prove the
