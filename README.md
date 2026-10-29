@@ -35,6 +35,7 @@ bun run status
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
 | `bun run audit [repo...] [--rule <id>]... [--remote]` | Check checkouts against the shared standards; `--remote` also fails agent-tool pins that trail a release by a week |
 | `bun run health [--remote] [--markdown]` | Combine disk space, status, audit, discovery, and sweep friction into suggested next steps |
+| `bun run space [repo...] [--builds] [--deps] [--machine] [--apply]` | List regenerable, git-ignored output and caches to free disk space; `--apply` removes them |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 | `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |

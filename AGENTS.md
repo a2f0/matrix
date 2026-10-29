@@ -71,7 +71,8 @@ command, add the old spelling to the audit's superseded patterns.
 `bun run health [--remote]` combines status, the audit, discovery, and sweep
 retro into suggested next steps ([docs/health.md](docs/health.md)); start there
 when a session has no specific task. Its suggestions are proposals: acting on
-one still needs a request that authorizes it.
+one still needs a request that authorizes it. To free disk space, here or in any
+repository, follow the [space-cleanup skill](skills/space-cleanup/SKILL.md).
 
 ## Onboarding a repository
 

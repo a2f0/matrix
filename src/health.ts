@@ -69,7 +69,7 @@ export function assessHealth(inputs: HealthInputs): Health {
   const staleInstalls = inputs.statuses.filter(status => status.agentTool && !status.agentTool.current).map(status => status.repo);
   const suggestions: string[] = [];
   const low = inputs.disk !== undefined && inputs.disk.free < MIN_FREE_DISK_GIB * GIB;
-  if (low) suggestions.push(`Free disk space before the next sweep: ${gib(inputs.disk!.free)} free of ${gib(inputs.disk!.total)}; validation needs at least ${MIN_FREE_DISK_GIB} GiB.`);
+  if (low) suggestions.push(`Free disk space before the next sweep: ${gib(inputs.disk!.free)} free of ${gib(inputs.disk!.total)}; validation needs at least ${MIN_FREE_DISK_GIB} GiB; \`bun run space\` lists what is safe to remove.`);
   for (const { repo, reason } of notReadyList) suggestions.push(`Inspect ${repo} before the next sweep: ${reason}.`);
   if (staleInstalls.length > 0) suggestions.push(`Reinstall dependencies in ${list(staleInstalls)}; their node_modules hold a different agent-tool than they pin.`);
   for (const repo of inputs.discovery?.added ?? []) suggestions.push(`Onboard ${repo}: \`bun run discover --apply\`, then the onboarding steps in AGENTS.md.`);

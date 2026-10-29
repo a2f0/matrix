@@ -57,7 +57,7 @@ test("orders suggestions from disk and checkout state to standards to friction",
   });
   expect(health.ok).toBe(false);
   expect(health.suggestions).toEqual([
-    "Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB.",
+    "Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB; `bun run space` lists what is safe to remove.",
     "Inspect a2f0/one before the next sweep: on branch feat/x.",
     "Reinstall dependencies in a2f0/two; their node_modules hold a different agent-tool than they pin.",
     "Onboard a2f0/new: `bun run discover --apply`, then the onboarding steps in AGENTS.md.",
