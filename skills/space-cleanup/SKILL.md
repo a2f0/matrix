@@ -48,8 +48,10 @@ are your own or finished.
    than the listed sizes, and Time Machine local snapshots can hold it until
    macOS thins them.
 4. After `--deps`, reinstall dependencies in each cleaned repository that will
-   be used next, with its documented setup (for agent-tool repositories,
-   `bun run agent-tool bun install`), so hooks and `status` keep working.
+   be used next, with its documented setup, so hooks and `status` keep
+   working. Deleting `node_modules` also deletes a local agent-tool, so where
+   setup runs `bun run agent-tool bun install`, first bootstrap with the
+   repository's pinned Bun: `bun install --frozen-lockfile`.
    After `--builds`, nothing is needed: the next build regenerates output.
 5. Report the before and after free space, the tiers applied, repositories
    skipped as busy, and the `review` items from `--machine` with their sizes,

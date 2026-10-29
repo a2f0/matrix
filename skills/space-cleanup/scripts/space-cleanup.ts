@@ -157,7 +157,9 @@ export interface Proc {
 }
 
 const PIPELINE_FILTERS = new Set(["head", "tail", "less", "more", "cat", "tee", "grep", "rg", "sed", "awk", "jq", "sort", "uniq", "wc", "cut", "tr", "column"]);
-const SHELLS = new Set(["zsh", "-zsh", "bash", "-bash", "sh", "fish", "dash", "login", "tmux"]);
+/** An interactive shell waiting at a prompt; `bash build.sh` and `sh -c ...` are working. */
+const IDLE_SHELL = /^-?(?:\S*\/)?(?:zsh|bash|sh|fish|dash|tmux)(?:\s+-[il]+)*$/;
+export function idleShell(proc: Proc): boolean { return IDLE_SHELL.test(proc.args.trim()); }
 
 /** Every process's cwd; throws when it cannot list them, so busy repositories are never mistaken for idle ones. */
 export function processes(): Proc[] {
@@ -205,7 +207,7 @@ export function busyRoots(procs: Proc[], roots: string[], self = process.pid): M
   const byDepth = roots.toSorted((a, b) => b.length - a.length);
   for (const proc of procs) {
     const pipeline = group !== undefined && proc.pgid === group && PIPELINE_FILTERS.has(proc.name);
-    if (!proc.cwd || ancestors.has(proc.pid) || proc.ppid === self || pipeline || SHELLS.has(proc.name)) continue;
+    if (!proc.cwd || ancestors.has(proc.pid) || proc.ppid === self || pipeline || idleShell(proc)) continue;
     const root = byDepth.find(candidate => proc.cwd === candidate || proc.cwd!.startsWith(`${candidate}/`));
     if (root) busy.set(root, [...(busy.get(root) ?? []), proc]);
   }
@@ -237,7 +239,7 @@ export function resolveTargets(cwd: string, names: string[]): { workspace?: stri
   const workspace = here && isMatrixWorkspace(here) ? here : undefined;
   const checkouts = (root: string) => readdirSync(path.join(root, "checkouts"), { withFileTypes: true })
     .filter(entry => entry.isDirectory() && existsSync(path.join(root, "checkouts", entry.name, ".git")))
-    .map(entry => ({ name: entry.name, root: path.join(root, "checkouts", entry.name) }));
+    .map(entry => ({ name: entry.name, root: realpathSync(path.join(root, "checkouts", entry.name)) }));
   if (names.length === 0) {
     if (workspace) return { workspace, targets: [{ name: path.basename(workspace), root: workspace }, ...checkouts(workspace)] };
     if (!here) throw new Error(`${cwd} is not inside a git repository; name one`);

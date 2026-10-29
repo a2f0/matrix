@@ -127,11 +127,13 @@ describe("space cleanup", () => {
       { pid: 21, ppid: 1, name: "node", args: "vite", cwd: "/w/checkouts/b/web" },
       { pid: 22, ppid: 1, name: "bun", args: "bun test", cwd: "/w/checkouts/a" },
       { pid: 23, ppid: 1, name: "codex", args: "codex", cwd: "/w" },
+      { pid: 24, ppid: 1, name: "bash", args: "bash build.sh", cwd: "/w/checkouts/b" },
+      { pid: 25, ppid: 1, name: "zsh", args: "/bin/zsh -il", cwd: "/w/checkouts/b" },
     ];
     const busy = busyRoots(procs, ["/w", "/w/checkouts/a", "/w/checkouts/b"], 11);
     expect(Object.fromEntries([...busy].map(([root, list]) => [root, list.map(proc => proc.pid)]))).toEqual({
       "/w/checkouts/a": [13, 22],
-      "/w/checkouts/b": [21],
+      "/w/checkouts/b": [21, 24],
       "/w": [23],
     });
   });
@@ -252,6 +254,17 @@ describe("space cleanup", () => {
     temps.push(linkDir);
     symlinkSync(root, path.join(linkDir, "repo"));
     expect(resolveTargets(linkDir, ["repo"]).targets.map(target => target.root)).toEqual([root]);
+  });
+
+  test("canonicalizes checkouts reached through a symlinked checkouts directory", () => {
+    const workspace = realpathSync(fixture());
+    write(workspace, "matrix.json", "{}");
+    write(workspace, ".gitignore", "checkouts\n");
+    const elsewhere = realpathSync(mkdtempSync(path.join(os.tmpdir(), "space-cleanup-checkouts-")));
+    temps.push(elsewhere);
+    const checkout = fixture(path.join(elsewhere, "app"));
+    symlinkSync(elsewhere, path.join(workspace, "checkouts"));
+    expect(resolveTargets(workspace, []).targets.map(target => target.root)).toEqual([workspace, realpathSync(checkout)]);
   });
 
   test("rejects unknown options", () => {
