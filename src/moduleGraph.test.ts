@@ -38,8 +38,8 @@ function sourceFiles(directory: string): string[] {
 }
 
 /**
- * Blanks comments and template-literal text, keeping quoted strings (which carry
- * specifiers) and the code inside `${...}` interpolations, which can import too.
+ * Blanks comments, template-literal text, and every string that is not an import
+ * specifier, keeping the code inside `${...}` interpolations, which can import too.
  */
 function stripNonCode(source: string): string {
   const out = source.split("");
@@ -63,8 +63,11 @@ function stripNonCode(source: string): string {
     if (char === "/" && source[i + 1] === "/") { const end = source.indexOf("\n", i); blank(i, end === -1 ? source.length : end); i = end === -1 ? source.length : end; }
     else if (char === "/" && source[i + 1] === "*") { const end = source.indexOf("*/", i + 2); const stop = end === -1 ? source.length : end + 2; blank(i, stop); i = stop; }
     else if (char === "\"" || char === "'") {
-      i++;
+      // Only a string right after `from` or `import` is a specifier; blank the text of any other.
+      const specifier = /(?:\bfrom|\bimport\s*\(?)\s*$/.test(out.slice(Math.max(0, i - 40), i).join(""));
+      const start = ++i;
       while (i < source.length && source[i] !== char && source[i] !== "\n") i += source[i] === "\\" ? 2 : 1;
+      if (!specifier) blank(start, Math.min(i, source.length));
       i++;
     }
     else if (char === "`") { i++; skipTemplateText(); }
@@ -79,7 +82,7 @@ function stripNonCode(source: string): string {
   return out.join("");
 }
 
-const SPECIFIER = /\b(?:import|export)(?:\s+type\b)?\s*(?:[\w*{}\s,$]*?\bfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
+const SPECIFIER = /\b(?:import|export)(?:\s+type\b)?\s*(?:[\w*{}\s,$]*?\bfrom\s*)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
 
 function relativeImports(source: string): string[] {
   return [...stripNonCode(source).matchAll(SPECIFIER)].map(match => (match[1] ?? match[2])!).filter(specifier => specifier.startsWith("."));
@@ -148,8 +151,10 @@ describe("module graph", () => {
       'const url = "https://example.com"; import{k}from"./k";',
       'const lazy = `${(await import("./l")).name} and ${`nested ${await import("./m")}`} import "./n"`;',
       'const brace = `${ { o: 1 }.o }`; import "./p";',
+      'const spaced = await import ("./q");',
+      'const fixture = \'import "./r";\'; const other = "export * from \'./s\'";',
     ].join("\n");
-    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p"]);
+    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p", "./q"]);
   });
 
   test("detects a planted cycle and a planted layer violation", () => {

@@ -105,10 +105,37 @@ function biomeGuardsCycles(config: string): boolean {
   return rule !== undefined && /"level"\s*:\s*"error"/.test(rule) && /"ignoreTypes"\s*:\s*false/.test(rule);
 }
 
-/** A dependency-cruiser rule set (a named config or a module importing dependency-cruiser) with a no-circular rule. */
+/** The text of the innermost `{...}` object enclosing `index`, or undefined. */
+function enclosingObject(text: string, index: number): string | undefined {
+  let depth = 0;
+  let start = index;
+  for (; start >= 0; start--) {
+    if (text[start] === "}") depth++;
+    else if (text[start] === "{" && depth-- === 0) break;
+  }
+  if (start < 0) return undefined;
+  depth = 0;
+  for (let end = start; end < text.length; end++) {
+    if (text[end] === "{") depth++;
+    else if (text[end] === "}" && --depth === 0) return text.slice(start, end + 1);
+  }
+  return undefined;
+}
+
+/**
+ * A dependency-cruiser rule set (a named config or a module importing
+ * dependency-cruiser) with an error-level no-circular rule that sees type-only
+ * imports: those are dropped unless tsPreCompilationDeps is true or "specify",
+ * or the swc parser, which keeps them, reads the sources.
+ */
 function cruiserGuardsCycles(file: string, text: string): boolean {
   const config = /(^|\/)(\.dependency-cruiser|dependency-cruiser\.config)\.[a-z]+$/.test(file) || /["']dependency-cruiser["']/.test(text);
-  return config && /["']no-circular["']/.test(text);
+  const typeAware = /tsPreCompilationDeps["']?\s*:\s*(true|["']specify["'])/.test(text) || /parser["']?\s*:\s*["']swc["']/.test(text);
+  if (!config || !typeAware) return false;
+  return [...text.matchAll(/["']no-circular["']/g)].some(match => {
+    const rule = enclosingObject(text, match.index);
+    return rule !== undefined && /severity["']?\s*:\s*["']error["']/.test(rule) && /circular["']?\s*:\s*true/.test(rule);
+  });
 }
 
 function managedSkills(checkout: Checkout): string[] {
