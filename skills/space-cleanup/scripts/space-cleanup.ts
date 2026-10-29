@@ -84,6 +84,15 @@ function git(root: string, args: string[]): { ok: boolean; stdout: string } {
 
 /** Names that mark a tree as holding work or data rather than regenerable output. */
 const PROTECTED = [".git", ".env", ".env.*", ".secrets", "*.sqlite", "*.sqlite3", "*.db"];
+const TEMPLATE = /\.(example|sample|template)$/;
+
+/** Whether one path component is protected, by the same patterns `find` applies below. */
+export function protectedName(name: string): boolean {
+  if (TEMPLATE.test(name)) return false;
+  return PROTECTED.some(pattern => pattern.startsWith("*.") ? name.endsWith(pattern.slice(1))
+    : pattern.endsWith(".*") ? name.startsWith(pattern.slice(0, -1))
+    : name === pattern);
+}
 
 /** Why a path must not be removed, or undefined when it is safe to. */
 export function unsafeReason(root: string, rel: string): string | undefined {
@@ -94,6 +103,8 @@ export function unsafeReason(root: string, rel: string): string | undefined {
     let stats;
     try { stats = lstatSync(current); } catch { return "missing"; }
     if (stats.isSymbolicLink()) return "symlink";
+    // An ignored `.secrets/build` is still inside credentials.
+    if (protectedName(part)) return `inside ${path.relative(root, current)}`;
   }
   // A repository, credentials, or a local database anywhere inside is someone's work or data.
   const protectedFile = spawnSync("find", [current, "(", ...PROTECTED.flatMap((name, index) => [...(index ? ["-o"] : []), "-name", name]), ")",
@@ -165,29 +176,50 @@ export function idleShell(proc: Proc): boolean { return IDLE_SHELL.test(proc.arg
 export function processes(): Proc[] {
   const list = (command: string, args: string[]) => {
     const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    // lsof exits 1 when some processes are unreadable but still lists the rest.
+    // lsof exits 1 when some processes are unreadable but still lists the rest; completeness is checked below.
     if (result.error || !result.stdout || (result.status !== 0 && !(command === "lsof" && result.status === 1))) {
-      throw new Error(`cannot list processes with ${command} (${result.error?.message ?? `exit ${result.status}`}); without it busy repositories cannot be detected, so pass --include-busy only if none is in use`);
+      throw new Error(`cannot list processes with ${command} (${result.error?.message ?? `exit ${result.status}`}); ${UNLISTED}`);
     }
     return result.stdout;
   };
-  const names = new Map<number, { ppid: number; pgid: number; name: string }>();
-  for (const line of list("ps", ["-axo", "pid=,ppid=,pgid=,comm="]).split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (match) names.set(Number(match[1]), { ppid: Number(match[2]), pgid: Number(match[3]), name: path.basename(match[4]!.trim()) });
+  const table = list("ps", ["-axo", "pid=,ppid=,pgid=,uid=,stat=,comm="]);
+  const args = list("ps", ["-axo", "pid=,args="]);
+  const cwds = list("lsof", ["-nP", "-d", "cwd", "-Fpn"]);
+  return parseProcesses(table, args, cwds, process.getuid?.() ?? -1, pid => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  });
+}
+
+const UNLISTED = "without every process's working directory busy repositories cannot be detected, so pass --include-busy only if none is in use";
+
+/**
+ * Joins `ps` and `lsof` output. Throws when a live process of this user has no
+ * known working directory, so partial visibility never passes for idle.
+ * Other users' processes (root daemons) are listed when lsof can read them.
+ */
+export function parseProcesses(table: string, argsOutput: string, lsofOutput: string, uid: number, alive: (pid: number) => boolean): Proc[] {
+  const rows: Array<{ pid: number; ppid: number; pgid: number; uid: number; zombie: boolean; name: string }> = [];
+  for (const line of table.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
+    if (match) rows.push({ pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]), uid: Number(match[4]), zombie: match[5]!.startsWith("Z"), name: path.basename(match[6]!.trim()) });
   }
   const args = new Map<number, string>();
-  for (const line of list("ps", ["-axo", "pid=,args="]).split("\n")) {
+  for (const line of argsOutput.split("\n")) {
     const match = /^\s*(\d+)\s+(.*)$/.exec(line);
     if (match) args.set(Number(match[1]), match[2]!);
   }
   const cwds = new Map<number, string>();
-  let pid = 0;
-  for (const line of list("lsof", ["-nP", "-d", "cwd", "-Fpn"]).split("\n")) {
-    if (line.startsWith("p")) pid = Number(line.slice(1));
-    else if (line.startsWith("n") && pid) cwds.set(pid, line.slice(1));
+  let current = 0;
+  for (const line of lsofOutput.split("\n")) {
+    if (line.startsWith("p")) current = Number(line.slice(1));
+    else if (line.startsWith("n") && current) cwds.set(current, line.slice(1));
   }
-  return [...names].map(([pid, { ppid, pgid, name }]) => ({ pid, ppid, pgid, name, args: args.get(pid) ?? "", cwd: cwds.get(pid) }));
+  // A process that exited between ps and lsof has nothing left to protect.
+  const unseen = rows.filter(row => row.uid === uid && !row.zombie && !cwds.has(row.pid) && alive(row.pid));
+  if (unseen.length > 0) {
+    throw new Error(`cannot read the working directory of ${unseen.slice(0, 3).map(row => `${row.name} ${row.pid}`).join(", ")}${unseen.length > 3 ? ", ..." : ""}; ${UNLISTED}`);
+  }
+  return rows.filter(row => !row.zombie).map(({ pid, ppid, pgid, name }) => ({ pid, ppid, pgid, name, args: args.get(pid) ?? "", cwd: cwds.get(pid) }));
 }
 
 /**
@@ -298,7 +330,9 @@ export const HOST: Host = {
 
 /** Running installs read the package caches, so those caches wait for them. */
 // Matches the launcher forms too: `brew.rb`, `pnpm.cjs`, `npm-cli.js`, `yarn.js`.
-export const INSTALLING = /(^|[\s/])(bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?(\s+run\s+agent-tool\s+bun)?\s+(install|ci|add|i|upgrade|reinstall)(\s|$)/;
+// Options may come first (`bun --cwd /repo install`, `pnpm -C dir install`).
+const OPTIONS = String.raw`(?:\s+-\S+(?:\s+[^\s-]\S*)?)*`;
+export const INSTALLING = new RegExp(String.raw`(^|[\s/])(bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?${OPTIONS}(\s+run\s+agent-tool\s+bun${OPTIONS})?\s+(install|ci|add|i|upgrade|reinstall)(\s|$)`);
 
 /** Developer caches outside any repository, for `--machine`. */
 export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {

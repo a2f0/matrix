@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, INSTALLING, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
+import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, INSTALLING, parseProcesses, protectedName, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -278,8 +278,13 @@ describe("space cleanup", () => {
       "node /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs install",
       "node /usr/local/lib/node_modules/npm/bin/npm-cli.js ci",
       "node .yarn/releases/yarn.js add left-pad",
+      "bun --cwd /repo install",
+      "npm --prefix packages/api ci",
+      "pnpm -C web install --frozen-lockfile",
+      "bun --verbose install",
+      "bun run agent-tool bun install --cwd packages/api",
     ]) expect(INSTALLING.test(args)).toBe(true);
-    for (const args of ["bun test", "npm run build", "brew list", "node install.js"]) expect(INSTALLING.test(args)).toBe(false);
+    for (const args of ["bun test", "npm run build", "brew list", "node install.js", "bun --cwd /repo test"]) expect(INSTALLING.test(args)).toBe(false);
   });
 
   test("lists processes again before each guarded machine item", () => {
@@ -296,6 +301,27 @@ describe("space cleanup", () => {
     expect(calls).toBe(2);
     expect(ran).toEqual([]);
     expect(items.find(item => item.id === "npm-cache")?.skipped).toBe("an install is running (pid 8)");
+  });
+
+  test("refuses paths inside protected directories", () => {
+    const root = fixture();
+    write(root, ".gitignore", ".secrets-dir/\n.env.local/\n", );
+    write(root, ".env.local/build/x");
+    git(root, "add", ".gitignore");
+    expect(unsafeReason(root, ".env.local/build")).toBe("inside .env.local");
+    expect(protectedName(".secrets")).toBe(true);
+    expect(protectedName("app.sqlite3")).toBe(true);
+    expect(protectedName(".env.example")).toBe(false);
+    expect(protectedName("dist")).toBe(false);
+  });
+
+  test("fails closed when a live process of this user has no visible working directory", () => {
+    const table = ["  1   0   1   0 Ss   launchd", " 10   1  10 501 S    node", " 11   1  11 501 Z    <defunct>", " 12   1  12 501 S    gone"].join("\n");
+    const args = " 1 launchd\n 10 node build\n 11 \n 12 gone";
+    const alive = (pid: number) => pid !== 12;
+    expect(() => parseProcesses(table, args, "", 501, alive)).toThrow("cannot read the working directory of node 10");
+    const procs = parseProcesses(table, args, "p10\nfcwd\nn/repo\n", 501, alive);
+    expect(procs.map(proc => [proc.pid, proc.cwd])).toEqual([[1, undefined], [10, "/repo"], [12, undefined]]);
   });
 
   test("rejects unknown options", () => {
