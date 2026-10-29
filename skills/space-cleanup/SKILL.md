@@ -30,7 +30,7 @@ Flags add tiers; each includes the ones above it in cost:
 | (default) | Caches: `.turbo`, `node_modules/.cache` and `.vite`, `.next/cache`, `.wrangler/tmp`, coverage, test reports, Python caches | Next run is slower |
 | `--builds` | Build output: `dist`, `build`, `out`, `.next`, `.gradle`, `.build`, Rust `target`, `*.tsbuildinfo` | The repository's build |
 | `--deps` | `node_modules`, `.venv`, CocoaPods `Pods`, `vendor/bundle` | The repository's documented install |
-| `--machine` | Xcode DerivedData, simulators without a runtime, `brew cleanup`, Bun and npm caches, `pnpm store prune` | Re-downloads and rebuilds |
+| `--machine` | Xcode DerivedData, `brew cleanup`, Bun and npm caches, `pnpm store prune` | Re-downloads and rebuilds |
 
 `--json` gives agents the same report. `--include-busy` cleans repositories
 other processes are working in; use it only after confirming those processes
@@ -60,17 +60,19 @@ are your own or finished.
 The script enforces these; keep them when cleaning by hand:
 
 - Remove a repository path only when git reports it ignored, nothing under it
-  is tracked, its name is on the tier's list, and neither it nor any parent
-  inside the repository is a symlink. Untracked files that are not ignored
+  is tracked, its name is on the tier's list, no repository is nested anywhere
+  under it, and neither it nor any parent inside the repository is a symlink. Untracked files that are not ignored
   belong to someone: never remove them.
 - Never run `git clean` (`-X` included), `rm -rf` on a whole ignored tree, or
   delete `.env*`, `.secrets`, `.wrangler/state`, local databases, or anything
   under `../matrix-secrets`.
 - Skip a repository another process is working in (a dev server, a test run,
   another agent session). Idle shells and the session running the script do
-  not count.
+  not count. When processes cannot be listed, the script stops instead of
+  guessing.
 - Never delete clones, worktrees, branches, stashes, Docker data, Gradle
-  caches, simulator devices, or iOS DeviceSupport on your own: the `--machine`
+  caches, simulator devices (unavailable ones included: they keep app data),
+  or iOS DeviceSupport on your own: the `--machine`
   report lists the large ones as `review` for the user to decide.
 - Package caches wait while an install runs, and DerivedData waits for Xcode.
 - In a matrix workspace, cleaning ignored output does not change any

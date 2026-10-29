@@ -77,7 +77,10 @@ export function unsafeReason(root: string, rel: string): string | undefined {
     try { stats = lstatSync(current); } catch { return "missing"; }
     if (stats.isSymbolicLink()) return "symlink";
   }
-  if (existsSync(path.join(current, ".git"))) return "nested repository";
+  // A repository anywhere inside (a git dependency, a scratch clone) is someone's work.
+  const nested = spawnSync("find", [current, "-name", ".git", "-print", "-quit"], { encoding: "utf8" });
+  if (nested.status !== 0) return "could not search for nested repositories";
+  if (nested.stdout.trim() !== "") return "contains a repository";
   if (!git(root, ["check-ignore", "-q", "--", rel]).ok) return "not ignored";
   return undefined;
 }
@@ -135,20 +138,29 @@ export interface Proc {
 
 const SHELLS = new Set(["zsh", "-zsh", "bash", "-bash", "sh", "fish", "dash", "login", "tmux"]);
 
-function processes(): Proc[] {
+/** Every process's cwd; throws when it cannot list them, so busy repositories are never mistaken for idle ones. */
+export function processes(): Proc[] {
+  const list = (command: string, args: string[]) => {
+    const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    // lsof exits 1 when some processes are unreadable but still lists the rest.
+    if (result.error || !result.stdout || (result.status !== 0 && !(command === "lsof" && result.status === 1))) {
+      throw new Error(`cannot list processes with ${command} (${result.error?.message ?? `exit ${result.status}`}); without it busy repositories cannot be detected, so pass --include-busy only if none is in use`);
+    }
+    return result.stdout;
+  };
   const names = new Map<number, { ppid: number; pgid: number; name: string }>();
-  for (const line of (spawnSync("ps", ["-axo", "pid=,ppid=,pgid=,comm="], { encoding: "utf8" }).stdout ?? "").split("\n")) {
+  for (const line of list("ps", ["-axo", "pid=,ppid=,pgid=,comm="]).split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (match) names.set(Number(match[1]), { ppid: Number(match[2]), pgid: Number(match[3]), name: path.basename(match[4]!.trim()) });
   }
   const args = new Map<number, string>();
-  for (const line of (spawnSync("ps", ["-axo", "pid=,args="], { encoding: "utf8" }).stdout ?? "").split("\n")) {
+  for (const line of list("ps", ["-axo", "pid=,args="]).split("\n")) {
     const match = /^\s*(\d+)\s+(.*)$/.exec(line);
     if (match) args.set(Number(match[1]), match[2]!);
   }
   const cwds = new Map<number, string>();
   let pid = 0;
-  for (const line of (spawnSync("lsof", ["-nP", "-d", "cwd", "-Fpn"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).stdout ?? "").split("\n")) {
+  for (const line of list("lsof", ["-nP", "-d", "cwd", "-Fpn"]).split("\n")) {
     if (line.startsWith("p")) pid = Number(line.slice(1));
     else if (line.startsWith("n") && pid) cwds.set(pid, line.slice(1));
   }
@@ -260,7 +272,8 @@ function machineItems(procs: Proc[]): MachineItem[] {
   if (has("xcrun")) {
     const listing = spawnSync("xcrun", ["simctl", "list", "devices", "unavailable"], { encoding: "utf8" }).stdout ?? "";
     const count = listing.split("\n").filter(line => /\(unavailable/.test(line)).length;
-    if (count > 0) items.push({ id: "unavailable-simulators", description: `${count} simulators whose runtime is no longer installed`, reportOnly: false, apply: () => run("xcrun", ["simctl", "delete", "unavailable"]) || "deleted" });
+    // Their app data returns if the runtime is reinstalled, so deleting them is the owner's call.
+    if (count > 0) items.push({ id: "unavailable-simulators", description: `${count} simulators whose runtime is no longer installed; \`xcrun simctl delete unavailable\` removes them and their app data`, reportOnly: true });
   }
   if (has("brew")) {
     const dry = spawnSync("brew", ["cleanup", "-n"], { encoding: "utf8" });
@@ -356,13 +369,17 @@ function free(directory: string): number {
   return stats.bavail * stats.bsize;
 }
 
-export function main(argv: string[], cwd = process.cwd()): number {
+export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[] = processes): number {
   if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); return 0; }
   const options = parseOptions(argv);
   const { workspace, targets } = resolveTargets(cwd, options.names);
   const volume = workspace ?? targets[0]?.root ?? cwd;
   const before = free(volume);
-  const procs = processes();
+  let procs: Proc[];
+  try { procs = discover(); } catch (error) {
+    if (!options.includeBusy) throw error;
+    procs = [];
+  }
   const busy = busyRoots(procs, targets.map(target => target.root));
 
   const repos: RepoReport[] = targets.map(target => {

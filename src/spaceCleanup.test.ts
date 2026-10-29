@@ -27,6 +27,9 @@ function fixture(root = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-"))): 
   write(root, "src/index.ts");
   write(root, ".turbo/cache/a");
   write(root, "dist/index.js");
+  // A clone nested deep inside a cache directory.
+  mkdirSync(path.join(root, "test-results/vendor/clone/.git"), { recursive: true });
+  write(root, "test-results/vendor/clone/notes.md");
   write(root, "node_modules/pkg/index.js");
   write(root, "node_modules/.cache/babel/a");
   write(root, "packages/app/package.json", "{}");
@@ -91,7 +94,7 @@ describe("space cleanup", () => {
       expect(main([root, "--apply", "--include-busy"])).toBe(0);
     } finally { console.log = quiet; }
     for (const gone of [".turbo", "node_modules/.cache", ".wrangler/tmp"]) expect(existsSync(path.join(root, gone))).toBe(false);
-    for (const kept of ["dist", "node_modules/pkg", ".wrangler/state/d1/db.sqlite", ".env", "scratch/notes.md", "coverage/lcov.info", "build/keep.txt", "out/file", ".secrets/prod/key", "src/index.ts"]) {
+    for (const kept of ["test-results/vendor/clone/notes.md", "dist", "node_modules/pkg", ".wrangler/state/d1/db.sqlite", ".env", "scratch/notes.md", "coverage/lcov.info", "build/keep.txt", "out/file", ".secrets/prod/key", "src/index.ts"]) {
       expect(existsSync(path.join(root, kept))).toBe(true);
     }
   });
@@ -125,6 +128,12 @@ describe("space cleanup", () => {
       ["/w/checkouts/a", [22]],
       ["/w", [23]],
     ]);
+  });
+
+  test("fails closed when processes cannot be listed", () => {
+    const root = fixture();
+    expect(() => main([root, "--apply"], root, () => { throw new Error("cannot list processes with lsof"); })).toThrow("cannot list processes");
+    expect(existsSync(path.join(root, ".turbo"))).toBe(true);
   });
 
   test("rejects unknown options", () => {
