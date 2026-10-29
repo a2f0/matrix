@@ -370,6 +370,46 @@ describe("space cleanup", () => {
     expect(cache!.bytes).toBeGreaterThanOrEqual(64 * 1024);
   });
 
+  test("keeps machine guards when --include-busy is given and processes cannot be listed", () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-home-"));
+    temps.push(home);
+    write(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x");
+    const items = machineItems([], { home, has: () => false, output: () => "", run: () => "" });
+    applyMachine(items, () => { throw new Error("cannot list processes with lsof"); });
+    expect(items[0]?.skipped).toContain("cannot list processes");
+    expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x"))).toBe(true);
+  });
+
+  test("leaves a DerivedData that is a repository or a symlink alone", () => {
+    for (const kind of ["repository", "symlink"]) {
+      const home = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-home-"));
+      temps.push(home);
+      const target = kind === "repository" ? path.join(home, "Library/Developer/Xcode/DerivedData") : path.join(home, "elsewhere");
+      write(target, ".git/HEAD");
+      write(target, "Project/src/main.swift");
+      if (kind === "symlink") {
+        mkdirSync(path.join(home, "Library/Developer/Xcode"), { recursive: true });
+        symlinkSync(target, path.join(home, "Library/Developer/Xcode/DerivedData"));
+      }
+      const items = machineItems([], { home, has: () => false, output: () => "", run: () => "" });
+      expect(applyMachine(items, () => [])).toBe(1);
+      expect(existsSync(path.join(target, "Project/src/main.swift"))).toBe(true);
+    }
+  });
+
+  test("rechecks activity before each repository", () => {
+    const first = realpathSync(fixture());
+    const second = realpathSync(fixture());
+    let calls = 0;
+    // The second repository becomes busy while the first is being cleaned.
+    const discover = (): Proc[] => ++calls <= 2 ? [] : [{ pid: 999998, ppid: 1, name: "node", args: "vite", cwd: second }];
+    const quiet = console.log;
+    console.log = () => {};
+    try { main([first, second, "--apply"], first, discover); } finally { console.log = quiet; }
+    expect(existsSync(path.join(first, ".turbo"))).toBe(false);
+    expect(existsSync(path.join(second, ".turbo"))).toBe(true);
+  });
+
   test("rejects unknown options", () => {
     expect(() => parseOptions(["--force"])).toThrow("unknown option --force");
     expect(parseOptions(["--builds", "--deps", "tearleads"]).tiers).toEqual(new Set(["caches", "builds", "deps"]));

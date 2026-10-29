@@ -376,6 +376,8 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
 
   const derived = path.join(home, "Library/Developer/Xcode/DerivedData");
   dir("xcode-derived-data", "Xcode DerivedData, keeping each project's SourcePackages", derived, false, () => {
+    // A relocated or hand-made DerivedData could be a link to, or itself be, someone's repository.
+    if (lstatSync(derived).isSymbolicLink() || isRepository(derived)) throw new Error(`${derived} is a symlink or a repository; clean it by hand`);
     // SourcePackages/checkouts are Swift package clones someone may have edited; builds and indexes go.
     for (const entry of readdirSync(derived, { withFileTypes: true })) {
       const project = path.join(derived, entry.name);
@@ -541,19 +543,14 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
   // A repository that could not be scanned was not cleaned: report it as a failure.
   let failures = repos.filter(repo => repo.error).length;
   if (options.apply) {
-    // Scans and sizing take a while; judge activity from a fresh process list.
-    let fresh: Proc[];
-    try { fresh = discover(); } catch (error) {
-      if (!options.includeBusy) throw error;
-      fresh = [];
-    }
-    const nowBusy = busyRoots(fresh, targets.map(target => target.root));
     for (const repo of repos) {
-      const workers = nowBusy.get(repo.root);
-      repo.busy = workers?.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
-    }
-    for (const repo of repos) {
-      if (repo.error || (repo.busy && !options.includeBusy)) continue;
+      if (repo.error) continue;
+      // Scans and earlier removals take a while; judge each repository from a fresh process list.
+      if (!options.includeBusy) {
+        const workers = busyRoots(discover(), targets.map(target => target.root)).get(repo.root);
+        repo.busy = workers?.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
+        if (repo.busy) continue;
+      }
       repo.removed = [];
       repo.failed = [];
       for (const candidate of selected(repo.candidates, options.tiers)) {
@@ -565,9 +562,8 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
       }
       failures += repo.failed.length;
     }
-    failures += applyMachine(machine, () => {
-      try { return discover(); } catch (error) { if (options.includeBusy) return []; throw error; }
-    });
+    // --include-busy covers repositories only: package caches and DerivedData always wait for installs and builds.
+    failures += applyMachine(machine, discover);
   }
   const after = options.apply ? free(volume) : undefined;
 

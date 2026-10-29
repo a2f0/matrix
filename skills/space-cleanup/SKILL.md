@@ -34,7 +34,8 @@ Caches are always included; each other flag adds its own tier independently:
 
 `--json` gives agents the same report. `--include-busy` cleans repositories
 other processes are working in; use it only after confirming those processes
-are your own or finished.
+are your own or finished. It never applies to `--machine` items, which always
+wait for running installs and Xcode builds.
 
 ## Procedure
 
