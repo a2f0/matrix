@@ -266,6 +266,25 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "import-cycle-guard",
+    summary: "TypeScript or Python sources have a merge-gating guard against import cycles, type-only imports included",
+    source: "docs/tooling.md#import-cycles-and-layering",
+    check: checkout => {
+      const sources = checkout.tracked(":(glob)**/*.ts", ":(glob)**/*.tsx", ":(glob)**/__init__.py", ...managedSkills(checkout).map(file => `:(exclude,literal)${file}`))
+        .filter(file => !file.endsWith(".d.ts"));
+      if (sources.length === 0) return skip("no TypeScript sources or Python package");
+      const guarded = (patterns: string[], test: (text: string) => boolean) =>
+        checkout.tracked(...patterns).some(file => test(checkout.read(file) ?? ""));
+      if (guarded([":(glob)**/biome.json", ":(glob)**/biome.jsonc"], text => /"noImportCycles"/.test(text) && /"ignoreTypes"\s*:\s*false/.test(text))) return pass;
+      // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
+      const cruiser = git(checkout.directory, ["grep", "-l", "-I", "-E", "-e", "circular[\"']?[[:space:]]*:[[:space:]]*true", "--", "*.ts", "*.js", "*.cjs", "*.mjs", "*.json"]);
+      if (cruiser.status === 0) return pass;
+      if (cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
+      if (checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts", ":(glob)**/test_module_graph.py").length > 0) return pass;
+      return fail("no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test");
+    },
+  },
+  {
     id: "superseded-guidance",
     summary: "Markdown outside managed skills names no command a shared command replaced",
     source: "docs/audit.md#superseded-guidance",
