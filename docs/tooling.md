@@ -260,7 +260,7 @@ Repositories that do not use Bun's test runner keep `agent:run` for their tests;
 Agents can work without blanket approval when routine commands run freely and
 consequential ones ask. agent-tool assigns each of its commands a permission
 class and generates Claude Code and Codex rules from them, as its
-[permissions guide](https://github.com/a2f0/agent-tool/blob/ca698ad954ed489dbeba618e20887448f1e2a5cd/docs/permissions.md)
+[permissions guide](https://github.com/a2f0/agent-tool/blob/43e8334cc4001442fb1faf6c14099dac8c1739a2/docs/permissions.md)
 describes. Every managed repository that pins agent-tool:
 
 - commits the generated `.claude/settings.json`, `.codex/rules/agent-tool.rules`,
@@ -268,8 +268,7 @@ describes. Every managed repository that pins agent-tool:
   `agent-tool permissions install --apply`, which `agents:sync` runs after
   installing skills;
 - runs `agent-tool permissions check` wherever it checks managed skills,
-  usually in the `agents:check` script, so a new script that asks, or a stale
-  rule, fails CI;
+  usually in the `agents:check` script, so a stale rule fails CI;
 - classifies, in the `permissions.executables` section of `agent-tool.json`,
   the installed CLIs its guidance tells agents to run through `bun x`:
   `local` for linters and compilers, `release` for deploy tools, `exec` for
@@ -277,7 +276,10 @@ describes. Every managed repository that pins agent-tool:
 
 Agents then run tests and classified executables through
 `agent-tool bun test|x`, and change dependencies through
-`agent-tool bun update|remove`; adding a dependency, merges, and publishing
-ask. Package scripts are not classified, so `bun run` and `agent:run` keep the
-harness default. `bun run audit --rule harness-permissions` reports
+`agent-tool bun update|remove`. Adding a dependency, merges, and publishing
+prompt in Codex. For Claude Code the generated rules only allow, because an
+explicit `ask` rule prompts even in `bypassPermissions` mode; those classes are
+left to the user's mode, and the guide's auto-mode block makes the classifier
+hold them until the user asks. Package scripts are not classified, so
+`bun run` and `agent:run` keep the harness default. `bun run audit --rule harness-permissions` reports
 repositories that lack the files or the check.
