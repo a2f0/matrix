@@ -45,7 +45,8 @@ matrix sync, status, and audit results, visible. Do not wrap interactive tools
 or persistent servers.
 Ship with the installed `ship-pr` skill; title and required CI policy is in
 `agent-tool.json`. After updating the agent-tool pin, run `bun run agents:sync`
-and commit the lockfile, skills, and `.agent-tool-skills.json` together. Do not
+and commit the lockfile, skills, permission rules, and their manifests
+together. Do not
 edit managed skills. When handling review feedback, reply in its original review
 thread with
 `agent-tool pr threads reply <comment-id> --body-file <reply-file>`
@@ -77,15 +78,13 @@ one still needs a request that authorizes it.
    manifest change here. Then run `bun run sync <name>` and `bun run status`.
 2. Adopting agent-tool in a checkout is a change to that repository: read its
    guidance and ship it there. Pin `@a2f0/agent-tool` exactly, run
-   `agent-tool skills install --apply`, and run `agent-tool skills check` in a
-   CI job that already gates merges, so skill drift blocks them without
-   changing repository settings. Use a check that branch protection or a
-   ruleset requires, or a dependency of a required aggregate job that runs
-   with `if: always()` and fails unless every dependency succeeded; a plain
-   `needs` is not enough, because GitHub accepts a skipped required check.
-   Several default branches have no protection or rulesets, and there
-   `agent-tool pr merge` is the only gate, so put the check in a job that
-   `merge.requiredChecks` names. Do not add protection while onboarding.
+   `agent-tool skills install --apply` and
+   `agent-tool permissions install --apply`, and run `agent-tool skills check`
+   and `agent-tool permissions check` in a CI job that already gates merges,
+   so drift blocks them without changing repository settings;
+   [adoption](docs/tooling.md#adoption-and-validation) says which jobs qualify.
+   Do not add protection while onboarding. Review its script classes as
+   [harness permissions](docs/tooling.md#harness-permissions) describes.
    Add the `agent:run` and `agent:logs` package scripts and an
    `Output capture` section in `AGENTS.md`, as
    [output capture](#output-capture) describes.
