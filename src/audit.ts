@@ -316,7 +316,7 @@ export const RULES: readonly Rule[] = [
         checkout.tracked(...patterns).some(file => test(checkout.read(file) ?? ""));
       if (guarded([":(glob)**/biome.json", ":(glob)**/biome.jsonc"], biomeGuardsCycles)) return pass;
       // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
-      const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-E", "-e", "circular[\"']?[[:space:]]*:[[:space:]]*true", "--", "*.ts", "*.js", "*.cjs", "*.mjs", "*.json"]);
+      const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-F", "-e", "no-circular", "--", "*.ts", "*.js", "*.cjs", "*.mjs", "*.json"]);
       if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
       const configs = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
       if (configs.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return pass;

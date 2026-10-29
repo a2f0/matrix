@@ -90,7 +90,8 @@ function relativeImports(source: string): string[] {
 
 function resolve(from: string, specifier: string): string | undefined {
   const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), specifier));
-  return [base, `${base}.ts`, `${base}/index.ts`].find(candidate => candidate.endsWith(".ts") && existsSync(path.join(ROOT, candidate)));
+  // TypeScript resolves `./x.js` to `x.ts`.
+  return [base, base.replace(/\.[cm]?js$/, ".ts"), `${base}.ts`, `${base}/index.ts`].find(candidate => candidate.endsWith(".ts") && existsSync(path.join(ROOT, candidate)));
 }
 
 /** Each cycle once, rotated to start at its smallest module. */
@@ -155,6 +156,12 @@ describe("module graph", () => {
       'const fixture = \'import "./r";\'; const other = "export * from \'./s\'";',
     ].join("\n");
     expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p", "./q"]);
+  });
+
+  test("resolves extensionless, TypeScript-style .js, and index specifiers", () => {
+    expect(resolve("src/cli.ts", "./audit")).toBe("src/audit.ts");
+    expect(resolve("src/cli.ts", "./audit.js")).toBe("src/audit.ts");
+    expect(resolve("src/cli.ts", "./missing")).toBeUndefined();
   });
 
   test("detects a planted cycle and a planted layer violation", () => {

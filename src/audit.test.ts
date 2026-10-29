@@ -182,6 +182,7 @@ describe("audit", () => {
     expect(guard("biome", { "packages/web/biome.jsonc": '{ "suspicious": { "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } } }' })).toBeUndefined();
     expect(guard("cruiser", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "error", from: {}, to: { circular: true } }], options: { tsPreCompilationDeps: "specify" } };' })).toBeUndefined();
     expect(guard("cruiser-policy", { "scripts/checks/architecturePolicy.ts": 'import type { IForbiddenRuleType } from "dependency-cruiser";\nexport const rules = [{ name: "no-circular", severity: "error", to: {\n  circular: true,\n} }];\nexport const options = { parser: "swc" };' })).toBeUndefined();
+    expect(guard("cruiser-multiline", { ".dependency-cruiser.cjs": 'require("dependency-cruiser");\nmodule.exports = { forbidden: [{\n  name: "no-circular",\n  severity: "error",\n  to: { circular:\n    true },\n}], options: { tsPreCompilationDeps: true } };' })).toBeUndefined();
     // Disabled rules, test fixtures, and unrelated data are not guards.
     expect(guard("biome-off", { "biome.json": '{ "suspicious": { "noImportCycles": { "level": "off", "options": { "ignoreTypes": false } } } }' })).toBe(missing);
     expect(guard("cruiser-fixture", { "tests/fixtures/depcruise.ts": 'import "dependency-cruiser";\nconst rule = { name: "no-circular", severity: "error", to: { circular: true } };\nconst options = { tsPreCompilationDeps: true };' })).toBe(missing);
