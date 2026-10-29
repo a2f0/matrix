@@ -30,7 +30,7 @@ Caches are always included; each other flag adds its own tier independently:
 | (default) | Caches: `.turbo`, `node_modules/.cache` and `.vite`, `.next/cache`, `.wrangler/tmp`, coverage, test reports, Python caches | Next run is slower |
 | `--builds` | Build output: `dist`, `build`, `out`, `.next`, `.gradle`, `.build`, Rust `target`, `*.tsbuildinfo` | The repository's build |
 | `--deps` | `node_modules`, `.venv`, CocoaPods `Pods`, `vendor/bundle` | The repository's documented install |
-| `--machine` | Xcode DerivedData, `brew cleanup`, Bun and npm caches, `pnpm store prune` | Re-downloads and rebuilds |
+| `--machine` | Xcode DerivedData (not its `SourcePackages` clones), `brew cleanup`, Bun and npm caches, `pnpm store prune` | Re-downloads and rebuilds |
 
 `--json` gives agents the same report. `--include-busy` cleans repositories
 other processes are working in; use it only after confirming those processes

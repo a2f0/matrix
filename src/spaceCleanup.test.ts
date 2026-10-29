@@ -176,6 +176,7 @@ describe("space cleanup", () => {
       const home = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-home-"));
       temps.push(home);
       write(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x");
+      write(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD");
       write(home, ".bun/install/cache/pkg/x");
       write(home, ".gradle/caches/x");
       const ran: string[] = [];
@@ -197,9 +198,9 @@ describe("space cleanup", () => {
       const { home, ran, fake } = host(["bun", "xcrun", "brew"]);
       const items = machineItems([], fake);
       expect(items.filter(item => item.reportOnly).map(item => item.id).toSorted()).toEqual(["gradle-caches", "unavailable-simulators"]);
-      expect(applyMachine(items)).toBe(0);
-      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData"))).toBe(true);
-      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc"))).toBe(false);
+      expect(applyMachine(items, [])).toBe(0);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build"))).toBe(false);
+      expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD"))).toBe(true);
       expect(ran.toSorted()).toEqual(["brew cleanup", "bun pm cache rm"]);
       expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
     });
@@ -216,10 +217,41 @@ describe("space cleanup", () => {
         "bun-cache": "an install is running (pid 5)",
         "homebrew-cleanup": "an install is running (pid 5)",
       });
-      expect(applyMachine(items)).toBe(0);
+      expect(applyMachine(items, procs)).toBe(0);
       expect(ran).toEqual([]);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x"))).toBe(true);
     });
+  });
+
+  test("rechecks machine guards against processes started after the scan", () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-home-"));
+    temps.push(home);
+    write(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x");
+    const fake: Host = { home, has: () => false, output: () => "", run: () => "" };
+    const items = machineItems([], fake);
+    expect(items[0]?.skipped).toBeUndefined();
+    applyMachine(items, [{ pid: 7, ppid: 1, name: "xcodebuild", args: "xcodebuild", cwd: "/x" }]);
+    expect(items[0]?.skipped).toBe("xcodebuild is running (pid 7)");
+    expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x"))).toBe(true);
+  });
+
+  test("skips repositories that became busy after the scan", () => {
+    const root = realpathSync(fixture());
+    let calls = 0;
+    const discover = (): Proc[] => calls++ === 0 ? [] : [{ pid: 999999, ppid: 1, name: "node", args: "vite build", cwd: path.join(root, "src") }];
+    const quiet = console.log;
+    console.log = () => {};
+    try { expect(main([root, "--apply"], root, discover)).toBe(0); } finally { console.log = quiet; }
+    expect(calls).toBe(2);
+    expect(existsSync(path.join(root, ".turbo"))).toBe(true);
+  });
+
+  test("canonicalizes symlinked targets so busy detection sees them", () => {
+    const root = realpathSync(fixture());
+    const linkDir = mkdtempSync(path.join(os.tmpdir(), "space-cleanup-link-"));
+    temps.push(linkDir);
+    symlinkSync(root, path.join(linkDir, "repo"));
+    expect(resolveTargets(linkDir, ["repo"]).targets.map(target => target.root)).toEqual([root]);
   });
 
   test("rejects unknown options", () => {

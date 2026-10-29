@@ -12,7 +12,7 @@
  * Uses only Node built-ins so it runs by path from any repository.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, rmSync, statfsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync, rmSync, statfsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -232,7 +232,8 @@ export function isMatrixWorkspace(root: string): boolean {
  * containing the working directory, or the named paths.
  */
 export function resolveTargets(cwd: string, names: string[]): { workspace?: string; targets: Target[] } {
-  const here = toplevel(cwd);
+  // Real paths, so they compare equal to the cwd paths lsof reports.
+  const here = toplevel(cwd) && realpathSync(toplevel(cwd)!);
   const workspace = here && isMatrixWorkspace(here) ? here : undefined;
   const checkouts = (root: string) => readdirSync(path.join(root, "checkouts"), { withFileTypes: true })
     .filter(entry => entry.isDirectory() && existsSync(path.join(root, "checkouts", entry.name, ".git")))
@@ -244,9 +245,13 @@ export function resolveTargets(cwd: string, names: string[]): { workspace?: stri
   }
   const targets = names.map(name => {
     const short = name.includes("/") && !existsSync(path.resolve(cwd, name)) ? name.split("/").pop()! : name;
-    if (workspace && existsSync(path.join(workspace, "checkouts", short, ".git"))) return { name: short, root: path.join(workspace, "checkouts", short) };
-    const root = existsSync(path.resolve(cwd, name)) ? toplevel(path.resolve(cwd, name)) : undefined;
-    if (!root) throw new Error(`${name} is neither a checkout name nor a path inside a git repository`);
+    if (workspace && existsSync(path.join(workspace, "checkouts", short, ".git"))) {
+      const root = realpathSync(path.join(workspace, "checkouts", short));
+      return { name: path.basename(root), root };
+    }
+    const top = existsSync(path.resolve(cwd, name)) ? toplevel(path.resolve(cwd, name)) : undefined;
+    if (!top) throw new Error(`${name} is neither a checkout name nor a path inside a git repository`);
+    const root = realpathSync(top);
     return { name: path.basename(root), root };
   });
   return { workspace, targets: targets.filter((target, index) => targets.findIndex(other => other.root === target.root) === index) };
@@ -261,6 +266,8 @@ export interface MachineItem {
   skipped?: string;
   result?: string;
   apply?: () => string;
+  /** Why it must wait, given the running processes; rechecked just before it runs. */
+  guard?: (procs: Proc[]) => string | undefined;
 }
 
 /** What `--machine` needs from the host; tests substitute a fake one. */
@@ -294,19 +301,28 @@ const INSTALLING = /(^|[\s/])(bun|npm|pnpm|yarn|brew)(\s+run\s+agent-tool\s+bun)
 export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
   const { home, has, run } = host;
   const items: MachineItem[] = [];
-  const dir = (id: string, description: string, location: string, reportOnly: boolean, apply?: () => string) => {
-    if (existsSync(location)) items.push({ id, description: `${description} (${location.replace(home, "~")})`, reportOnly, bytes: measure([location]).get(location), apply });
+  const installing: MachineItem["guard"] = list => {
+    const proc = list.find(candidate => INSTALLING.test(candidate.args));
+    return proc ? `an install is running (pid ${proc.pid})` : undefined;
   };
-  const installing = procs.find(proc => INSTALLING.test(proc.args));
-  const busyInstall = installing ? `an install is running (pid ${installing.pid})` : undefined;
-  const xcode = procs.find(proc => proc.name === "xcodebuild" || proc.name === "Xcode");
+  const building: MachineItem["guard"] = list => {
+    const proc = list.find(candidate => candidate.name === "xcodebuild" || candidate.name === "Xcode");
+    return proc ? `${proc.name} is running (pid ${proc.pid})` : undefined;
+  };
+  const dir = (id: string, description: string, location: string, reportOnly: boolean, apply?: () => string, guard?: MachineItem["guard"]) => {
+    if (existsSync(location)) items.push({ id, description: `${description} (${location.replace(home, "~")})`, reportOnly, bytes: measure([location]).get(location), apply, guard });
+  };
 
   const derived = path.join(home, "Library/Developer/Xcode/DerivedData");
-  dir("xcode-derived-data", "Xcode DerivedData", derived, false, () => {
-    for (const entry of readdirSync(derived)) rmSync(path.join(derived, entry), { recursive: true, force: true });
-    return "emptied";
-  });
-  if (xcode && items.at(-1)?.id === "xcode-derived-data") items.at(-1)!.skipped = `${xcode.name} is running (pid ${xcode.pid})`;
+  dir("xcode-derived-data", "Xcode DerivedData, keeping each project's SourcePackages", derived, false, () => {
+    // SourcePackages/checkouts are Swift package clones someone may have edited; builds and indexes go.
+    for (const entry of readdirSync(derived, { withFileTypes: true })) {
+      const project = path.join(derived, entry.name);
+      if (!entry.isDirectory()) { rmSync(project, { force: true }); continue; }
+      for (const child of readdirSync(project)) if (child !== "SourcePackages") rmSync(path.join(project, child), { recursive: true, force: true });
+    }
+    return "cleaned";
+  }, building);
   if (has("xcrun")) {
     const listing = host.output("xcrun", ["simctl", "list", "devices", "unavailable"]);
     const count = listing.split("\n").filter(line => /\(unavailable/.test(line)).length;
@@ -316,22 +332,18 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
   if (has("brew")) {
     const match = /free approximately ([\d.]+)([KMGT]?B)/.exec(host.output("brew", ["cleanup", "-n"]));
     const unit: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
-    if (match) items.push({ id: "homebrew-cleanup", description: "Old Homebrew versions and downloads (`brew cleanup`)", reportOnly: false, bytes: Number(match[1]) * unit[match[2]!]!, apply: () => { run("brew", ["cleanup"]); return "cleaned"; } });
     // brew cleanup removes downloads an install in progress is using.
-    if (busyInstall && items.at(-1)?.id === "homebrew-cleanup") items.at(-1)!.skipped = busyInstall;
+    if (match) items.push({ id: "homebrew-cleanup", description: "Old Homebrew versions and downloads (`brew cleanup`)", reportOnly: false, bytes: Number(match[1]) * unit[match[2]!]!, apply: () => { run("brew", ["cleanup"]); return "cleaned"; }, guard: installing });
   }
   if (has("bun")) {
     const cache = host.output("bun", ["pm", "cache"]).trim().split("\n")[0];
-    if (cache) dir("bun-cache", "Bun install cache", cache, false, () => run("bun", ["pm", "cache", "rm"]) || "removed");
-    if (busyInstall && items.at(-1)?.id === "bun-cache") items.at(-1)!.skipped = busyInstall;
+    if (cache) dir("bun-cache", "Bun install cache", cache, false, () => run("bun", ["pm", "cache", "rm"]) || "removed", installing);
   }
   if (has("npm")) {
-    dir("npm-cache", "npm cache", path.join(home, ".npm/_cacache"), false, () => { run("npm", ["cache", "clean", "--force"]); return "cleaned"; });
-    if (busyInstall && items.at(-1)?.id === "npm-cache") items.at(-1)!.skipped = busyInstall;
+    dir("npm-cache", "npm cache", path.join(home, ".npm/_cacache"), false, () => { run("npm", ["cache", "clean", "--force"]); return "cleaned"; }, installing);
   }
   if (has("pnpm")) {
-    items.push({ id: "pnpm-store", description: "Packages no project references in the pnpm store (`pnpm store prune`)", reportOnly: false, apply: () => { run("pnpm", ["store", "prune"]); return "pruned"; } });
-    if (busyInstall) items.at(-1)!.skipped = busyInstall;
+    items.push({ id: "pnpm-store", description: "Packages no project references in the pnpm store (`pnpm store prune`)", reportOnly: false, apply: () => { run("pnpm", ["store", "prune"]); return "pruned"; }, guard: installing });
   }
   dir("gradle-caches", "Gradle caches; delete with Gradle stopped if Android builds can wait for a re-download", path.join(home, ".gradle/caches"), true);
   dir("playwright-browsers", "Playwright browsers; old versions no project pins can go", path.join(home, "Library/Caches/ms-playwright"), true);
@@ -342,13 +354,19 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
     if (snapshots > 0) items.push({ id: "local-snapshots", description: `${snapshots} Time Machine local snapshots hold deleted files' space until macOS thins them`, reportOnly: true });
   }
   if (has("docker")) items.push({ id: "docker", description: "Docker images, containers, and volumes; `docker system df` sizes them, and pruning is the owner's call", reportOnly: true });
+  for (const item of items) item.skipped = item.guard?.(procs);
   return items;
 }
 
-/** Runs every machine item that is neither report-only nor skipped; returns the number that failed. */
-export function applyMachine(items: MachineItem[]): number {
+/**
+ * Runs every machine item that is neither report-only nor waiting on a running
+ * process, rechecking its guard against `procs`, a fresh process list.
+ * Returns the number that failed.
+ */
+export function applyMachine(items: MachineItem[], procs: Proc[]): number {
   let failures = 0;
   for (const item of items) {
+    item.skipped = item.guard?.(procs);
     if (item.reportOnly || item.skipped || !item.apply) continue;
     try { item.result = item.apply(); } catch (error) { item.result = `failed: ${(error as Error).message}`; failures++; }
   }
@@ -444,6 +462,17 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
 
   let failures = 0;
   if (options.apply) {
+    // Scans and sizing take a while; judge activity from a fresh process list.
+    let fresh: Proc[];
+    try { fresh = discover(); } catch (error) {
+      if (!options.includeBusy) throw error;
+      fresh = [];
+    }
+    const nowBusy = busyRoots(fresh, targets.map(target => target.root));
+    for (const repo of repos) {
+      const workers = nowBusy.get(repo.root);
+      repo.busy = workers?.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
+    }
     for (const repo of repos) {
       if (repo.error || (repo.busy && !options.includeBusy)) continue;
       repo.removed = [];
@@ -457,7 +486,7 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
       }
       failures += repo.failed.length;
     }
-    failures += applyMachine(machine);
+    failures += applyMachine(machine, fresh);
   }
   const after = options.apply ? free(volume) : undefined;
 
