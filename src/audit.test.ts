@@ -176,7 +176,8 @@ describe("audit", () => {
 
   test("requires an import-cycle guard that counts type-only imports wherever TypeScript or a Python package exists", () => {
     const guard = (name: string, files: Record<string, string>) => failures(checkout(name, { "src/a.ts": "export const a = 1;\n", ...files }), ["import-cycle-guard"])["import-cycle-guard"];
-    const missing = "no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test";
+    const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test";
+    const pythonMissing = "the Python package has no test_module_graph.py";
     expect(guard("unguarded", {})).toBe(missing);
     expect(guard("biome-default", { "biome.json": '{ "linter": { "rules": { "suspicious": { "noImportCycles": "error" } } } }' })).toBe(missing);
     expect(guard("biome", { "packages/web/biome.jsonc": '{ "suspicious": { "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } } }' })).toBeUndefined();
@@ -195,7 +196,12 @@ describe("audit", () => {
     expect(guard("cruiser-default", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", to: { circular: true } }], options: { tsPreCompilationDeps: true } };' })).toBe(missing);
     expect(guard("graph-test", { "tests/module-graph.test.ts": "test('acyclic', () => {});\n" })).toBeUndefined();
     expect(failures(checkout("python", { "plugin/__init__.py": "", "tests/test_module_graph.py": "" }), ["import-cycle-guard"])).toEqual({});
-    expect(failures(checkout("python-bare", { "plugin/__init__.py": "" }), ["import-cycle-guard"])["import-cycle-guard"]).toBe(missing);
+    expect(failures(checkout("python-bare", { "plugin/__init__.py": "" }), ["import-cycle-guard"])["import-cycle-guard"]).toBe(pythonMissing);
+    // Each language needs its own guard: a Biome config cannot check Python.
+    const biome = '{ "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } }';
+    expect(guard("mixed", { "biome.json": biome, "plugin/__init__.py": "" })).toBe(pythonMissing);
+    expect(guard("mixed-ok", { "biome.json": biome, "plugin/__init__.py": "", "tests/test_module_graph.py": "" })).toBeUndefined();
+    expect(failures(checkout("mts-only", { "src/main.mts": "export {};\n" }), ["import-cycle-guard"])["import-cycle-guard"]).toBe(missing);
     // Declarations and managed skills are not sources.
     const skipped = audit(root, [checkout("types-only", { "types/env.d.ts": "declare const x: 1;\n" })], selectRules(["import-cycle-guard"], false), statusOf, context);
     expect(skipped.checkouts[0]!.skipped).toEqual([{ rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" }]);

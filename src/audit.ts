@@ -138,6 +138,17 @@ function cruiserGuardsCycles(file: string, text: string): boolean {
   });
 }
 
+function typescriptGuarded(checkout: Checkout): boolean {
+  const configs = (patterns: string[]) => checkout.tracked(...patterns).map(file => ({ file, text: checkout.read(file) ?? "" }));
+  if (configs([":(glob)**/biome.json", ":(glob)**/biome.jsonc"]).some(({ text }) => biomeGuardsCycles(text))) return true;
+  // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
+  const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-F", "-e", "no-circular", "--", "*.ts", "*.mts", "*.cts", "*.js", "*.cjs", "*.mjs", "*.json"]);
+  if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
+  const candidates = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
+  if (candidates.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return true;
+  return checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts").length > 0;
+}
+
 function managedSkills(checkout: Checkout): string[] {
   return Object.keys(object(json(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
 }
@@ -309,19 +320,16 @@ export const RULES: readonly Rule[] = [
     summary: "TypeScript or Python sources have a merge-gating guard against import cycles, type-only imports included",
     source: "docs/tooling.md#import-cycles-and-layering",
     check: checkout => {
-      const sources = checkout.tracked(":(glob)**/*.ts", ":(glob)**/*.tsx", ":(glob)**/__init__.py", ...managedSkills(checkout).map(file => `:(exclude,literal)${file}`))
-        .filter(file => !file.endsWith(".d.ts"));
-      if (sources.length === 0) return skip("no TypeScript sources or Python package");
-      const guarded = (patterns: string[], test: (text: string) => boolean) =>
-        checkout.tracked(...patterns).some(file => test(checkout.read(file) ?? ""));
-      if (guarded([":(glob)**/biome.json", ":(glob)**/biome.jsonc"], biomeGuardsCycles)) return pass;
-      // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
-      const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-F", "-e", "no-circular", "--", "*.ts", "*.js", "*.cjs", "*.mjs", "*.json"]);
-      if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
-      const configs = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
-      if (configs.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return pass;
-      if (checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts", ":(glob)**/test_module_graph.py").length > 0) return pass;
-      return fail("no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test");
+      const exclusions = managedSkills(checkout).map(file => `:(exclude,literal)${file}`);
+      const typescript = checkout.tracked(...["ts", "tsx", "mts", "cts"].map(extension => `:(glob)**/*.${extension}`), ...exclusions)
+        .some(file => !/\.d\.[cm]?ts$/.test(file));
+      const python = checkout.tracked(":(glob)**/__init__.py", ...exclusions).length > 0;
+      if (!typescript && !python) return skip("no TypeScript sources or Python package");
+      // Each language needs a guard that can read it: Biome and dependency-cruiser cannot check Python.
+      const missing: string[] = [];
+      if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, or module-graph test");
+      if (python && checkout.tracked(":(glob)**/test_module_graph.py").length === 0) missing.push("the Python package has no test_module_graph.py");
+      return problems(missing);
     },
   },
   {

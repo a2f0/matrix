@@ -146,9 +146,10 @@ imports, and writes its intended layering down beside its other layout
 guidance. Use whichever mechanism the repository already runs: Biome's
 `suspicious.noImportCycles` with `ignoreTypes: false` (the default skips
 type-only imports, and most cycles found in the matrix were type-only),
-dependency-cruiser's `no-circular` rule, or, without either, a module-graph
-test named `moduleGraph.test.ts`, `module-graph.test.ts`, or
-`test_module_graph.py`. Express layers with the same tool:
+dependency-cruiser's `no-circular` rule at severity `error` with
+`tsPreCompilationDeps` or the `swc` parser, or, without either, a module-graph
+test named `moduleGraph.test.ts` or `module-graph.test.ts`. A Python package
+needs its own `test_module_graph.py`, since neither tool reads Python. Express layers with the same tool:
 `style/noRestrictedImports` overrides scoped to `**/<pkg>/src/**`,
 dependency-cruiser rules, or the test's layer table. Prove a new guard fails on
 a planted violation before relying on it. The audit's `import-cycle-guard` rule

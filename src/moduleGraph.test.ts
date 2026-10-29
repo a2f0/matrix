@@ -70,7 +70,13 @@ function stripNonCode(source: string): string {
       if (!specifier) blank(start, Math.min(i, source.length));
       i++;
     }
-    else if (char === "`") { i++; skipTemplateText(); }
+    else if (char === "`") {
+      // A substitution-free template right after `import(` is a specifier; keep it.
+      const close = source.indexOf("`", i + 1);
+      const literal = close === -1 ? "" : source.slice(i + 1, close);
+      if (close !== -1 && !literal.includes("${") && !literal.includes("\\") && /\bimport\s*\(\s*$/.test(out.slice(Math.max(0, i - 40), i).join(""))) i = close + 1;
+      else { i++; skipTemplateText(); }
+    }
     else if (char === "{") { depth++; i++; }
     else if (char === "}") {
       depth--;
@@ -82,7 +88,7 @@ function stripNonCode(source: string): string {
   return out.join("");
 }
 
-const SPECIFIER = /\b(?:import|export)(?:\s+type\b)?\s*(?:[\w*{}\s,$]*?\bfrom\s*)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+const SPECIFIER = /\b(?:import|export)(?:\s+type\b)?\s*(?:[\w*{}\s,$]*?\bfrom\s*)?["']([^"']+)["']|\bimport\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
 
 function relativeImports(source: string): string[] {
   return [...stripNonCode(source).matchAll(SPECIFIER)].map(match => (match[1] ?? match[2])!).filter(specifier => specifier.startsWith("."));
@@ -154,8 +160,9 @@ describe("module graph", () => {
       'const brace = `${ { o: 1 }.o }`; import "./p";',
       'const spaced = await import ("./q");',
       'const fixture = \'import "./r";\'; const other = "export * from \'./s\'";',
+      'const literal = await import(`./t`); const dynamic = await import(`./${name}`);',
     ].join("\n");
-    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p", "./q"]);
+    expect(relativeImports(source)).toEqual(["./a", "./b", "./c", "./d", "./e", "./f", "./k", "./l", "./m", "./p", "./q", "./t"]);
   });
 
   test("resolves extensionless, TypeScript-style .js, and index specifiers", () => {
