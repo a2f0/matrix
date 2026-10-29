@@ -12,9 +12,10 @@ force-push or add attribution footers. Do not create GitHub issues without an
 explicit request.
 
 Claude Code, Codex, and Hermes all read this file. Claude Code loads the
-managed skills from `.claude/skills` and Codex from `.agents/skills`; Hermes
-does not load repository skills, so in Hermes read
-`.agents/skills/<name>/SKILL.md` before following a skill named here.
+managed skills from `.claude/skills`, and Codex and Hermes from
+`.agents/skills`; Hermes loads them only in checkouts trusted with
+`hermes skills trust`, so elsewhere read `.agents/skills/<name>/SKILL.md`
+before following a skill named here.
 Delegated subagents start without this conversation, so give each one the
 paths, rules, and commands it needs.
 
