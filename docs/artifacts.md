@@ -96,14 +96,23 @@ it ends (`complete` or `failed`), atomically:
 Non-empty `args` usually means a partial capture: only those screens or
 layouts changed, and `over` names the capture whose other images it kept. A
 partial capture inherits that capture's taint: over a dirty one it stays
-`dirty`, and over a `failed`, `running`, or `incomplete` one, or a store with
-no record, it ends `incomplete`; `merged` stays false or unknown until a full
-capture from origin's default branch. The first clone to link or capture
-reserves the namespace in `<project>/repository.json` with its GitHub
-`owner/name` (from origin's URL, or `gh repo view`), and `link` and `capture`
-refuse another owner's repository of the same name; pass `--project` to give it
-its own namespace, as a repository without a GitHub origin must. A capture
-whose clone changes commit or gains local changes before it ends is `failed`. Only a full, clean capture clears them.
+`dirty`; over a `failed`, `running`, or `incomplete` one, or a store with no
+record, it ends `incomplete`; and `merged` stays false or unknown. Only a full,
+clean capture clears them. A capture whose clone changes commit or gains local
+changes before it ends is `failed`.
+
+## Namespaces
+
+The first clone to link or capture reserves the namespace in
+`<project>/repository.json` with its GitHub `owner/name`, as `gh repo view`
+reports it for origin, so a remote with a pre-rename name or other casing
+still finds it. Origin's URL is used when GitHub is unreachable or
+`MATRIX_ARTIFACTS_NO_GH` is set. Owners compare case-insensitively, and `link`
+and `capture` refuse another owner's repository of the same name; pass
+`--project` to give it its own namespace, as a repository without a GitHub
+origin must.
+
+## Locks
 
 A capture that is killed outright leaves `.capture.lock` behind. `capture`
 reports a lock whose process is gone instead of removing it, since two

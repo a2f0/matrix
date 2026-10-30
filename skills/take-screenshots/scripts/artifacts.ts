@@ -125,21 +125,29 @@ export function githubRepo(url: string): string | undefined {
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
-/** owner/name as GitHub reports it, for remote forms the URL parser does not know. */
-function ghRepo(root: string): string | undefined {
-  const result = spawnSync("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+/**
+ * owner/name as GitHub reports it now, following renames and fixing case. Asks
+ * about origin's repository by name, since bare `gh repo view` prefers an
+ * `upstream` remote and would name a fork's parent. MATRIX_ARTIFACTS_NO_GH
+ * skips the network (offline use and tests).
+ */
+function canonicalRepo(root: string, parsed?: string): string | undefined {
+  if (process.env.MATRIX_ARTIFACTS_NO_GH) return undefined;
+  if (!parsed && gitValue(root, "remote", "get-url", "origin") === undefined) return undefined;
+  const result = spawnSync("gh", ["repo", "view", ...(parsed ? [parsed] : []), "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   const name = result.status === 0 ? result.stdout.trim() : "";
   return /^[^/\s]+\/[^/\s]+$/.test(name) ? name : undefined;
 }
 
 /**
- * A repository's store namespace: its GitHub name, like matrix-secrets'. The
- * owner comes from origin's URL, or `gh repo view` for other remote forms; a
- * repository GitHub cannot name needs an explicit --project.
+ * A repository's store namespace: its GitHub name, like matrix-secrets'. GitHub
+ * names it when reachable (a clone's remote can carry a pre-rename name or other
+ * casing); otherwise origin's URL does. A repository with neither needs --project.
  */
-export function targetFor(root: string, project?: string, resolve: (root: string) => string | undefined = ghRepo): Target {
+export function targetFor(root: string, project?: string, resolve: (root: string, parsed?: string) => string | undefined = canonicalRepo): Target {
   const remote = gitValue(root, "remote", "get-url", "origin");
-  const repo = (remote ? githubRepo(remote) : undefined) ?? resolve(root);
+  const parsed = remote ? githubRepo(remote) : undefined;
+  const repo = resolve(root, parsed) ?? parsed;
   if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
   const name = project ?? repo!.split("/")[1]!;
   if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") throw new Error(`'${name}' is not a usable project name`);
@@ -157,7 +165,8 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
   const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
   const foreign = (holder: string) => `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace`;
   let owner = read();
-  if (owner === undefined && recorded !== undefined && recorded !== identity) return foreign(recorded);
+  const same = (other: string) => other.toLowerCase() === identity.toLowerCase();
+  if (owner === undefined && recorded !== undefined && !same(recorded)) return foreign(recorded);
   if (owner === undefined && apply) {
     mkdirSync(path.dirname(file), { recursive: true });
     try { writeFileSync(file, `${JSON.stringify({ repo: identity })}\n`, { flag: "wx" }); } catch (error) {
@@ -166,7 +175,7 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
     owner = read();
     if (owner === undefined) return `${file} is unreadable; fix or remove it`;
   }
-  return owner !== undefined && owner !== identity ? foreign(owner) : undefined;
+  return owner !== undefined && !same(owner) ? foreign(owner) : undefined;
 }
 
 export function packageScripts(root: string): Record<string, unknown> {

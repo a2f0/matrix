@@ -8,6 +8,9 @@ import {
   type Runner, storeDir, targetFor,
 } from "../skills/take-screenshots/scripts/artifacts";
 
+// Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
+process.env.MATRIX_ARTIFACTS_NO_GH = "1";
+
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
@@ -163,6 +166,11 @@ describe("take-screenshots artifacts", () => {
     git(fork, "remote", "set-url", "origin", "/srv/git/app.git");
     expect(() => targetFor(fork, undefined, () => undefined)).toThrow("pass --project");
     expect(targetFor(fork, "app-local", () => undefined)).toMatchObject({ project: "app-local" });
+    // GitHub's current name wins over a pre-rename or differently cased remote.
+    git(fork, "remote", "set-url", "origin", "git@github.com:a2f0/Stealth.git");
+    expect(targetFor(fork, undefined, (_root, parsed) => (parsed === "a2f0/Stealth" ? "a2f0/balebase" : undefined))).toMatchObject({ project: "balebase", repo: "a2f0/balebase" });
+    git(fork, "remote", "set-url", "origin", "git@github.com:A2F0/App.git");
+    expect(link(targetFor(fork), artifacts, false).blocked).toBeUndefined();
   });
 
   test("partial captures keep the merge state of the images they keep", async () => {
