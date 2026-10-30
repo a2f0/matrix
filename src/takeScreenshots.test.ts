@@ -146,6 +146,13 @@ describe("take-screenshots artifacts", () => {
     const fork = repo(path.join(home, "fork", "app"), ".screenshots\n");
     git(fork, "remote", "set-url", "origin", "git@github.com:someone/app.git");
     expect(link(targetFor(fork), artifacts, true).blocked).toContain("holds captures of a2f0/app");
+    // A linked clone whose origin moves to a same-named fork stops matching, in link and status alike.
+    git(clone, "remote", "set-url", "origin", "git@github.com:someone/app.git");
+    expect(link(targetFor(clone), artifacts, false).blocked).toContain("not someone/app");
+    expect(await main(["status", "--json"], clone, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0].foreign).toContain("not someone/app");
+    await expect(main(["capture", "--apply"], clone, undefined, print)).rejects.toThrow("not someone/app");
+    git(clone, "remote", "set-url", "origin", "git@github.com:a2f0/app.git");
     // An empty namespace is reserved by the first repository that links it.
     const other = path.join(home, "other-artifacts");
     rmSync(path.join(app, LINK));

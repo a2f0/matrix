@@ -267,8 +267,12 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   const store = storeDir(target, artifacts);
   const base = { name: target.name, project: target.project, store };
   const state = linkState(target, artifacts);
-  if (state.state === "linked") return { ...base, before: "linked" };
   const blocked = (reason: string): LinkResult => ({ ...base, before: state.state, blocked: reason });
+  // A linked clone whose origin now names another repository must not keep reading this namespace.
+  if (state.state === "linked") {
+    const foreign = claimNamespace(target, artifacts, false);
+    return foreign ? blocked(`${foreign}; remove ${LINK} from this clone`) : { ...base, before: "linked" };
+  }
   if (isInside(artifacts, target.root)) return blocked(`the store ${artifacts} is inside the repository`);
   if (!ignorePatternMatchesFile(target.root)) return blocked(`the root .gitignore must list ${LINK} without a trailing slash, so the link is ignored`);
   const foreign = claimNamespace(target, artifacts, false);
@@ -365,6 +369,8 @@ export function relation(root: string, commit: string): { relation: "current" | 
 
 export interface StatusEntry {
   readonly name: string;
+  /** Set when the namespace belongs to another repository than this clone's origin. */
+  readonly foreign?: string;
   readonly project: string;
   readonly store: string;
   readonly link: LinkState;
@@ -377,8 +383,10 @@ export function status(target: Target, artifacts: string): StatusEntry {
   const store = storeDir(target, artifacts);
   const capture = readRecord(store);
   const lock = readLock(path.join(artifacts, target.project, LOCK));
+  const foreign = claimNamespace(target, artifacts, false);
   return {
     name: target.name,
+    ...(foreign ? { foreign } : {}),
     project: target.project,
     store,
     link: linkState(target, artifacts),
@@ -684,9 +692,9 @@ export async function main(argv: string[], cwd = process.cwd(), runner: Runner =
     if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));
     else for (const entry of entries) {
       const lock = entry.lock ? `; capture running in ${entry.lock.checkout} (pid ${entry.lock.pid})` : "";
-      print(`${entry.name} [${entry.project}] ${entry.link.state}: ${describeCapture(entry)}${lock}`);
+      print(`${entry.name} [${entry.project}] ${entry.link.state}: ${entry.foreign ? `NOT THIS REPOSITORY'S: ${entry.foreign}` : describeCapture(entry)}${lock}`);
     }
-    return entries.every(entry => entry.link.state === "linked") ? 0 : 1;
+    return entries.every(entry => entry.link.state === "linked" && !entry.foreign) ? 0 : 1;
   }
   if (options.command === "link") {
     const results = targets.map(target => link(target, artifacts, options.apply, options.supersede));
