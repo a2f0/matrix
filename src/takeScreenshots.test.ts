@@ -4,7 +4,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import os from "node:os";
 import path from "node:path";
 import {
-  acquireLock, artifactsRoot, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
+  acquireLock, artifactsRoot, processGroup, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
   type Runner, storeDir, targetFor,
 } from "../skills/take-screenshots/scripts/artifacts";
 
@@ -175,6 +175,11 @@ describe("take-screenshots artifacts", () => {
     write(app, "src/wip.ts");
     expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("local changes");
     rmSync(path.join(app, "src"), { recursive: true });
+    // A git check that fails is not evidence of a clean tree.
+    const index = readFileSync(path.join(app, ".git/index"));
+    writeFileSync(path.join(app, ".git/index"), "corrupt");
+    expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("cannot tell whether it has local changes");
+    writeFileSync(path.join(app, ".git/index"), index);
     // Edits hidden behind assume-unchanged or skip-worktree still count.
     for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
       git(app, "update-index", flag, "package.json");
@@ -234,6 +239,9 @@ describe("take-screenshots artifacts", () => {
     expect(() => acquireLock(file, info)).toThrow("another-host");
     writeFileSync(file, "{");
     expect(() => acquireLock(file, info)).toThrow("unreadable");
+    // A dead holder whose process group still runs (orphaned capture children) is not recoverable yet.
+    writeFileSync(file, JSON.stringify({ ...info, pid: 2 ** 22 + 12345, pgid: processGroup(process.pid) }));
+    expect(() => acquireLock(file, info)).toThrow("still runs and may be writing");
   });
 
   test("exactly one of several concurrent processes takes the lock", async () => {

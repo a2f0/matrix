@@ -84,7 +84,7 @@ an image, so an unchanged `complete` record on both sides proves no capture
 overlapped the copy:
 
 ```ts
-import { readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 interface CaptureRecord { status?: string; commit?: string; dirty?: boolean; finishedAt?: string; args?: string[] }
@@ -101,6 +101,11 @@ function readCapture(screenshotsDir: string): string | undefined {
 /** Copies shared screenshots only from a finished, committed capture that no capture overlapped. */
 export async function withSharedCapture<T>(screenshotsDir: string, copy: () => Promise<T>): Promise<T> {
   const before = readCapture(screenshotsDir);
+  // CI and unlinked clones have a plain directory, or none; the shared store always has a record.
+  const shared = lstatSync(screenshotsDir, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
+  if (before === undefined && shared && readdirSync(screenshotsDir).length > 0) {
+    throw new Error("The shared screenshots have no capture record; capture once through the take-screenshots skill.");
+  }
   if (before !== undefined) {
     const record = JSON.parse(before) as CaptureRecord;
     if (record.status !== "complete") throw new Error(`The shared screenshot capture is ${record.status}; wait for it or recapture.`);
@@ -114,8 +119,10 @@ export async function withSharedCapture<T>(screenshotsDir: string, copy: () => P
 }
 ```
 
-A missing record means the screenshots came from a direct capture or none at
-all; CI builds, which have no store, take that path. Copy into the build
+Without a record, a plain `.screenshots` directory (CI, or a clone not yet
+linked) builds as before, but a linked, non-empty store does not: its images
+have no known commit, as after `link` moves an older capture into the store,
+until one capture through the skill records them. Copy into the build
 output inside `copy`, and publish only what was copied.
 
 ## Build caches

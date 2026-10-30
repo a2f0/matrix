@@ -365,7 +365,25 @@ export function status(target: Target, artifacts: string): StatusEntry {
   };
 }
 
-interface LockInfo { readonly pid: number; readonly host: string; readonly checkout: string; readonly startedAt: string }
+interface LockInfo {
+  readonly pid: number;
+  /** The holder's process group, which its capture's children share. */
+  readonly pgid?: number;
+  readonly host: string;
+  readonly checkout: string;
+  readonly startedAt: string;
+}
+
+/** A process's group id, from ps; undefined when it cannot be read. */
+export function processGroup(pid: number): number | undefined {
+  const result = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const value = Number(result.stdout.trim());
+  return result.status === 0 && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function groupAlive(pgid: number): boolean {
+  try { process.kill(-pgid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+}
 
 function readLock(file: string): LockInfo | undefined {
   try { return JSON.parse(readFileSync(file, "utf8")) as LockInfo; } catch { return undefined; }
@@ -393,6 +411,10 @@ export function acquireLock(file: string, info: LockInfo): () => void {
     const held = readLock(file);
     if (!held) throw new Error(`the capture lock ${file} is unreadable; remove it once no capture is running`);
     if (held.host === info.host && !alive(held.pid)) {
+      // A killed holder's capture children keep its process group and may still be writing.
+      if (held.pgid !== undefined && groupAlive(held.pgid)) {
+        throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which died, but process group ${held.pgid} still runs and may be writing screenshots; stop it (kill -TERM -${held.pgid}) or wait, then remove the lock`);
+      }
       throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which is no longer running (started ${held.startedAt} in ${held.checkout}); remove it, then capture again`);
     }
     throw new Error(`another capture of this project is running: pid ${held.pid} on ${held.host} in ${held.checkout} since ${held.startedAt}`);
@@ -438,9 +460,15 @@ export interface CapturePlan {
 
 /** Local changes, including edits behind assume-unchanged or skip-worktree flags that git status cannot see. */
 function isDirty(root: string): boolean {
+  const checked = (...args: string[]) => {
+    const result = git(root, ...args);
+    // A check that fails proves nothing about the tree, so it never passes for clean.
+    if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed in ${root}; cannot tell whether it has local changes`);
+    return result.stdout;
+  };
   // `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree entries with S.
-  if (git(root, "ls-files", "-v").stdout.split("\n").some(line => /^[a-zS] /.test(line))) return true;
-  return (gitValue(root, "status", "--porcelain=v1", "--untracked-files=normal") ?? "") !== "";
+  if (checked("ls-files", "-v").split("\n").some(line => /^[a-zS] /.test(line))) return true;
+  return checked("status", "--porcelain=v1", "--untracked-files=normal") !== "";
 }
 
 export function capture(target: Target, artifacts: string, options: { apply: boolean; allowDirty: boolean; args: string[] }, runner: Runner = RUNNER): CapturePlan {
@@ -467,7 +495,8 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   };
   if (!options.apply) return plan;
   const startedAt = new Date().toISOString();
-  const release = acquireLock(path.join(artifacts, target.project, LOCK), { pid: process.pid, host: os.hostname(), checkout: target.root, startedAt });
+  const pgid = processGroup(process.pid);
+  const release = acquireLock(path.join(artifacts, target.project, LOCK), { pid: process.pid, ...(pgid ? { pgid } : {}), host: os.hostname(), checkout: target.root, startedAt });
   // Hold SIGINT and SIGTERM until the capture exits, so the record and lock are settled.
   let signal: NodeJS.Signals | undefined;
   const hold = (received: NodeJS.Signals) => { signal = received; };

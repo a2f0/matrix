@@ -53,7 +53,8 @@ clone selects itself.
   empty store; when both hold captures, or `.screenshots` links elsewhere, it
   stops and reports instead of choosing. After comparing the two, `--supersede`
   moves the clone's capture to `<project>/superseded/` and links it; nothing
-  is deleted. It also refuses when the root
+  is deleted. Images moved into the store have no `capture.json`, so builds
+  refuse them until one capture through `capture` records a commit. It also refuses when the root
   `.gitignore` lists `.screenshots/` with a trailing slash, which does not
   match a symlink.
 - `capture` runs the repository's `screenshots` package script, forwarding
@@ -104,8 +105,9 @@ whose clone changes commit or gains local changes before it ends is `failed`. On
 
 A capture that is killed outright leaves `.capture.lock` behind. `capture`
 reports a lock whose process is gone instead of removing it, since two
-processes recovering at once could each remove the other's fresh lock; delete
-the file once `status` confirms nothing is capturing.
+processes recovering at once could each remove the other's fresh lock. The
+lock records the capture's process group, and while any process in it still
+runs, the error names the group to stop; delete the file once it is gone.
 
 ## Repository contract
 
@@ -118,8 +120,9 @@ A repository that captures screenshots:
   which would replace the link with a local directory;
 - never captures as part of a build or deploy: builds read `.screenshots`, and
   a build that publishes screenshots reads `.screenshots/capture.json` before
-  and after copying them, failing on a `running`, `failed`, or `dirty` capture
-  or a record that changed during the copy, and printing the capture's commit;
+  and after copying them, failing on a `running`, `failed`, `incomplete`, or
+  `dirty` capture, a record that changed during the copy, or a linked,
+  non-empty store with no record, and printing the capture's commit;
 - keeps build caches honest: a cached task that copies screenshots must hash
   them through the link, or run uncached.
 
