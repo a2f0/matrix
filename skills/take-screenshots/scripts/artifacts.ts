@@ -87,6 +87,10 @@ export interface Target {
   readonly repo?: string;
   /** GitHub confirmed `repo`; false when it came from origin's URL alone. */
   readonly verified?: boolean;
+  /** origin's URL name when GitHub reported another (a rename or other casing). */
+  readonly alias?: string;
+  /** --project chose the namespace; nothing may substitute another. */
+  readonly explicit?: boolean;
 }
 
 /** Git without hooks, prompts, or variables that bind it to another repository. */
@@ -154,11 +158,24 @@ export function targetFor(root: string, project?: string, resolve: (root: string
   if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
   const name = project ?? repo!.split("/")[1]!;
   if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") throw new Error(`'${name}' is not a usable project name`);
-  return { name: path.basename(root), root, project: name, ...(repo ? { repo } : {}), verified: canonical !== undefined };
+  return {
+    name: path.basename(root), root, project: name, ...(repo ? { repo } : {}), verified: canonical !== undefined,
+    ...(canonical && parsed && parsed !== canonical ? { alias: parsed } : {}),
+    ...(project ? { explicit: true } : {}),
+  };
 }
 
 /** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
 export const OWNER = "repository.json";
+
+/** Adds a GitHub-confirmed remote name to the owner file, atomically, so offline clones still find the namespace. */
+function recordAlias(file: string, alias: string): void {
+  const owner = readOwner(file);
+  if (!owner || owner.aliases.some(known => known.toLowerCase() === alias.toLowerCase())) return;
+  const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify({ repo: owner.repo, aliases: [...owner.aliases, alias] })}\n`, { flag: "wx" });
+  renameSync(temporary, file);
+}
 
 /** Reserve the namespace for this repository, or explain whose it is. */
 export function claimNamespace(target: Target, artifacts: string, apply: boolean): string | undefined {
@@ -187,7 +204,9 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
     owner = read();
     if (owner === undefined) return `${file} could not be written`;
   }
-  return owner !== undefined && !same(owner) ? foreign(owner) : undefined;
+  if (owner !== undefined && !same(owner)) return foreign(owner);
+  if (apply && target.alias) recordAlias(file, target.alias);
+  return undefined;
 }
 
 export function packageScripts(root: string): Record<string, unknown> {
@@ -252,19 +271,25 @@ export function existingCase(target: Target, artifacts: string): Target {
  * namespace recorded when it was verified, so going offline never moves it.
  */
 export function linkedNamespace(target: Target, artifacts: string): Target {
-  if (target.verified !== false) return target;
+  if (target.verified !== false || target.explicit || !target.repo) return target;
   let destination: string;
   try { destination = path.resolve(target.root, readlinkSync(path.join(target.root, LINK))); } catch { return target; }
   const relative = path.relative(artifacts, destination).split(path.sep);
   if (relative.length !== 2 || relative[1] !== "screenshots" || relative[0] === target.project || relative[0]!.startsWith(".")) return target;
+  const owner = readOwner(path.join(artifacts, relative[0]!, OWNER));
+  // Only a rename GitHub confirmed earlier: origin's name must be one the namespace recorded as an alias.
+  const known = owner?.aliases.some(alias => alias.toLowerCase() === target.repo!.toLowerCase());
+  return owner && known ? { ...target, project: relative[0]!, repo: owner.repo } : target;
+}
+
+/** A namespace's owner file: its repository and the remote names GitHub confirmed for it. */
+function readOwner(file: string): { repo: string; aliases: string[] } | undefined {
   try {
-    const repo = (JSON.parse(readFileSync(path.join(artifacts, relative[0]!, OWNER), "utf8")) as { repo?: unknown }).repo;
-    // Only a namespace owned by the same account under the GitHub name it now has.
-    if (typeof repo === "string" && target.repo && repo.split("/")[0]!.toLowerCase() === target.repo.split("/")[0]!.toLowerCase() && repo.split("/")[1] === relative[0]) {
-      return { ...target, project: relative[0]!, repo };
-    }
-  } catch { /* not a namespace this clone can claim */ }
-  return target;
+    const value = JSON.parse(readFileSync(file, "utf8")) as { repo?: unknown; aliases?: unknown };
+    if (typeof value.repo !== "string" || value.repo === "") return undefined;
+    const aliases = Array.isArray(value.aliases) ? value.aliases.filter((alias): alias is string => typeof alias === "string") : [];
+    return { repo: value.repo, aliases };
+  } catch { return undefined; }
 }
 
 export function storeDir(target: Target, artifacts: string): string { return path.join(artifacts, target.project, "screenshots"); }

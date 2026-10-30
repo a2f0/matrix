@@ -106,8 +106,10 @@ changes before it ends is `failed`.
 The first clone to link or capture reserves the namespace in
 `<project>/repository.json` with its GitHub `owner/name`, as `gh repo view`
 reports it for origin, so a remote with a pre-rename name or other casing
-still finds it. Origin's URL is used when GitHub is unreachable or
-`MATRIX_ARTIFACTS_NO_GH` is set. Owners compare case-insensitively, and `link`
+still finds it; such a confirmed remote name is kept in the file's `aliases`.
+Origin's URL is used when GitHub is unreachable or `MATRIX_ARTIFACTS_NO_GH` is
+set, and a clone already linked into a namespace that lists its remote name as
+an alias keeps that namespace unless `--project` names another. Owners compare case-insensitively, and `link`
 and `capture` refuse another owner's repository of the same name; pass
 `--project` to give it its own namespace, as a repository without a GitHub
 origin must.

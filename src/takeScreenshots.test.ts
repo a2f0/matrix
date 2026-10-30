@@ -383,6 +383,16 @@ esac
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/renamed/screenshots");
     expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "renamed", link: { state: "linked" } });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/renamed/repository.json"), "utf8"))).toEqual({ repo: "a2f0/renamed", aliases: ["a2f0/stealth"] });
+    // --project keeps its own namespace, even offline in a linked clone.
+    expect(await main(["status", "--json", "--project", "isolated"], app, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "isolated" });
+    // An origin GitHub never confirmed as this namespace's name does not adopt it offline.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/other.git");
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "other" });
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/Stealth.git");
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
     rmSync(path.join(app, LINK));
 
     // A namespace that differs only in case keeps its existing spelling.
