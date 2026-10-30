@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, utimesSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  acquireLock, artifactsRoot, drainGroup, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
-  type Runner, storeDir, targetFor,
+  acquireLock, artifactsRoot, claimNamespace, drainGroup, existingCase, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
+  type Runner, storeDir, targetFor, updateOwner,
 } from "../skills/take-screenshots/scripts/artifacts";
+
+// Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
+process.env.MATRIX_ARTIFACTS_NO_GH = "1";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -163,6 +166,11 @@ describe("take-screenshots artifacts", () => {
     git(fork, "remote", "set-url", "origin", "/srv/git/app.git");
     expect(() => targetFor(fork, undefined, () => undefined)).toThrow("pass --project");
     expect(targetFor(fork, "app-local", () => undefined)).toMatchObject({ project: "app-local" });
+    // GitHub's current name wins over a pre-rename or differently cased remote.
+    git(fork, "remote", "set-url", "origin", "git@github.com:a2f0/Stealth.git");
+    expect(targetFor(fork, undefined, (_root, parsed) => (parsed === "a2f0/Stealth" ? "a2f0/balebase" : undefined))).toMatchObject({ project: "balebase", repo: "a2f0/balebase" });
+    git(fork, "remote", "set-url", "origin", "git@github.com:A2F0/App.git");
+    expect(link(targetFor(fork), artifacts, false).blocked).toBeUndefined();
   });
 
   test("partial captures keep the merge state of the images they keep", async () => {
@@ -336,6 +344,198 @@ try {
     expect(await main(["capture", "--apply"], app, lingering, print, { graceMs: 200, killMs: 2_000 })).toBe(1);
     expect(readRecord(path.join(home, "matrix-artifacts/app/screenshots"))?.status).toBe("failed");
     expect(existsSync(lock)).toBe(false);
+  });
+
+  test("asks GitHub about origin by name, and falls back to its URL", async () => {
+    const { home, app } = workspace();
+    const bin = path.join(home, "bin");
+    // A stub gh: names origin's renamed repository, and a fork's parent when asked without a name.
+    write(bin, "gh", `#!/bin/sh
+case "$*" in
+  *"repo view a2f0/app "*) echo a2f0/App R_app ;;
+  *"repo view a2f0/down "*) exit 1 ;;
+  *"repo view --json"*) echo parent/app R_parent ;;
+  *) exit 1 ;;
+esac
+`);
+    spawnSync("chmod", ["+x", path.join(bin, "gh")]);
+    const saved = { path: process.env.PATH, noGh: process.env.MATRIX_ARTIFACTS_NO_GH };
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try {
+      git(app, "remote", "add", "upstream", "git@github.com:parent/app.git");
+      expect(targetFor(app)).toMatchObject({ repo: "a2f0/App", project: "App", id: "R_app" });
+      git(app, "remote", "set-url", "origin", "git@github.com:a2f0/down.git");
+      expect(targetFor(app)).toMatchObject({ repo: "a2f0/down", project: "down" });
+    } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    // Linked online under GitHub's new name, a clone keeps that namespace offline.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/stealth.git");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/renamed R_renamed\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/renamed/screenshots");
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "renamed", link: { state: "linked" } });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/renamed/repository.json"), "utf8"))).toEqual({ repo: "a2f0/renamed", aliases: ["a2f0/stealth"], id: "R_renamed" });
+    // --project keeps its own namespace, even offline in a linked clone.
+    expect(await main(["status", "--json", "--project", "isolated"], app, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "isolated" });
+    // An origin GitHub never confirmed as this namespace's name does not adopt it offline.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/other.git");
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "other" });
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/Stealth.git");
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
+    rmSync(path.join(app, LINK));
+
+    // A store made before a rename keeps serving the repository once GitHub confirms the old name.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/newname R_old\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try {
+      expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+      expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
+    } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname", link: { state: "linked" } });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/newname", aliases: ["a2f0/oldname"], id: "R_old" });
+    rmSync(path.join(app, LINK));
+    // Clones whose remote already uses the new name share the same store.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/newname.git");
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
+    rmSync(path.join(app, LINK));
+
+    // A second rename (oldname -> newname -> third): a clone still on the first name keeps the store.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/third R_old\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/third", aliases: ["a2f0/oldname", "a2f0/newname"], id: "R_old" });
+    // Renamed back to an earlier name, the same repository (same id) keeps its store.
+    write(bin, "gh", "#!/bin/sh\necho a2f0/oldname R_old\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toMatchObject({ repo: "a2f0/oldname", id: "R_old" });
+    // A different repository that reused the old name (new id) cannot claim the store through the alias.
+    write(bin, "gh", "#!/bin/sh\necho a2f0/fourth R_other\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try {
+      expect(await main(["link", "--json"], app, undefined, print)).toBe(1);
+      expect(output.at(-1)).toContain("another GitHub repository, R_old");
+    } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    // An extra namespace made with --project never replaces the one a clone already uses,
+    // and an unlinked clone picks the repository's own namespace, not the extra.
+    rmSync(path.join(app, LINK));
+    expect(await main(["link", "--project", "aaa", "--apply"], app, undefined, print)).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/aaa/repository.json"), "utf8"))).toMatchObject({ repo: "a2f0/oldname", explicit: true });
+    rmSync(path.join(app, LINK));
+    writeFileSync(path.join(home, "matrix-artifacts/aaa/repository.json"), JSON.stringify({ repo: "a2f0/third", explicit: true }));
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname" });
+    // With only an explicit namespace matching, an unlinked clone gets its own, never the extra.
+    const lone = repo(path.join(home, "lone"), ".screenshots\n");
+    git(lone, "remote", "set-url", "origin", "git@github.com:a2f0/lone.git");
+    mkdirSync(path.join(home, "matrix-artifacts/isolated"), { recursive: true });
+    writeFileSync(path.join(home, "matrix-artifacts/isolated/repository.json"), JSON.stringify({ repo: "a2f0/lone", explicit: true }));
+    expect(await main(["status", "--json"], lone, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "lone" });
+    // Offline, --project accepts a confirmed old name of that namespace's owner.
+    writeFileSync(path.join(home, "matrix-artifacts/isolated/repository.json"), JSON.stringify({ repo: "a2f0/lone-renamed", aliases: ["a2f0/lone"], explicit: true }));
+    expect(await main(["link", "--project", "isolated", "--apply"], lone, undefined, print)).toBe(0);
+    expect(readlinkSync(path.join(lone, LINK))).toContain("matrix-artifacts/isolated/screenshots");
+
+    // An owner-only transfer keeps working offline through the confirmed alias, even with the same project name.
+    const transferred = path.join(home, "matrix-artifacts", "moved");
+    mkdirSync(path.join(transferred, "screenshots"), { recursive: true });
+    writeFileSync(path.join(transferred, "repository.json"), JSON.stringify({ repo: "neworg/moved", aliases: ["a2f0/moved"] }));
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/moved.git");
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "moved", link: { state: "linked" } });
+    expect(output.at(-1)).not.toContain("foreign");
+    rmSync(path.join(app, LINK));
+
+    // A namespace that differs only in case keeps its existing spelling.
+    const artifacts = path.join(home, "matrix-artifacts");
+    mkdirSync(path.join(artifacts, "app"), { recursive: true });
+    expect(existingCase({ name: "app", root: app, project: "App", repo: "a2f0/App" }, artifacts).project).toBe("app");
+    // A damaged owner file holds the namespace instead of crashing or freeing it.
+    writeFileSync(path.join(artifacts, "app", "repository.json"), JSON.stringify({ repo: null }));
+    expect(claimNamespace({ name: "app", root: app, project: "app", repo: "a2f0/app" }, artifacts, true)).toContain("unreadable repository.json");
+  });
+
+  test("owner updates from concurrent processes are all kept", async () => {
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-owner-")));
+    temps.push(dir);
+    const file = path.join(dir, "repository.json");
+    writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const script = path.join(dir, "alias.ts");
+    writeFileSync(script, `import { updateOwner } from ${JSON.stringify(module)};
+const alias = process.argv[2]!;
+updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...owner.aliases, alias] });
+`);
+    const children = Array.from({ length: 8 }, (_, index) => Bun.spawn([process.execPath, script, `a2f0/old${index}`]));
+    await Promise.all(children.map(child => child.exited));
+    expect(JSON.parse(readFileSync(file, "utf8")).aliases.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `a2f0/old${index}`));
+  });
+
+  test("concurrent claims with conflicting GitHub ids: exactly one wins", async () => {
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-claim-")));
+    temps.push(dir);
+    mkdirSync(path.join(dir, "app"));
+    // A legacy owner file, written before ids were recorded.
+    writeFileSync(path.join(dir, "app", "repository.json"), JSON.stringify({ repo: "a2f0/app" }));
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const script = path.join(dir, "claim.ts");
+    writeFileSync(script, `import { claimNamespace } from ${JSON.stringify(module)};
+const id = process.argv[2]!;
+const error = claimNamespace({ name: "app", root: "/nowhere", project: "app", repo: "a2f0/app", verified: true, id }, ${JSON.stringify(dir)}, true);
+console.log(error ? "lost" : "won");
+`);
+    const children = Array.from({ length: 6 }, (_, index) => Bun.spawn([process.execPath, script, `R_${index}`], { stdout: "pipe" }));
+    const results = await Promise.all(children.map(child => new Response(child.stdout).text()));
+    expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path.join(dir, "app", "repository.json"), "utf8")).id).toMatch(/^R_\d$/);
+  });
+
+  test("a held owner lock is never broken automatically", () => {
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-owner-lock-")));
+    temps.push(dir);
+    const file = path.join(dir, "repository.json");
+    writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
+    writeFileSync(`${file}.lock`, "1\n");
+    utimesSync(`${file}.lock`, new Date(0), new Date(0));
+    const started = Date.now();
+    expect(() => updateOwner(file, owner => owner, 200)).toThrow("left by a killed process");
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(existsSync(`${file}.lock`)).toBe(true);
   });
 
   test("parses commands and rejects options that do not apply", async () => {

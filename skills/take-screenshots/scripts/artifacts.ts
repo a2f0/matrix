@@ -85,6 +85,14 @@ export interface Target {
   readonly root: string;
   readonly project: string;
   readonly repo?: string;
+  /** GitHub confirmed `repo`; false when it came from origin's URL alone. */
+  readonly verified?: boolean;
+  /** origin's URL name when GitHub reported another (a rename or other casing). */
+  readonly alias?: string;
+  /** --project chose the namespace; nothing may substitute another. */
+  readonly explicit?: boolean;
+  /** GitHub's node id for `repo`, which survives renames and transfers. */
+  readonly id?: string;
 }
 
 /** Git without hooks, prompts, or variables that bind it to another repository. */
@@ -125,48 +133,129 @@ export function githubRepo(url: string): string | undefined {
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
-/** owner/name as GitHub reports it, for remote forms the URL parser does not know. */
-function ghRepo(root: string): string | undefined {
-  const result = spawnSync("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  const name = result.status === 0 ? result.stdout.trim() : "";
-  return /^[^/\s]+\/[^/\s]+$/.test(name) ? name : undefined;
+/**
+ * owner/name as GitHub reports it now, following renames and fixing case. Asks
+ * about origin's repository by name, since bare `gh repo view` prefers an
+ * `upstream` remote and would name a fork's parent. MATRIX_ARTIFACTS_NO_GH
+ * skips the network (offline use and tests).
+ */
+function canonicalRepo(root: string, parsed?: string): Resolved | undefined {
+  if (process.env.MATRIX_ARTIFACTS_NO_GH) return undefined;
+  if (!parsed && gitValue(root, "remote", "get-url", "origin") === undefined) return undefined;
+  const result = spawnSync("gh", ["repo", "view", ...(parsed ? [parsed] : []), "--json", "nameWithOwner,id", "--jq", ".nameWithOwner + \" \" + .id"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const [repo, id] = result.status === 0 ? result.stdout.trim().split(/\s+/) : [];
+  return repo && /^[^/\s]+\/[^/\s]+$/.test(repo) ? { repo, ...(id ? { id } : {}) } : undefined;
 }
 
+/** GitHub's current name for a repository and its node id, which survives renames and transfers. */
+export interface Resolved { readonly repo: string; readonly id?: string }
+
 /**
- * A repository's store namespace: its GitHub name, like matrix-secrets'. The
- * owner comes from origin's URL, or `gh repo view` for other remote forms; a
- * repository GitHub cannot name needs an explicit --project.
+ * A repository's store namespace: its GitHub name, like matrix-secrets'. GitHub
+ * names it when reachable (a clone's remote can carry a pre-rename name or other
+ * casing); otherwise origin's URL does. A repository with neither needs --project.
  */
-export function targetFor(root: string, project?: string, resolve: (root: string) => string | undefined = ghRepo): Target {
+export function targetFor(root: string, project?: string, resolve: (root: string, parsed?: string) => Resolved | string | undefined = canonicalRepo): Target {
   const remote = gitValue(root, "remote", "get-url", "origin");
-  const repo = (remote ? githubRepo(remote) : undefined) ?? resolve(root);
+  const parsed = remote ? githubRepo(remote) : undefined;
+  const resolved = resolve(root, parsed);
+  const canonical = typeof resolved === "string" ? resolved : resolved?.repo;
+  const id = typeof resolved === "string" ? undefined : resolved?.id;
+  const repo = canonical ?? parsed;
   if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
   const name = project ?? repo!.split("/")[1]!;
   if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") throw new Error(`'${name}' is not a usable project name`);
-  return { name: path.basename(root), root, project: name, ...(repo ? { repo } : {}) };
+  return {
+    name: path.basename(root), root, project: name, ...(repo ? { repo } : {}), verified: canonical !== undefined,
+    ...(canonical && parsed && parsed !== canonical ? { alias: parsed } : {}),
+    ...(project ? { explicit: true } : {}),
+    ...(id ? { id } : {}),
+  };
 }
 
 /** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
 export const OWNER = "repository.json";
 
+/** Adds a GitHub-confirmed remote name to the owner file, atomically, so offline clones still find the namespace. */
+function writeOwner(file: string, owner: Owner): void {
+  const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
+  const body = { repo: owner.repo, ...(owner.aliases.length ? { aliases: owner.aliases } : {}), ...(owner.id ? { id: owner.id } : {}), ...(owner.explicit ? { explicit: true } : {}) };
+  writeFileSync(temporary, `${JSON.stringify(body)}\n`, { flag: "wx" });
+  renameSync(temporary, file);
+}
+
+/**
+ * Read, change, and write the owner file under its own short lock, so two
+ * clones recording different aliases at once both keep theirs. `change`
+ * returns the new owner, or undefined to leave the file alone.
+ */
+export function updateOwner(file: string, change: (owner: Owner | undefined) => Owner | undefined, waitMs = 10_000): void {
+  const lock = `${file}.lock`;
+  const mine = `${lock}.${process.pid}.${process.hrtime.bigint()}`;
+  writeFileSync(mine, `${process.pid}\n`, { flag: "wx" });
+  try {
+    for (const deadline = Date.now() + waitMs; ;) {
+      try { linkSync(mine, lock); break; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        // Never broken automatically: two recovering processes could each remove the other's fresh lock.
+        if (Date.now() > deadline) throw new Error(`${lock} is held; an update takes milliseconds, so if no link or capture is running it was left by a killed process: remove it`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+    try {
+      const next = change(readOwner(file));
+      if (next) writeOwner(file, next);
+    } finally {
+      unlinkSync(lock);
+    }
+  } finally {
+    unlinkSync(mine);
+  }
+}
+
 /** Reserve the namespace for this repository, or explain whose it is. */
 export function claimNamespace(target: Target, artifacts: string, apply: boolean): string | undefined {
   const file = path.join(artifacts, target.project, OWNER);
   const identity = target.repo ?? `local:${target.project}`;
-  const read = () => { try { return (JSON.parse(readFileSync(file, "utf8")) as { repo?: string }).repo; } catch { return undefined; } };
-  const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
+  const lower = (name: string) => name.toLowerCase();
   const foreign = (holder: string) => `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace`;
-  let owner = read();
-  if (owner === undefined && recorded !== undefined && recorded !== identity) return foreign(recorded);
-  if (owner === undefined && apply) {
-    mkdirSync(path.dirname(file), { recursive: true });
-    try { writeFileSync(file, `${JSON.stringify({ repo: identity })}\n`, { flag: "wx" }); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  const decide = (owner: Owner | undefined, damaged: boolean): { error?: string; next?: Owner } => {
+    if (damaged) return { error: foreign("(unreadable repository.json)") };
+    if (!owner) {
+      const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
+      const renamed = target.alias !== undefined && recorded !== undefined && lower(recorded) === lower(target.alias);
+      if (recorded !== undefined && lower(recorded) !== lower(identity) && !renamed) return { error: foreign(recorded) };
+      return { next: { repo: identity, aliases: target.verified && target.alias ? [target.alias] : [], id: target.verified ? target.id : undefined, explicit: target.explicit } };
     }
-    owner = read();
-    if (owner === undefined) return `${file} is unreadable; fix or remove it`;
-  }
-  return owner !== undefined && owner !== identity ? foreign(owner) : undefined;
+    // GitHub's node id survives renames and transfers; a different id is a different repository, whatever its name.
+    if (target.verified && target.id !== undefined && owner.id !== undefined && owner.id !== target.id) {
+      return { error: foreign(`${owner.repo} (another GitHub repository, ${owner.id})`) };
+    }
+    const names = [owner.repo, ...owner.aliases].map(lower);
+    const sameName = lower(owner.repo) === lower(identity);
+    // The same repository after renames or transfers: GitHub confirmed origin's old name, which the namespace
+    // knows, or GitHub's id matches the recorded one.
+    const priorName = target.alias !== undefined && names.includes(lower(target.alias));
+    const sameId = target.verified === true && target.id !== undefined && owner.id === target.id;
+    if (!sameName && !(target.verified && (priorName || sameId))) return { error: foreign(owner.repo) };
+    if (!target.verified) return {};
+    const aliases = [...owner.aliases, owner.repo, ...(target.alias ? [target.alias] : [])]
+      .filter((name, index, all) => lower(name) !== lower(identity) && all.findIndex(other => lower(other) === lower(name)) === index);
+    const next = { ...owner, repo: identity, aliases, id: owner.id ?? target.id };
+    const changed = JSON.stringify(next) !== JSON.stringify({ ...owner, id: owner.id });
+    return changed ? { next } : {};
+  };
+  const damaged = () => lexists(file) && readOwner(file) === undefined;
+  if (!apply) return decide(readOwner(file), damaged()).error;
+  // Decide and write under the owner lock, so a concurrent claim sees this one's result.
+  mkdirSync(path.dirname(file), { recursive: true });
+  let error: string | undefined;
+  updateOwner(file, owner => {
+    const result = decide(owner, damaged());
+    error = result.error;
+    return result.error ? undefined : result.next;
+  });
+  return error;
 }
 
 export function packageScripts(root: string): Record<string, unknown> {
@@ -210,6 +299,77 @@ export function resolveTargets(cwd: string, names: string[], project?: string): 
     return realpathSync(top);
   });
   return { workspace, targets: [...new Set(roots)].map(root => targetFor(root, project)) };
+}
+
+/**
+ * The target with its project spelled like an existing namespace that differs
+ * only in case, so a repository whose GitHub name gains capitals keeps its store
+ * on case-sensitive filesystems too.
+ */
+export function existingCase(target: Target, artifacts: string): Target {
+  if (target.explicit) return target;
+  let entries: string[];
+  try { entries = readdirSync(artifacts); } catch { return target; }
+  if (entries.includes(target.project)) return target;
+  const variant = entries.find(entry => entry.toLowerCase() === target.project.toLowerCase());
+  return variant ? { ...target, project: variant } : target;
+}
+
+/**
+ * The namespace that already serves this repository: one whose owner file names
+ * its GitHub repository, or lists origin's name as an alias GitHub confirmed
+ * earlier. Renames and transfers therefore keep one store whether a clone's
+ * remote uses the old or the new name, online or offline. --project is never
+ * overridden.
+ */
+export function knownNamespace(target: Target, artifacts: string): Target {
+  if (!target.repo) return target;
+  if (target.explicit) {
+    // The chosen namespace stays; offline, a confirmed old name of its owner still counts as that owner.
+    const owner = readOwner(path.join(artifacts, target.project, OWNER));
+    const confirmed = !target.verified && owner?.aliases.some(alias => alias.toLowerCase() === target.repo!.toLowerCase());
+    return confirmed ? { ...target, repo: owner!.repo } : target;
+  }
+  let entries: string[];
+  try { entries = readdirSync(artifacts); } catch { return target; }
+  const names = [target.repo, target.alias].filter((name): name is string => name !== undefined).map(name => name.toLowerCase());
+  const matches = entries.filter(entry => !entry.startsWith(".")).flatMap(entry => {
+    const owner = readOwner(path.join(artifacts, entry, OWNER));
+    if (!owner) return [];
+    const canonical = owner.repo.toLowerCase() === target.repo!.toLowerCase();
+    // Offline, origin's name counts only as an alias GitHub confirmed for that namespace.
+    const confirmed = owner.aliases.some(alias => names.includes(alias.toLowerCase()));
+    const verifiedAlias = target.verified && target.alias !== undefined && owner.repo.toLowerCase() === target.alias.toLowerCase();
+    return canonical || confirmed || verifiedAlias ? [{ entry, owner, canonical }] : [];
+  });
+  // Prefer the namespace this clone already links to, then the one its current name owns (its own
+  // directory first), then this project's directory, so an extra --project namespace never takes over.
+  let linked: string | undefined;
+  try {
+    const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
+    if (relative.length === 2 && relative[1] === "screenshots") linked = relative[0];
+  } catch { /* not linked */ }
+  // Namespaces made with --project are extras: used implicitly only by a clone already linked to one.
+  const primary = matches.filter(match => !match.owner.explicit);
+  const chosen = matches.find(match => match.entry === linked)
+    ?? primary.find(match => match.canonical && match.entry === target.project)
+    ?? primary.find(match => match.entry === target.project)
+    ?? primary.find(match => match.canonical)
+    ?? primary[0];
+  if (!chosen) return target;
+  return { ...target, project: chosen.entry, repo: target.verified ? target.repo : chosen.owner.repo };
+}
+
+/** A namespace's owner file: its repository and the remote names GitHub confirmed for it. */
+interface Owner { repo: string; aliases: string[]; id?: string | undefined; explicit?: boolean | undefined }
+
+function readOwner(file: string): Owner | undefined {
+  try {
+    const value = JSON.parse(readFileSync(file, "utf8")) as { repo?: unknown; aliases?: unknown; id?: unknown; explicit?: unknown };
+    if (typeof value.repo !== "string" || value.repo === "") return undefined;
+    const aliases = Array.isArray(value.aliases) ? value.aliases.filter((alias): alias is string => typeof alias === "string") : [];
+    return { repo: value.repo, aliases, ...(typeof value.id === "string" ? { id: value.id } : {}), ...(value.explicit === true ? { explicit: true } : {}) };
+  } catch { return undefined; }
 }
 
 export function storeDir(target: Target, artifacts: string): string { return path.join(artifacts, target.project, "screenshots"); }
@@ -270,7 +430,8 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   const blocked = (reason: string): LinkResult => ({ ...base, before: state.state, blocked: reason });
   // A linked clone whose origin now names another repository must not keep reading this namespace.
   if (state.state === "linked") {
-    const foreign = claimNamespace(target, artifacts, false);
+    // With --apply this also records a GitHub-confirmed rename in the owner file.
+    const foreign = claimNamespace(target, artifacts, apply);
     return foreign ? blocked(`${foreign}; remove ${LINK} from this clone`) : { ...base, before: "linked" };
   }
   if (isInside(artifacts, target.root)) return blocked(`the store ${artifacts} is inside the repository`);
@@ -683,10 +844,11 @@ function describeCapture(entry: StatusEntry): string {
 export async function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNER, print: (text: string) => void = text => console.log(text), timing: Timing = {}): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) { print(USAGE); return argv.length === 0 ? 2 : 0; }
   const options = parseOptions(argv);
-  const { targets } = resolveTargets(cwd, options.names, options.project);
-  if (targets.length === 0) { print(options.json ? "[]" : "No repository here captures screenshots."); return 0; }
-  const artifacts = artifactsRoot(targets[0]!.root);
-  if (targets.some(target => artifactsRoot(target.root) !== artifacts)) throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
+  const { targets: found } = resolveTargets(cwd, options.names, options.project);
+  if (found.length === 0) { print(options.json ? "[]" : "No repository here captures screenshots."); return 0; }
+  const artifacts = artifactsRoot(found[0]!.root);
+  if (found.some(target => artifactsRoot(target.root) !== artifacts)) throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
+  const targets = found.map(target => existingCase(knownNamespace(target, artifacts), artifacts));
   if (options.command === "status") {
     const entries = targets.map(target => status(target, artifacts));
     if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));

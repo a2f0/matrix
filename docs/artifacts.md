@@ -96,14 +96,33 @@ it ends (`complete` or `failed`), atomically:
 Non-empty `args` usually means a partial capture: only those screens or
 layouts changed, and `over` names the capture whose other images it kept. A
 partial capture inherits that capture's taint: over a dirty one it stays
-`dirty`, and over a `failed`, `running`, or `incomplete` one, or a store with
-no record, it ends `incomplete`; `merged` stays false or unknown until a full
-capture from origin's default branch. The first clone to link or capture
-reserves the namespace in `<project>/repository.json` with its GitHub
-`owner/name` (from origin's URL, or `gh repo view`), and `link` and `capture`
-refuse another owner's repository of the same name; pass `--project` to give it
-its own namespace, as a repository without a GitHub origin must. A capture
-whose clone changes commit or gains local changes before it ends is `failed`. Only a full, clean capture clears them.
+`dirty`; over a `failed`, `running`, or `incomplete` one, or a store with no
+record, it ends `incomplete`; and `merged` stays false or unknown. Only a full,
+clean capture clears them. A capture whose clone changes commit or gains local
+changes before it ends is `failed`.
+
+## Namespaces
+
+The first clone to link or capture reserves the namespace in
+`<project>/repository.json` with its GitHub `owner/name`, as `gh repo view`
+reports it for origin, and GitHub's node `id` for it, which survives renames
+and transfers; owners compare case-insensitively, and `link` and `capture`
+refuse another owner's repository of the same name, or a repository with a
+different `id` that reuses a recorded name. When GitHub
+reports a different name than origin's URL (a rename, a transfer, or other
+casing), the old name is kept in the file's `aliases`, and a namespace still
+owned by the old name moves to the new one. Every clone, whichever name its
+remote uses and whether or not GitHub is reachable (origin's URL is used when
+it is not, or when `MATRIX_ARTIFACTS_NO_GH` is set), uses the namespace whose
+owner or confirmed aliases match it. A clone whose remote already uses a new
+name finds an older namespace only after one old-name clone has run `link`
+or `capture` online to record the rename. Pass `--project` to choose a
+namespace explicitly, as a repository without a GitHub origin must; such a
+namespace is marked `explicit`, and other clones use it only with the same
+`--project` or when already linked to it. Owner-file updates hold a short
+`repository.json.lock`, which, like the capture lock, is never broken automatically.
+
+## Locks
 
 A capture that is killed outright leaves `.capture.lock` behind. `capture`
 reports a lock whose process is gone instead of removing it, since two
