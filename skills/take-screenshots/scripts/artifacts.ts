@@ -405,7 +405,10 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   if (state.state !== "linked") throw new Error(`${target.name}/${LINK} is ${state.state}, not linked to the store; run \`link --apply\` first`);
   const commit = gitValue(target.root, "rev-parse", "HEAD");
   if (!commit) throw new Error(`${target.name} has no commit to capture`);
-  const dirty = (gitValue(target.root, "status", "--porcelain=v1", "--untracked-files=normal") ?? "") !== "";
+  // `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree entries
+  // with S; git status cannot see edits behind either flag, so they count as changes.
+  const hidden = (git(target.root, "ls-files", "-v").stdout).split("\n").some(line => /^[a-zS] /.test(line));
+  const dirty = hidden || (gitValue(target.root, "status", "--porcelain=v1", "--untracked-files=normal") ?? "") !== "";
   if (dirty && !options.allowDirty) {
     throw new Error(`${target.name} has local changes; a shared capture would publish them. Commit first, or pass --allow-dirty for a local-only look`);
   }
@@ -430,13 +433,14 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   try {
     // Re-read under the lock: the previous capture is now settled.
     const previous = readRecord(store);
-    const partial = options.args.length > 0 && previous !== undefined;
-    const inheritsDirty = partial && (previous.dirty || previous.over?.dirty === true);
-    const inheritsIncomplete = partial && previous.status !== "complete";
+    // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
+    const partial = options.args.length > 0;
+    const inheritsDirty = partial && previous !== undefined && previous.dirty;
+    const inheritsIncomplete = partial && (previous === undefined || previous.status !== "complete");
     const base = {
       schemaVersion: 1 as const, project: target.project, ...(target.repo ? { repo: target.repo } : {}),
       commit, branch, dirty: dirty || inheritsDirty, merged, args: options.args,
-      ...(partial ? { over: { commit: previous.commit, status: previous.status, dirty: previous.dirty } } : {}),
+      ...(partial && previous ? { over: { commit: previous.commit, status: previous.status, dirty: previous.dirty } } : {}),
       checkout: target.root, host: os.hostname(), startedAt,
     };
     writeRecord(store, { ...base, status: "running" });

@@ -123,8 +123,9 @@ describe("take-screenshots artifacts", () => {
     };
     expect(main(["capture", "app"], root, runner, print)).toBe(0);
     expect(runs).toEqual([]);
+    expect(main(["capture", "app", "--apply"], root, runner, print)).toBe(0);
     expect(main(["capture", "app", "--apply", "--", "--project=web"], root, runner, print)).toBe(0);
-    expect(runs).toEqual([["--project=web"]]);
+    expect(runs).toEqual([[], ["--project=web"]]);
     expect(existsSync(path.join(artifacts, "app", LOCK))).toBe(false);
     const record = readRecord(path.join(artifacts, "app/screenshots"))!;
     expect(record).toMatchObject({ status: "complete", project: "app", repo: "a2f0/app", commit: git(app, "rev-parse", "HEAD"), branch: "main", dirty: false, args: ["--project=web"], exitCode: 0 });
@@ -143,6 +144,15 @@ describe("take-screenshots artifacts", () => {
     write(app, "src/wip.ts");
     expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("local changes");
     rmSync(path.join(app, "src"), { recursive: true });
+    // Edits hidden behind assume-unchanged or skip-worktree still count.
+    for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
+      git(app, "update-index", flag, "package.json");
+      expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("local changes");
+      git(app, "update-index", flag.replace("--", "--no-"), "package.json");
+    }
+    // A partial capture into a store with no record keeps images of unknown provenance.
+    expect(main(["capture", "--apply", "--", "--project=web"], app, { capture: () => 0 }, print)).toBe(1);
+    expect(readRecord(path.join(home, "matrix-artifacts/app/screenshots"))?.status).toBe("incomplete");
 
     expect(main(["capture", "--apply"], app, { capture: () => 1 }, print)).toBe(1);
     const store = path.join(home, "matrix-artifacts/app/screenshots");

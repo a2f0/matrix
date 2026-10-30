@@ -92,8 +92,8 @@ it ends (`complete` or `failed`), atomically:
 Non-empty `args` usually means a partial capture: only those screens or
 layouts changed, and `over` names the capture whose other images it kept. A
 partial capture inherits that capture's taint: over a dirty one it stays
-`dirty`, and over a `failed`, `running`, or `incomplete` one it ends
-`incomplete`. Only a full, clean capture clears them.
+`dirty`, and over a `failed`, `running`, or `incomplete` one, or a store with
+no record, it ends `incomplete`. Only a full, clean capture clears them.
 
 A capture that is killed outright leaves `.capture.lock` behind. `capture`
 reports a lock whose process is gone instead of removing it, since two
