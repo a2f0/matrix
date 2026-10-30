@@ -119,9 +119,9 @@ export function artifactsRoot(root: string, env: NodeJS.ProcessEnv = process.env
   return path.resolve(env.MATRIX_ARTIFACTS_DIR || path.join(workspaceOf(root) ?? root, "..", "matrix-artifacts"));
 }
 
-/** owner/name from a GitHub remote URL in any form Git accepts. */
+/** owner/name from a GitHub remote URL in the forms Git accepts; any other host is not GitHub. */
 export function githubRepo(url: string): string | undefined {
-  const match = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url.trim());
+  const match = /^(?:git@github\.com:|(?:ssh:\/\/)?git@github\.com\/|(?:https?|git|ssh):\/\/(?:[^@/\s]+@)?github\.com(?::\d+)?\/)([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url.trim());
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
@@ -325,8 +325,30 @@ function isInside(child: string, parent: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+const STATUSES = new Set(["running", "complete", "failed", "incomplete"]);
+
+/** Whether a parsed record has every field a decision reads, with the right type. */
+export function validRecord(value: unknown): value is CaptureRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  const over = record.over as Record<string, unknown> | undefined;
+  return record.schemaVersion === 1
+    && typeof record.status === "string" && STATUSES.has(record.status)
+    && typeof record.commit === "string" && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(record.commit)
+    && typeof record.dirty === "boolean"
+    && (record.merged === null || typeof record.merged === "boolean")
+    && Array.isArray(record.args) && record.args.every(arg => typeof arg === "string")
+    && (record.repo === undefined || typeof record.repo === "string")
+    && typeof record.project === "string"
+    && (over === undefined || (typeof over === "object" && over !== null && typeof over.commit === "string" && typeof over.status === "string" && STATUSES.has(over.status) && typeof over.dirty === "boolean"));
+}
+
+/** The newest capture's record; a missing or malformed one reads as no record, which is never complete. */
 export function readRecord(store: string): CaptureRecord | undefined {
-  try { return JSON.parse(readFileSync(path.join(store, RECORD), "utf8")) as CaptureRecord; } catch { return undefined; }
+  try {
+    const value: unknown = JSON.parse(readFileSync(path.join(store, RECORD), "utf8"));
+    return validRecord(value) ? value : undefined;
+  } catch { return undefined; }
 }
 
 /** Where a capture's commit sits relative to a repository's HEAD. */
@@ -412,8 +434,9 @@ export function acquireLock(file: string, info: LockInfo): () => void {
     if (!held) throw new Error(`the capture lock ${file} is unreadable; remove it once no capture is running`);
     if (held.host === info.host && !alive(held.pid)) {
       // A killed holder's capture children keep its process group and may still be writing.
+      // The group can also hold the shell or agent that started it, so name it for a person to inspect; never suggest killing it.
       if (held.pgid !== undefined && groupAlive(held.pgid)) {
-        throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which died, but process group ${held.pgid} still runs and may be writing screenshots; stop it (kill -TERM -${held.pgid}) or wait, then remove the lock`);
+        throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which died, but its process group ${held.pgid} still has processes that may be writing screenshots; inspect them with \`ps -o pid,command -g ${held.pgid}\`, stop any leftover capture processes, then remove the lock`);
       }
       throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which is no longer running (started ${held.startedAt} in ${held.checkout}); remove it, then capture again`);
     }

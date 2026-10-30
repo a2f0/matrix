@@ -109,7 +109,8 @@ export async function withSharedCapture<T>(screenshotsDir: string, copy: () => P
   if (before !== undefined) {
     const record = JSON.parse(before) as CaptureRecord;
     if (record.status !== "complete") throw new Error(`The shared screenshot capture is ${record.status}; wait for it or recapture.`);
-    if (record.dirty) throw new Error("The shared screenshots were captured from uncommitted changes; recapture from a commit.");
+    if (typeof record.commit !== "string" || !/^[0-9a-f]{40}$/.test(record.commit)) throw new Error("The shared screenshot capture record names no commit; recapture.");
+    if (record.dirty !== false) throw new Error("The shared screenshots were captured from uncommitted changes; recapture from a commit.");
     const partial = record.args?.length ? ` (partial: ${record.args.join(" ")})` : "";
     console.log(`Screenshots from ${record.commit?.slice(0, 10)}, captured ${record.finishedAt}${partial}.`);
   }

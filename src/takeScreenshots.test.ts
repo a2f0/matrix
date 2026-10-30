@@ -4,7 +4,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import os from "node:os";
 import path from "node:path";
 import {
-  acquireLock, artifactsRoot, processGroup, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
+  acquireLock, artifactsRoot, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
   type Runner, storeDir, targetFor,
 } from "../skills/take-screenshots/scripts/artifacts";
 
@@ -53,6 +53,11 @@ describe("take-screenshots artifacts", () => {
     expect(githubRepo("git@github.com:a2f0/a2f0.net.git")).toBe("a2f0/a2f0.net");
     expect(githubRepo("https://github.com/a2f0/nc")).toBe("a2f0/nc");
     expect(githubRepo("/srv/git/app.git")).toBeUndefined();
+    expect(githubRepo("ssh://git@github.com/a2f0/app.git")).toBe("a2f0/app");
+    expect(githubRepo("https://token@github.com/a2f0/app.git")).toBe("a2f0/app");
+    for (const url of ["https://evilgithub.com/a2f0/app.git", "git@github.com.evil.io:a2f0/app.git", "https://github.com.evil.io/a2f0/app", "https://evil.io/github.com/a2f0/app"]) {
+      expect(githubRepo(url)).toBeUndefined();
+    }
     const { home, root, app } = workspace();
     expect(artifactsRoot(root, {})).toBe(path.join(home, "matrix-artifacts"));
     expect(artifactsRoot(app, {})).toBe(path.join(home, "matrix-artifacts"));
@@ -241,7 +246,7 @@ describe("take-screenshots artifacts", () => {
     expect(() => acquireLock(file, info)).toThrow("unreadable");
     // A dead holder whose process group still runs (orphaned capture children) is not recoverable yet.
     writeFileSync(file, JSON.stringify({ ...info, pid: 2 ** 22 + 12345, pgid: processGroup(process.pid) }));
-    expect(() => acquireLock(file, info)).toThrow("still runs and may be writing");
+    expect(() => acquireLock(file, info)).toThrow("still has processes that may be writing");
   });
 
   test("exactly one of several concurrent processes takes the lock", async () => {
@@ -260,6 +265,22 @@ try {
     const children = Array.from({ length: 6 }, () => Bun.spawn([process.execPath, script], { stdout: "pipe" }));
     const results = await Promise.all(children.map(child => new Response(child.stdout).text()));
     expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);
+  });
+
+  test("malformed records read as no record, so partial captures over them stay incomplete", () => {
+    const good = { schemaVersion: 1, project: "app", status: "complete", commit: "a".repeat(40), branch: "main", dirty: false, merged: true, args: [] };
+    expect(validRecord(good)).toBe(true);
+    expect(validRecord({ status: "complete" })).toBe(false);
+    expect(validRecord({ ...good, commit: "abc" })).toBe(false);
+    expect(validRecord({ ...good, dirty: "no" })).toBe(false);
+    expect(validRecord({ ...good, status: "done" })).toBe(false);
+    expect(validRecord({ ...good, over: { commit: "x", status: "complete" } })).toBe(false);
+    const { home, app } = workspace();
+    expect(main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const store = path.join(home, "matrix-artifacts/app/screenshots");
+    writeFileSync(path.join(store, "capture.json"), JSON.stringify({ status: "complete" }));
+    expect(main(["capture", "--apply", "--", "--project=web"], app, { capture: () => 0 }, print)).toBe(1);
+    expect(readRecord(store)).toMatchObject({ status: "incomplete" });
   });
 
   test("parses commands and rejects options that do not apply", () => {
