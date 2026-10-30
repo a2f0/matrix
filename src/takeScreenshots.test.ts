@@ -91,6 +91,11 @@ describe("take-screenshots artifacts", () => {
     write(second, ".screenshots/web/home.png", "other");
     expect(link(targetFor(second), artifacts, true).blocked).toContain("store already holds another");
     expect(readFileSync(path.join(second, ".screenshots/web/home.png"), "utf8")).toBe("other");
+    // --supersede keeps the clone's capture beside the store, never deleting it.
+    const moved = link(targetFor(second), artifacts, true, true, new Date("2026-10-30T12:00:00.000Z"));
+    expect(moved).toMatchObject({ action: "supersede-and-link", applied: true, superseded: path.join(artifacts, "app/superseded/app2-2026-10-30T12-00-00-000Z") });
+    expect(readFileSync(path.join(moved.superseded!, "web/home.png"), "utf8")).toBe("other");
+    expect(readFileSync(path.join(second, ".screenshots/web/home.png"), "utf8")).toBe("old");
 
     const stray = repo(path.join(home, "app3"), ".screenshots\n");
     symlinkSync("/tmp", path.join(stray, LINK));
@@ -162,6 +167,26 @@ describe("take-screenshots artifacts", () => {
     expect(existsSync(file)).toBe(false);
     writeFileSync(file, JSON.stringify({ ...info, pid: 2 ** 22 + 12345, host: "another-host" }));
     expect(() => acquireLock(file, info)).toThrow("another-host");
+    writeFileSync(file, "{");
+    expect(() => acquireLock(file, info)).toThrow("unreadable");
+  });
+
+  test("exactly one of several concurrent processes takes the lock", async () => {
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-race-")));
+    temps.push(dir);
+    const file = path.join(dir, LOCK);
+    const script = path.join(dir, "race.ts");
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    writeFileSync(script, `import { acquireLock } from ${JSON.stringify(module)};
+try {
+  acquireLock(${JSON.stringify(file)}, { pid: process.pid, host: "${os.hostname()}", checkout: "x", startedAt: "now" });
+  console.log("won");
+  await Bun.sleep(1500);
+} catch { console.log("lost"); }
+`);
+    const children = Array.from({ length: 6 }, () => Bun.spawn([process.execPath, script], { stdout: "pipe" }));
+    const results = await Promise.all(children.map(child => new Response(child.stdout).text()));
+    expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);
   });
 
   test("parses commands and rejects options that do not apply", () => {
@@ -169,6 +194,7 @@ describe("take-screenshots artifacts", () => {
     expect(() => parseOptions(["status", "--apply"])).toThrow("changes nothing");
     expect(() => parseOptions(["link", "--", "x"])).toThrow("only capture");
     expect(() => parseOptions(["link", "--allow-dirty"])).toThrow("only to capture");
+    expect(() => parseOptions(["capture", "--supersede"])).toThrow("only to link");
     expect(() => parseOptions(["delete"])).toThrow("unknown command");
   });
 });

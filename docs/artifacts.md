@@ -24,6 +24,7 @@ matrix-artifacts/
       capture.json   Provenance of the newest capture
       ...            The repository's own capture layout
     .capture.lock    Present while a capture runs
+    superseded/      Clones' older captures moved aside by link --supersede
 ```
 
 It is not a Git repository and holds no secrets. Everything in it is
@@ -36,7 +37,7 @@ script. From this workspace:
 
 ```sh
 bun run artifacts status [repo...]            # link state and newest capture
-bun run artifacts link [repo...] [--apply]    # point .screenshots at the store
+bun run artifacts link [repo...] [--apply] [--supersede]   # point .screenshots at the store
 bun run artifacts capture <repo> [--apply] [--allow-dirty] [-- args...]
 ```
 
@@ -49,13 +50,16 @@ clone selects itself.
 - `link` creates `.screenshots` as a relative symlink to
   `<project>/screenshots`. An existing `.screenshots` directory moves into an
   empty store; when both hold captures, or `.screenshots` links elsewhere, it
-  stops and reports instead of choosing. It also refuses when the root
+  stops and reports instead of choosing. After comparing the two, `--supersede`
+  moves the clone's capture to `<project>/superseded/` and links it; nothing
+  is deleted. It also refuses when the root
   `.gitignore` lists `.screenshots/` with a trailing slash, which does not
   match a symlink.
 - `capture` runs the repository's `screenshots` package script, forwarding
   arguments after `--`, under the project's lock, so two clones never capture into the
   store at once. It refuses a clone with local changes, which would publish
-  uncommitted work, unless `--allow-dirty`, and records the commit, branch,
+  uncommitted work, unless `--allow-dirty`, which records `dirty: true` so
+  builds refuse to publish it until a clean recapture. It records the commit, branch,
   whether that commit is on origin's default branch, and the outcome.
 - `status` reports each clone's link and the newest capture relative to its
   HEAD: `current`, commits `behind` or `ahead`, or `diverged`. It exits 1 when
@@ -98,8 +102,9 @@ A repository that captures screenshots:
 - clears or replaces files inside `.screenshots`, never `.screenshots` itself,
   which would replace the link with a local directory;
 - never captures as part of a build or deploy: builds read `.screenshots`, and
-  a build that publishes screenshots reads `.screenshots/capture.json` first,
-  failing on a `running` or `failed` capture and printing the capture's commit;
+  a build that publishes screenshots reads `.screenshots/capture.json` before
+  and after copying them, failing on a `running`, `failed`, or `dirty` capture
+  or a record that changed during the copy, and printing the capture's commit;
 - keeps build caches honest: a cached task that copies screenshots must hash
   them through the link, or run uncached.
 

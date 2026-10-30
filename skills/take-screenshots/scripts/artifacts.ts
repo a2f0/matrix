@@ -16,8 +16,8 @@
  */
 import { spawnSync } from "node:child_process";
 import {
-  closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync,
-  renameSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync, writeSync,
+  existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync,
+  renameSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,8 +32,10 @@ export const LOCK = ".capture.lock";
 export const USAGE = `Usage: artifacts.ts <command> [repo...] [options]
 
   status [repo...]          Link state and newest capture of each repository
-  link [repo...] [--apply]  Point each repository's .screenshots at the shared store,
-                            moving an existing capture there when the store is empty
+  link [repo...] [--apply] [--supersede]
+                            Point each repository's .screenshots at the shared store,
+                            moving an existing capture there when the store is empty;
+                            --supersede moves it to <project>/superseded/ instead
   capture [repo] [--apply] [--allow-dirty] [-- capture args...]
                             Run the repository's \`bun run screenshots\` under a lock
                             and record the capture's commit in .screenshots/capture.json
@@ -211,14 +213,16 @@ export interface LinkResult {
   readonly store: string;
   readonly before: LinkState["state"];
   /** What --apply does or did; absent when nothing needs doing. */
-  readonly action?: "link" | "move-and-link" | "replace-empty-directory";
+  readonly action?: "link" | "move-and-link" | "replace-empty-directory" | "supersede-and-link";
+  /** With --supersede, where the clone's own capture was moved. */
+  readonly superseded?: string;
   readonly applied?: boolean;
   /** Why it cannot be linked automatically. */
   readonly blocked?: string;
 }
 
 /** Plan, and with apply perform, the link for one repository. */
-export function link(target: Target, artifacts: string, apply: boolean): LinkResult {
+export function link(target: Target, artifacts: string, apply: boolean, supersede = false, now = new Date()): LinkResult {
   const store = storeDir(target, artifacts);
   const base = { name: target.name, project: target.project, store };
   const state = linkState(target, artifacts);
@@ -232,12 +236,17 @@ export function link(target: Target, artifacts: string, apply: boolean): LinkRes
   if (state.state === "directory") {
     if (state.entries === 0) action = "replace-empty-directory";
     else if (emptyOrMissing(store)) action = "move-and-link";
-    else return blocked(`${LINK} holds a capture and the store already holds another; keep one by hand (compare their ${RECORD})`);
+    else if (supersede) action = "supersede-and-link";
+    else return blocked(`${LINK} holds a capture and the store already holds another; compare them, then rerun with --supersede to move this clone's aside`);
   }
-  if (!apply) return { ...base, before: state.state, action };
+  // Kept, never deleted: a person removes superseded captures once nothing needs them.
+  const superseded = action === "supersede-and-link"
+    ? path.join(artifacts, target.project, "superseded", `${target.name}-${now.toISOString().replace(/[:.]/g, "-")}`)
+    : undefined;
+  if (!apply) return { ...base, before: state.state, action, ...(superseded ? { superseded } : {}) };
   // Recheck at apply time: another process may have linked or written since the plan.
-  const now = linkState(target, artifacts);
-  if (now.state !== state.state || (now.state === "directory" && now.entries !== (state as { entries: number }).entries)) {
+  const current = linkState(target, artifacts);
+  if (current.state !== state.state || (current.state === "directory" && current.entries !== (state as { entries: number }).entries)) {
     return blocked(`${LINK} changed while planning; run link again`);
   }
   mkdirSync(path.dirname(store), { recursive: true });
@@ -248,6 +257,10 @@ export function link(target: Target, artifacts: string, apply: boolean): LinkRes
     try { renameSync(linkPath, store); } catch (error) {
       return blocked(`could not move ${LINK} into the store (${(error as NodeJS.ErrnoException).code ?? String(error)}); move it by hand`);
     }
+  } else if (action === "supersede-and-link") {
+    mkdirSync(path.dirname(superseded!), { recursive: true });
+    if (lexists(superseded!)) return blocked(`${superseded} already exists; run link again`);
+    renameSync(linkPath, superseded!);
   } else if (action === "replace-empty-directory") {
     rmdirSync(linkPath); // fails, safely, if something was written meanwhile
     mkdirSync(store, { recursive: true });
@@ -256,9 +269,10 @@ export function link(target: Target, artifacts: string, apply: boolean): LinkRes
   }
   try { symlinkSync(relative, linkPath); } catch (error) {
     if (action === "move-and-link") renameSync(store, linkPath);
+    if (action === "supersede-and-link") renameSync(superseded!, linkPath);
     throw error;
   }
-  return { ...base, before: state.state, action, applied: true };
+  return { ...base, before: state.state, action, applied: true, ...(superseded ? { superseded } : {}) };
 }
 
 function isInside(child: string, parent: string): boolean {
@@ -316,25 +330,45 @@ function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
-/** Take the project's capture lock, replacing one left by a process that died on this host. */
+/**
+ * Take the project's capture lock, replacing one left by a process that died on
+ * this host. The lock is written to a private file and then hard-linked into
+ * place, so it never exists without its holder: a reader that cannot parse it
+ * is looking at a damaged lock, which stays held until a person removes it.
+ */
 export function acquireLock(file: string, info: LockInfo): () => void {
   mkdirSync(path.dirname(file), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = openSync(file, "wx", 0o644);
-      try { writeSync(fd, `${JSON.stringify(info)}\n`); } finally { closeSync(fd); }
-      return () => { if (readLock(file)?.pid === info.pid) unlinkSync(file); };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const held = readLock(file);
-      if (held && (held.host !== info.host || alive(held.pid))) {
-        throw new Error(`another capture of this project is running: pid ${held.pid} on ${held.host} in ${held.checkout} since ${held.startedAt}`);
+  const temporary = `${file}.${info.pid}.${process.hrtime.bigint()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(info)}\n`, { flag: "wx", mode: 0o644 });
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        linkSync(temporary, file);
+        return () => { if (readLock(file)?.pid === info.pid) unlinkSync(file); };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const held = readLock(file);
+        if (!held) throw new Error(`the capture lock ${file} is unreadable; remove it once no capture is running`);
+        if (held.host !== info.host || alive(held.pid)) {
+          throw new Error(`another capture of this project is running: pid ${held.pid} on ${held.host} in ${held.checkout} since ${held.startedAt}`);
+        }
+        // The holder died on this host. Move the lock aside, and keep it only if it
+        // turns out to be another process's lock taken since it was read.
+        const aside = `${temporary}.stale`;
+        try { renameSync(file, aside); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+          throw error;
+        }
+        const moved = readLock(aside);
+        if (moved?.pid === held.pid && moved.host === held.host && moved.startedAt === held.startedAt) { unlinkSync(aside); continue; }
+        try { linkSync(aside, file); } finally { unlinkSync(aside); }
+        throw new Error(`the capture lock ${file} changed while it was replaced; run capture again`);
       }
-      // Dead holder on this host, or an unreadable lock: remove it and try once more.
-      unlinkSync(file);
     }
+    throw new Error(`could not take the capture lock ${file}`);
+  } finally {
+    unlinkSync(temporary);
   }
-  throw new Error(`could not take the capture lock ${file}`);
 }
 
 /** Replace the record atomically, so a reader never sees half a file. */
@@ -432,6 +466,7 @@ export interface Options {
   readonly apply: boolean;
   readonly json: boolean;
   readonly allowDirty: boolean;
+  readonly supersede: boolean;
   readonly project?: string;
   readonly captureArgs: string[];
 }
@@ -444,19 +479,21 @@ export function parseOptions(argv: string[]): Options {
   const captureArgs = split === -1 ? [] : rest.slice(split + 1);
   if (captureArgs.length > 0 && command !== "capture") throw new Error("only capture forwards arguments after --");
   const names: string[] = [];
-  let apply = false, json = false, allowDirty = false, project: string | undefined;
+  let apply = false, json = false, allowDirty = false, supersede = false, project: string | undefined;
   for (let index = 0; index < own.length; index++) {
     const arg = own[index]!;
     if (arg === "--apply") apply = true;
     else if (arg === "--json") json = true;
     else if (arg === "--allow-dirty") allowDirty = true;
+    else if (arg === "--supersede") supersede = true;
     else if (arg === "--project") project = own[++index] ?? (() => { throw new Error("--project needs a name"); })();
     else if (arg.startsWith("-")) throw new Error(`unknown option ${arg}\n\n${USAGE}`);
     else names.push(arg);
   }
   if (apply && command === "status") throw new Error("status changes nothing; --apply does not apply");
   if (allowDirty && command !== "capture") throw new Error("--allow-dirty applies only to capture");
-  return { command, names, apply, json, allowDirty, captureArgs, ...(project ? { project } : {}) };
+  if (supersede && command !== "link") throw new Error("--supersede applies only to link");
+  return { command, names, apply, json, allowDirty, supersede, captureArgs, ...(project ? { project } : {}) };
 }
 
 function describeCapture(entry: StatusEntry): string {
@@ -488,12 +525,12 @@ export function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNE
     return entries.every(entry => entry.link.state === "linked") ? 0 : 1;
   }
   if (options.command === "link") {
-    const results = targets.map(target => link(target, artifacts, options.apply));
+    const results = targets.map(target => link(target, artifacts, options.apply, options.supersede));
     if (options.json) print(JSON.stringify({ artifacts, apply: options.apply, results }, null, 2));
     else for (const result of results) {
       const outcome = result.blocked ? `blocked: ${result.blocked}`
         : !result.action ? "already linked"
-          : `${result.applied ? "done" : "would"} ${result.action} -> ${result.store}`;
+          : `${result.applied ? "done" : "would"} ${result.action} -> ${result.store}${result.superseded ? `; its own capture to ${result.superseded}` : ""}`;
       print(`${result.name} [${result.project}] ${outcome}`);
     }
     if (!options.apply && results.some(result => result.action && !result.blocked)) print("Dry run; rerun with --apply.");

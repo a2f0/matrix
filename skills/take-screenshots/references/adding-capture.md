@@ -78,31 +78,45 @@ The pattern nc uses (`scripts/testing/takeIosScreenshots.sh`,
 
 ## Deploy guard
 
-A build that copies screenshots into a site or upload reads the record first:
+A build that copies screenshots into a site or upload checks the record before
+and after copying. Every capture writes a `running` record before it touches
+an image, so an unchanged `complete` record on both sides proves no capture
+overlapped the copy:
 
 ```ts
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-/** Fails on a running or failed shared capture and returns a line naming its commit. */
-export function captureProvenance(screenshotsDir: string): string | undefined {
-  let record: { status?: string; commit?: string; finishedAt?: string; args?: string[] };
+interface CaptureRecord { status?: string; commit?: string; dirty?: boolean; finishedAt?: string; args?: string[] }
+
+function readCapture(screenshotsDir: string): string | undefined {
   try {
-    record = JSON.parse(readFileSync(path.join(screenshotsDir, "capture.json"), "utf8"));
+    return readFileSync(path.join(screenshotsDir, "capture.json"), "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
-  if (record.status !== "complete") {
-    throw new Error(`The shared screenshot capture is ${record.status}; recapture before building.`);
+}
+
+/** Copies shared screenshots only from a finished, committed capture that no capture overlapped. */
+export async function withSharedCapture<T>(screenshotsDir: string, copy: () => Promise<T>): Promise<T> {
+  const before = readCapture(screenshotsDir);
+  if (before !== undefined) {
+    const record = JSON.parse(before) as CaptureRecord;
+    if (record.status !== "complete") throw new Error(`The shared screenshot capture is ${record.status}; wait for it or recapture.`);
+    if (record.dirty) throw new Error("The shared screenshots were captured from uncommitted changes; recapture from a commit.");
+    const partial = record.args?.length ? ` (partial: ${record.args.join(" ")})` : "";
+    console.log(`Screenshots from ${record.commit?.slice(0, 10)}, captured ${record.finishedAt}${partial}.`);
   }
-  const partial = record.args?.length ? ` (partial: ${record.args.join(" ")})` : "";
-  return `Screenshots from ${record.commit?.slice(0, 10)} captured ${record.finishedAt}${partial}.`;
+  const result = await copy();
+  if (readCapture(screenshotsDir) !== before) throw new Error("A screenshot capture started while copying; build again once it finishes.");
+  return result;
 }
 ```
 
 A missing record means the screenshots came from a direct capture or none at
-all; CI builds, which have no store, take that path.
+all; CI builds, which have no store, take that path. Copy into the build
+output inside `copy`, and publish only what was copied.
 
 ## Build caches
 

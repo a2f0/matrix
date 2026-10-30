@@ -25,7 +25,7 @@ dry runs until `--apply`; `--json` gives agents the report.
 | Command | Does |
 | --- | --- |
 | `status [repo...]` | Link state of each clone and its newest capture relative to HEAD |
-| `link [repo...] [--apply]` | Point `.screenshots` at the store; moves an existing capture into an empty store |
+| `link [repo...] [--apply] [--supersede]` | Point `.screenshots` at the store; moves an existing capture into an empty store, or with `--supersede` to `<project>/superseded/` |
 | `capture [repo] [--apply] [--allow-dirty] [-- args...]` | Run the repository's `screenshots` package script under the project lock and record `capture.json` |
 
 `MATRIX_ARTIFACTS_DIR` overrides the store location.
@@ -34,15 +34,17 @@ dry runs until `--apply`; `--json` gives agents the report.
 
 1. `status` first. If the clone is not `linked`, run `link`, then
    `link --apply`. A `blocked` result names what a person must decide (two
-   different captures, a link that points elsewhere, a `.screenshots/` ignore
+   different captures: compare their dates and commits, and if the store's is
+   newer rerun with `--supersede`, a link that points elsewhere, a `.screenshots/` ignore
    pattern that needs its trailing slash removed in a PR).
 2. Decide whether to capture. If the newest capture is `complete`, `merged`,
    and no screens changed since its commit, reuse it: that is the point of the
    store. Recapture after UI, seed data, or capture-code changes, after a
    `failed` capture, or when asked.
 3. Commit first: capture refuses a dirty tree, because the shared store would
-   publish uncommitted work. `--allow-dirty` is for a local-only look; recapture
-   from a commit before anyone deploys.
+   publish uncommitted work. `--allow-dirty` is for a local-only look: it marks the
+   capture `dirty`, which builds refuse, so recapture from a commit before
+   anyone deploys.
 4. Read the repository's capture docs for prerequisites (simulators, Maestro,
    Playwright browsers, seed data, mise-pinned tools). Maestro drives one
    device at a time on this machine: check for a running `maestro` first.
@@ -65,7 +67,8 @@ dry runs until `--apply`; `--json` gives agents the report.
 - Never commit screenshots, copy them into a repository, or delete the store.
   Never remove `.screenshots` itself; capture code clears files inside it.
 - Builds and deploys never capture. A build that publishes screenshots reads
-  `.screenshots/capture.json` and refuses `running` or `failed` captures.
+  `.screenshots/capture.json` before and after copying, and refuses `running`,
+  `failed`, or `dirty` captures and a record that changed meanwhile.
 
 ## Adding capture to a repository
 
