@@ -177,15 +177,6 @@ export function targetFor(root: string, project?: string, resolve: (root: string
 export const OWNER = "repository.json";
 
 /** Adds a GitHub-confirmed remote name to the owner file, atomically, so offline clones still find the namespace. */
-function recordAlias(file: string, alias: string | undefined, id: string | undefined): void {
-  updateOwner(file, owner => {
-    if (!owner) return undefined;
-    const newAlias = alias !== undefined && !owner.aliases.some(known => known.toLowerCase() === alias.toLowerCase()) && owner.repo.toLowerCase() !== alias.toLowerCase();
-    const newId = id !== undefined && owner.id === undefined;
-    return newAlias || newId ? { ...owner, aliases: newAlias ? [...owner.aliases, alias!] : owner.aliases, id: owner.id ?? id } : undefined;
-  });
-}
-
 function writeOwner(file: string, owner: Owner): void {
   const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
   const body = { repo: owner.repo, ...(owner.aliases.length ? { aliases: owner.aliases } : {}), ...(owner.id ? { id: owner.id } : {}), ...(owner.explicit ? { explicit: true } : {}) };
@@ -226,54 +217,45 @@ export function updateOwner(file: string, change: (owner: Owner | undefined) => 
 export function claimNamespace(target: Target, artifacts: string, apply: boolean): string | undefined {
   const file = path.join(artifacts, target.project, OWNER);
   const identity = target.repo ?? `local:${target.project}`;
-  // Undefined only when absent; a file that exists without a string repo is damaged, not free.
-  const read = (): string | undefined => {
-    let text: string;
-    try { text = readFileSync(file, "utf8"); } catch { return undefined; }
-    try {
-      const repo = (JSON.parse(text) as { repo?: unknown }).repo;
-      if (typeof repo === "string" && repo !== "") return repo;
-    } catch { /* reported below */ }
-    return "(unreadable repository.json)";
-  };
-  const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
+  const lower = (name: string) => name.toLowerCase();
   const foreign = (holder: string) => `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace`;
-  let owner = read();
-  const same = (other: string) => other.toLowerCase() === identity.toLowerCase();
-  const renamed = (other: string) => target.alias !== undefined && other.toLowerCase() === target.alias.toLowerCase();
-  if (owner === undefined && recorded !== undefined && !same(recorded) && !renamed(recorded)) return foreign(recorded);
-  if (owner === undefined && apply) {
-    mkdirSync(path.dirname(file), { recursive: true });
-    const body = { repo: identity, ...(target.verified && target.id ? { id: target.id } : {}), ...(target.explicit ? { explicit: true } : {}) };
-    try { writeFileSync(file, `${JSON.stringify(body)}\n`, { flag: "wx" }); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  const decide = (owner: Owner | undefined, damaged: boolean): { error?: string; next?: Owner } => {
+    if (damaged) return { error: foreign("(unreadable repository.json)") };
+    if (!owner) {
+      const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
+      const renamed = target.alias !== undefined && recorded !== undefined && lower(recorded) === lower(target.alias);
+      if (recorded !== undefined && lower(recorded) !== lower(identity) && !renamed) return { error: foreign(recorded) };
+      return { next: { repo: identity, aliases: target.verified && target.alias ? [target.alias] : [], id: target.verified ? target.id : undefined, explicit: target.explicit } };
     }
-    owner = read();
-    if (owner === undefined) return `${file} could not be written`;
-  }
-  // GitHub confirmed origin's old name redirects here, and that name is the namespace's owner or an
-  // alias it confirmed earlier: this is the same repository after one or more renames or transfers.
-  const previous = readOwner(file);
-  // GitHub's node id survives renames and transfers; a different id is a different repository, whatever its name.
-  const idDiffers = target.verified === true && target.id !== undefined && previous?.id !== undefined && previous.id !== target.id;
-  if (idDiffers) return foreign(`${previous!.repo} (another GitHub repository, ${previous!.id})`);
-  const priorName = target.alias !== undefined && previous !== undefined
-    && [previous.repo, ...previous.aliases].some(name => name.toLowerCase() === target.alias!.toLowerCase());
-  // The same GitHub repository by node id, whatever its name now (a rename back to an earlier name included).
-  const sameId = target.verified === true && target.id !== undefined && previous?.id === target.id;
-  if (owner !== undefined && !same(owner) && target.verified && (priorName || sameId)) {
-    if (apply) {
-      updateOwner(file, current => {
-        if (!current) return undefined;
-        const aliases = [...current.aliases, current.repo].filter((name, index, all) => name.toLowerCase() !== identity.toLowerCase() && all.findIndex(other => other.toLowerCase() === name.toLowerCase()) === index);
-        return { ...current, repo: identity, aliases, id: current.id ?? target.id };
-      });
+    // GitHub's node id survives renames and transfers; a different id is a different repository, whatever its name.
+    if (target.verified && target.id !== undefined && owner.id !== undefined && owner.id !== target.id) {
+      return { error: foreign(`${owner.repo} (another GitHub repository, ${owner.id})`) };
     }
-    return undefined;
-  }
-  if (owner !== undefined && !same(owner)) return foreign(owner);
-  if (apply && target.verified) recordAlias(file, target.alias, target.id);
-  return undefined;
+    const names = [owner.repo, ...owner.aliases].map(lower);
+    const sameName = lower(owner.repo) === lower(identity);
+    // The same repository after renames or transfers: GitHub confirmed origin's old name, which the namespace
+    // knows, or GitHub's id matches the recorded one.
+    const priorName = target.alias !== undefined && names.includes(lower(target.alias));
+    const sameId = target.verified === true && target.id !== undefined && owner.id === target.id;
+    if (!sameName && !(target.verified && (priorName || sameId))) return { error: foreign(owner.repo) };
+    if (!target.verified) return {};
+    const aliases = [...owner.aliases, owner.repo, ...(target.alias ? [target.alias] : [])]
+      .filter((name, index, all) => lower(name) !== lower(identity) && all.findIndex(other => lower(other) === lower(name)) === index);
+    const next = { ...owner, repo: identity, aliases, id: owner.id ?? target.id };
+    const changed = JSON.stringify(next) !== JSON.stringify({ ...owner, id: owner.id });
+    return changed ? { next } : {};
+  };
+  const damaged = () => lexists(file) && readOwner(file) === undefined;
+  if (!apply) return decide(readOwner(file), damaged()).error;
+  // Decide and write under the owner lock, so a concurrent claim sees this one's result.
+  mkdirSync(path.dirname(file), { recursive: true });
+  let error: string | undefined;
+  updateOwner(file, owner => {
+    const result = decide(owner, damaged());
+    error = result.error;
+    return result.error ? undefined : result.next;
+  });
+  return error;
 }
 
 export function packageScripts(root: string): Record<string, unknown> {

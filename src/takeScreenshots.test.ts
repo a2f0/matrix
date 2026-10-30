@@ -506,6 +506,25 @@ updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...
     expect(JSON.parse(readFileSync(file, "utf8")).aliases.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `a2f0/old${index}`));
   });
 
+  test("concurrent claims with conflicting GitHub ids: exactly one wins", async () => {
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-claim-")));
+    temps.push(dir);
+    mkdirSync(path.join(dir, "app"));
+    // A legacy owner file, written before ids were recorded.
+    writeFileSync(path.join(dir, "app", "repository.json"), JSON.stringify({ repo: "a2f0/app" }));
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const script = path.join(dir, "claim.ts");
+    writeFileSync(script, `import { claimNamespace } from ${JSON.stringify(module)};
+const id = process.argv[2]!;
+const error = claimNamespace({ name: "app", root: "/nowhere", project: "app", repo: "a2f0/app", verified: true, id }, ${JSON.stringify(dir)}, true);
+console.log(error ? "lost" : "won");
+`);
+    const children = Array.from({ length: 6 }, (_, index) => Bun.spawn([process.execPath, script, `R_${index}`], { stdout: "pipe" }));
+    const results = await Promise.all(children.map(child => new Response(child.stdout).text()));
+    expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path.join(dir, "app", "repository.json"), "utf8")).id).toMatch(/^R_\d$/);
+  });
+
   test("a held owner lock is never broken automatically", () => {
     const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-owner-lock-")));
     temps.push(dir);
