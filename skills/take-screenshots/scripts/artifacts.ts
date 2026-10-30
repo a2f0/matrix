@@ -51,7 +51,7 @@ export interface CaptureRecord {
   readonly project: string;
   /** owner/name from origin, when it is a GitHub remote. */
   readonly repo?: string;
-  readonly status: "running" | "complete" | "failed";
+  readonly status: "running" | "complete" | "failed" | "incomplete";
   readonly commit: string;
   readonly branch: string | null;
   /** The working tree had changes the commit does not hold. */
@@ -60,6 +60,12 @@ export interface CaptureRecord {
   readonly merged: boolean | null;
   /** Arguments passed to the capture; non-empty usually means a partial capture. */
   readonly args: string[];
+  /**
+   * For a partial capture, the capture whose other images it kept. A partial
+   * capture over a dirty or unfinished one stays dirty or `incomplete`, so
+   * only a full, clean capture clears them.
+   */
+  readonly over?: { readonly commit: string; readonly status: CaptureRecord["status"]; readonly dirty: boolean };
   readonly checkout: string;
   readonly host: string;
   readonly startedAt: string;
@@ -331,41 +337,26 @@ function alive(pid: number): boolean {
 }
 
 /**
- * Take the project's capture lock, replacing one left by a process that died on
- * this host. The lock is written to a private file and then hard-linked into
- * place, so it never exists without its holder: a reader that cannot parse it
- * is looking at a damaged lock, which stays held until a person removes it.
+ * Take the project's capture lock. The lock is written to a private file and
+ * then hard-linked into place, so it never exists without its holder. A lock
+ * whose holder died is never removed automatically: two recovering processes
+ * could each remove the other's fresh lock, so a person removes it.
  */
 export function acquireLock(file: string, info: LockInfo): () => void {
   mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${info.pid}.${process.hrtime.bigint()}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(info)}\n`, { flag: "wx", mode: 0o644 });
   try {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        linkSync(temporary, file);
-        return () => { if (readLock(file)?.pid === info.pid) unlinkSync(file); };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        const held = readLock(file);
-        if (!held) throw new Error(`the capture lock ${file} is unreadable; remove it once no capture is running`);
-        if (held.host !== info.host || alive(held.pid)) {
-          throw new Error(`another capture of this project is running: pid ${held.pid} on ${held.host} in ${held.checkout} since ${held.startedAt}`);
-        }
-        // The holder died on this host. Move the lock aside, and keep it only if it
-        // turns out to be another process's lock taken since it was read.
-        const aside = `${temporary}.stale`;
-        try { renameSync(file, aside); } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-          throw error;
-        }
-        const moved = readLock(aside);
-        if (moved?.pid === held.pid && moved.host === held.host && moved.startedAt === held.startedAt) { unlinkSync(aside); continue; }
-        try { linkSync(aside, file); } finally { unlinkSync(aside); }
-        throw new Error(`the capture lock ${file} changed while it was replaced; run capture again`);
-      }
+    linkSync(temporary, file);
+    return () => { if (readLock(file)?.pid === info.pid) unlinkSync(file); };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const held = readLock(file);
+    if (!held) throw new Error(`the capture lock ${file} is unreadable; remove it once no capture is running`);
+    if (held.host === info.host && !alive(held.pid)) {
+      throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which is no longer running (started ${held.startedAt} in ${held.checkout}); remove it, then capture again`);
     }
-    throw new Error(`could not take the capture lock ${file}`);
+    throw new Error(`another capture of this project is running: pid ${held.pid} on ${held.host} in ${held.checkout} since ${held.startedAt}`);
   } finally {
     unlinkSync(temporary);
   }
@@ -437,9 +428,16 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   process.on("SIGINT", hold);
   process.on("SIGTERM", hold);
   try {
+    // Re-read under the lock: the previous capture is now settled.
+    const previous = readRecord(store);
+    const partial = options.args.length > 0 && previous !== undefined;
+    const inheritsDirty = partial && (previous.dirty || previous.over?.dirty === true);
+    const inheritsIncomplete = partial && previous.status !== "complete";
     const base = {
       schemaVersion: 1 as const, project: target.project, ...(target.repo ? { repo: target.repo } : {}),
-      commit, branch, dirty, merged, args: options.args, checkout: target.root, host: os.hostname(), startedAt,
+      commit, branch, dirty: dirty || inheritsDirty, merged, args: options.args,
+      ...(partial ? { over: { commit: previous.commit, status: previous.status, dirty: previous.dirty } } : {}),
+      checkout: target.root, host: os.hostname(), startedAt,
     };
     writeRecord(store, { ...base, status: "running" });
     let exitCode: number | null = null;
@@ -447,7 +445,7 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
       // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
       const kept = linkState(target, artifacts).state === "linked";
       if (!kept) process.stderr.write(`${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`);
-      const finished: CaptureRecord = { ...base, status: exitCode === 0 && !signal && kept ? "complete" : "failed", finishedAt: new Date().toISOString(), exitCode };
+      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
       Object.assign(plan, { applied: true, record: finished });

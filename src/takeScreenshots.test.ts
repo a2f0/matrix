@@ -152,9 +152,26 @@ describe("take-screenshots artifacts", () => {
     const replacing: Runner = { capture(cwd) { rmSync(path.join(cwd, LINK)); write(cwd, ".screenshots/web/a.png"); return 0; } };
     expect(main(["capture", "--apply"], app, replacing, print)).toBe(1);
     expect(readRecord(store)?.status).toBe("failed");
+
+    // A partial capture keeps the failed capture's other images, so it cannot mark the store complete.
+    const ok: Runner = { capture: () => 0 };
+    rmSync(path.join(app, LINK), { recursive: true });
+    expect(main(["link", "--apply", "--supersede"], app, undefined, print)).toBe(0);
+    expect(main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(1);
+    expect(readRecord(store)).toMatchObject({ status: "incomplete", over: { status: "failed" } });
+    expect(main(["capture", "--apply"], app, ok, print)).toBe(0);
+    expect(readRecord(store)).toMatchObject({ status: "complete", dirty: false });
+    expect(readRecord(store)?.over).toBeUndefined();
+
+    // A partial clean capture over a dirty one stays dirty until a full clean capture.
+    write(app, "src/wip.ts");
+    expect(main(["capture", "--apply", "--allow-dirty"], app, ok, print)).toBe(0);
+    rmSync(path.join(app, "src"), { recursive: true });
+    expect(main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(0);
+    expect(readRecord(store)).toMatchObject({ status: "complete", dirty: true, over: { dirty: true } });
   });
 
-  test("a live lock blocks a second capture; a dead one on this host is replaced", () => {
+  test("a live lock blocks a second capture; a dead holder's lock waits for a person", () => {
     const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-lock-")));
     temps.push(dir);
     const file = path.join(dir, LOCK);
@@ -162,9 +179,10 @@ describe("take-screenshots artifacts", () => {
     const release = acquireLock(file, info);
     expect(() => acquireLock(file, { ...info, pid: process.pid + 1 })).toThrow("another capture");
     release();
+    // A dead holder's lock is reported, never removed: recovery could race another process.
     writeFileSync(file, JSON.stringify({ ...info, pid: 2 ** 22 + 12345 }));
-    acquireLock(file, info)();
-    expect(existsSync(file)).toBe(false);
+    expect(() => acquireLock(file, info)).toThrow("is no longer running");
+    expect(existsSync(file)).toBe(true);
     writeFileSync(file, JSON.stringify({ ...info, pid: 2 ** 22 + 12345, host: "another-host" }));
     expect(() => acquireLock(file, info)).toThrow("another-host");
     writeFileSync(file, "{");
