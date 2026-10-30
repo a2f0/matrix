@@ -141,6 +141,16 @@ describe("take-screenshots artifacts", () => {
     const fork = repo(path.join(home, "fork", "app"), ".screenshots\n");
     git(fork, "remote", "set-url", "origin", "git@github.com:someone/app.git");
     expect(link(targetFor(fork), artifacts, true).blocked).toContain("holds captures of a2f0/app");
+    // An empty namespace is reserved by the first repository that links it.
+    const other = path.join(home, "other-artifacts");
+    rmSync(path.join(app, LINK));
+    expect(link(targetFor(app), other, true)).toMatchObject({ applied: true });
+    rmSync(path.join(app, LINK));
+    expect(link(targetFor(fork), other, true).blocked).toContain("holds captures of a2f0/app, not someone/app");
+    // Without a GitHub origin the namespace must be named.
+    git(fork, "remote", "set-url", "origin", "/srv/git/app.git");
+    expect(() => targetFor(fork, undefined, () => undefined)).toThrow("pass --project");
+    expect(targetFor(fork, "app-local", () => undefined)).toMatchObject({ project: "app-local" });
   });
 
   test("partial captures keep the merge state of the images they keep", () => {
@@ -182,6 +192,12 @@ describe("take-screenshots artifacts", () => {
     // A capture that deletes the link and writes a real directory never reaches the store.
     const replacing: Runner = { capture(cwd) { rmSync(path.join(cwd, LINK)); write(cwd, ".screenshots/web/a.png"); return 0; } };
     expect(main(["capture", "--apply"], app, replacing, print)).toBe(1);
+    // A branch switch during the capture means the record would name the wrong commit.
+    const switching: Runner = { capture(cwd) { git(cwd, "commit", "-q", "--allow-empty", "-m", "moved"); return 0; } };
+    rmSync(path.join(app, LINK), { recursive: true });
+    expect(main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(main(["capture", "--apply"], app, switching, print)).toBe(1);
+    expect(readRecord(store)?.status).toBe("failed");
     expect(readRecord(store)?.status).toBe("failed");
 
     // A partial capture keeps the failed capture's other images, so it cannot mark the store complete.

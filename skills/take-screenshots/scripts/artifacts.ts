@@ -91,7 +91,7 @@ export interface Target {
 function git(cwd: string, ...args: string[]): { status: number | null; stdout: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
   for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX"]) delete env[name];
-  const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd, env, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   if (result.error) throw new Error(`Could not run git: ${result.error.message}`);
   return { status: result.status, stdout: result.stdout.trim() };
 }
@@ -125,13 +125,48 @@ export function githubRepo(url: string): string | undefined {
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
-/** A repository's store namespace: its GitHub name like matrix-secrets', or its directory name. */
-export function targetFor(root: string, project?: string): Target {
+/** owner/name as GitHub reports it, for remote forms the URL parser does not know. */
+function ghRepo(root: string): string | undefined {
+  const result = spawnSync("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const name = result.status === 0 ? result.stdout.trim() : "";
+  return /^[^/\s]+\/[^/\s]+$/.test(name) ? name : undefined;
+}
+
+/**
+ * A repository's store namespace: its GitHub name, like matrix-secrets'. The
+ * owner comes from origin's URL, or `gh repo view` for other remote forms; a
+ * repository GitHub cannot name needs an explicit --project.
+ */
+export function targetFor(root: string, project?: string, resolve: (root: string) => string | undefined = ghRepo): Target {
   const remote = gitValue(root, "remote", "get-url", "origin");
-  const repo = remote ? githubRepo(remote) : undefined;
-  const name = project ?? repo?.split("/")[1] ?? path.basename(root);
+  const repo = (remote ? githubRepo(remote) : undefined) ?? resolve(root);
+  if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
+  const name = project ?? repo!.split("/")[1]!;
   if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") throw new Error(`'${name}' is not a usable project name`);
   return { name: path.basename(root), root, project: name, ...(repo ? { repo } : {}) };
+}
+
+/** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
+export const OWNER = "repository.json";
+
+/** Reserve the namespace for this repository, or explain whose it is. */
+export function claimNamespace(target: Target, artifacts: string, apply: boolean): string | undefined {
+  const file = path.join(artifacts, target.project, OWNER);
+  const identity = target.repo ?? `local:${target.project}`;
+  const read = () => { try { return (JSON.parse(readFileSync(file, "utf8")) as { repo?: string }).repo; } catch { return undefined; } };
+  const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
+  const foreign = (holder: string) => `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace`;
+  let owner = read();
+  if (owner === undefined && recorded !== undefined && recorded !== identity) return foreign(recorded);
+  if (owner === undefined && apply) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    try { writeFileSync(file, `${JSON.stringify({ repo: identity })}\n`, { flag: "wx" }); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    owner = read();
+    if (owner === undefined) return `${file} is unreadable; fix or remove it`;
+  }
+  return owner !== undefined && owner !== identity ? foreign(owner) : undefined;
 }
 
 export function packageScripts(root: string): Record<string, unknown> {
@@ -236,8 +271,8 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   const blocked = (reason: string): LinkResult => ({ ...base, before: state.state, blocked: reason });
   if (isInside(artifacts, target.root)) return blocked(`the store ${artifacts} is inside the repository`);
   if (!ignorePatternMatchesFile(target.root)) return blocked(`the root .gitignore must list ${LINK} without a trailing slash, so the link is ignored`);
-  const stored = readRecord(store);
-  if (stored?.repo && target.repo && stored.repo !== target.repo) return blocked(`the store holds captures of ${stored.repo}, not ${target.repo}; pass --project to use another namespace`);
+  const foreign = claimNamespace(target, artifacts, false);
+  if (foreign) return blocked(foreign);
   if (state.state === "elsewhere") return blocked(`${LINK} already links to ${state.target}; remove it by hand if that is stale`);
   if (state.state === "other") return blocked(`${LINK} is neither a directory nor a link`);
   let action: LinkResult["action"] = "link";
@@ -257,6 +292,8 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   if (current.state !== state.state || (current.state === "directory" && current.entries !== (state as { entries: number }).entries)) {
     return blocked(`${LINK} changed while planning; run link again`);
   }
+  const claimed = claimNamespace(target, artifacts, true);
+  if (claimed) return blocked(claimed);
   mkdirSync(path.dirname(store), { recursive: true });
   const linkPath = path.join(target.root, LINK);
   const relative = path.relative(realpathSync(target.root), path.join(realpathSync(path.dirname(store)), path.basename(store)));
@@ -399,6 +436,13 @@ export interface CapturePlan {
   readonly record?: CaptureRecord;
 }
 
+/** Local changes, including edits behind assume-unchanged or skip-worktree flags that git status cannot see. */
+function isDirty(root: string): boolean {
+  // `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree entries with S.
+  if (git(root, "ls-files", "-v").stdout.split("\n").some(line => /^[a-zS] /.test(line))) return true;
+  return (gitValue(root, "status", "--porcelain=v1", "--untracked-files=normal") ?? "") !== "";
+}
+
 export function capture(target: Target, artifacts: string, options: { apply: boolean; allowDirty: boolean; args: string[] }, runner: Runner = RUNNER): CapturePlan {
   if (typeof packageScripts(target.root).screenshots !== "string") {
     throw new Error(`${target.name} has no \`screenshots\` package script; see the take-screenshots skill's repository contract`);
@@ -407,10 +451,7 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   if (state.state !== "linked") throw new Error(`${target.name}/${LINK} is ${state.state}, not linked to the store; run \`link --apply\` first`);
   const commit = gitValue(target.root, "rev-parse", "HEAD");
   if (!commit) throw new Error(`${target.name} has no commit to capture`);
-  // `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree entries
-  // with S; git status cannot see edits behind either flag, so they count as changes.
-  const hidden = (git(target.root, "ls-files", "-v").stdout).split("\n").some(line => /^[a-zS] /.test(line));
-  const dirty = hidden || (gitValue(target.root, "status", "--porcelain=v1", "--untracked-files=normal") ?? "") !== "";
+  const dirty = isDirty(target.root);
   if (dirty && !options.allowDirty) {
     throw new Error(`${target.name} has local changes; a shared capture would publish them. Commit first, or pass --allow-dirty for a local-only look`);
   }
@@ -435,9 +476,8 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   try {
     // Re-read under the lock: the previous capture is now settled.
     const previous = readRecord(store);
-    if (previous?.repo && target.repo && previous.repo !== target.repo) {
-      throw new Error(`the store ${store} holds captures of ${previous.repo}, not ${target.repo}; pass --project to use another namespace`);
-    }
+    const foreign = claimNamespace(target, artifacts, true);
+    if (foreign) throw new Error(foreign);
     // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
     const partial = options.args.length > 0;
     const inheritsDirty = partial && previous !== undefined && previous.dirty;
@@ -457,8 +497,11 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
     try { exitCode = runner.capture(target.root, options.args, env); } finally {
       // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
       const kept = linkState(target, artifacts).state === "linked";
+      // The record names one commit: a branch switch or new edit mid-capture makes that untrue.
+      const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
+      if (moved) process.stderr.write(`${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`);
       if (!kept) process.stderr.write(`${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`);
-      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
+      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept || moved ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
       Object.assign(plan, { applied: true, record: finished });

@@ -23,6 +23,7 @@ matrix-artifacts/
     screenshots/     Linked as each clone's gitignored .screenshots
       capture.json   Provenance of the newest capture
       ...            The repository's own capture layout
+    repository.json  The GitHub repository that owns the namespace
     .capture.lock    Present while a capture runs
     superseded/      Clones' older captures moved aside by link --supersede
 ```
@@ -94,9 +95,12 @@ layouts changed, and `over` names the capture whose other images it kept. A
 partial capture inherits that capture's taint: over a dirty one it stays
 `dirty`, and over a `failed`, `running`, or `incomplete` one, or a store with
 no record, it ends `incomplete`; `merged` stays false or unknown until a full
-capture from origin's default branch. A store records the `repo` it holds, and
-`link` and `capture` refuse another owner's repository of the same name; pass
-`--project` to give it its own namespace. Only a full, clean capture clears them.
+capture from origin's default branch. The first clone to link or capture
+reserves the namespace in `<project>/repository.json` with its GitHub
+`owner/name` (from origin's URL, or `gh repo view`), and `link` and `capture`
+refuse another owner's repository of the same name; pass `--project` to give it
+its own namespace, as a repository without a GitHub origin must. A capture
+whose clone changes commit or gains local changes before it ends is `failed`. Only a full, clean capture clears them.
 
 A capture that is killed outright leaves `.capture.lock` behind. `capture`
 reports a lock whose process is gone instead of removing it, since two
