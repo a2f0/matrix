@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  acquireLock, artifactsRoot, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
+  acquireLock, artifactsRoot, drainGroup, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
   type Runner, storeDir, targetFor,
 } from "../skills/take-screenshots/scripts/artifacts";
 
@@ -49,7 +49,7 @@ const output: string[] = [];
 const print = (text: string) => { output.push(text); };
 
 describe("take-screenshots artifacts", () => {
-  test("names projects by GitHub repository and stores them beside the workspace", () => {
+  test("names projects by GitHub repository and stores them beside the workspace", async () => {
     expect(githubRepo("git@github.com:a2f0/a2f0.net.git")).toBe("a2f0/a2f0.net");
     expect(githubRepo("https://github.com/a2f0/nc")).toBe("a2f0/nc");
     expect(githubRepo("/srv/git/app.git")).toBeUndefined();
@@ -69,7 +69,7 @@ describe("take-screenshots artifacts", () => {
     expect(resolveTargets(root, []).targets.map(target => target.name)).toEqual(["app"]);
   });
 
-  test("links a clone with a relative, ignored symlink, and only when a plain pattern ignores it", () => {
+  test("links a clone with a relative, ignored symlink, and only when a plain pattern ignores it", async () => {
     const { home, app } = workspace();
     const target = targetFor(app);
     const artifacts = path.join(home, "matrix-artifacts");
@@ -85,7 +85,7 @@ describe("take-screenshots artifacts", () => {
     expect(link(targetFor(slashed.app), path.join(slashed.home, "matrix-artifacts"), true).blocked).toContain("without a trailing slash");
   });
 
-  test("moves an existing capture into an empty store, and refuses to merge two captures", () => {
+  test("moves an existing capture into an empty store, and refuses to merge two captures", async () => {
     const { home, app } = workspace();
     const artifacts = path.join(home, "matrix-artifacts");
     write(app, ".screenshots/web/home.png", "old");
@@ -107,30 +107,30 @@ describe("take-screenshots artifacts", () => {
     expect(link(targetFor(stray), artifacts, true).blocked).toContain("already links to");
   });
 
-  test("captures under a lock, records provenance, and every linked clone sees it", () => {
+  test("captures under a lock, records provenance, and every linked clone sees it", async () => {
     const { home, root, app } = workspace();
     const artifacts = path.join(home, "matrix-artifacts");
-    expect(main(["link", "--apply"], root, undefined, print)).toBe(0);
+    expect(await main(["link", "--apply"], root, undefined, print)).toBe(0);
     const clone = repo(path.join(home, "app-day-to-day"), ".screenshots\n");
     git(clone, "fetch", "-q", app, "main");
     git(clone, "reset", "-q", "--hard", "FETCH_HEAD");
-    expect(main(["link", "--apply"], clone, undefined, print)).toBe(0);
+    expect(await main(["link", "--apply"], clone, undefined, print)).toBe(0);
 
     const runs: string[][] = [];
     const runner: Runner = {
-      capture(cwd, args, env) {
+      async capture(cwd, args, env) {
         runs.push(args);
         expect(env.SCREENSHOT_OUTPUT_DIR).toBe(path.join(cwd, LINK));
         expect(existsSync(path.join(artifacts, "app", LOCK))).toBe(true);
         expect(readRecord(storeDir(targetFor(cwd), artifacts))?.status).toBe("running");
         write(cwd, ".screenshots/web/light/home.png", "png");
-        return 0;
+        return { code: 0 };
       },
     };
-    expect(main(["capture", "app"], root, runner, print)).toBe(0);
+    expect(await main(["capture", "app"], root, runner, print)).toBe(0);
     expect(runs).toEqual([]);
-    expect(main(["capture", "app", "--apply"], root, runner, print)).toBe(0);
-    expect(main(["capture", "app", "--apply", "--", "--project=web"], root, runner, print)).toBe(0);
+    expect(await main(["capture", "app", "--apply"], root, runner, print)).toBe(0);
+    expect(await main(["capture", "app", "--apply", "--", "--project=web"], root, runner, print)).toBe(0);
     expect(runs).toEqual([[], ["--project=web"]]);
     expect(existsSync(path.join(artifacts, "app", LOCK))).toBe(false);
     const record = readRecord(path.join(artifacts, "app/screenshots"))!;
@@ -158,77 +158,85 @@ describe("take-screenshots artifacts", () => {
     expect(targetFor(fork, "app-local", () => undefined)).toMatchObject({ project: "app-local" });
   });
 
-  test("partial captures keep the merge state of the images they keep", () => {
+  test("partial captures keep the merge state of the images they keep", async () => {
     const { app } = workspace();
-    expect(main(["link", "--apply"], app, undefined, print)).toBe(0);
-    const ok: Runner = { capture: () => 0 };
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const ok: Runner = { capture: async () => ({ code: 0 }) };
     // No origin/HEAD here, so merged is unknown (null); a full capture records that.
-    expect(main(["capture", "--apply"], app, ok, print)).toBe(0);
+    expect(await main(["capture", "--apply"], app, ok, print)).toBe(0);
     const store = storeDir(targetFor(app), artifactsRoot(app));
     expect(readRecord(store)?.merged).toBeNull();
     git(app, "update-ref", "refs/remotes/origin/HEAD", "HEAD");
-    expect(main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(0);
+    expect(await main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(0);
     expect(readRecord(store)).toMatchObject({ merged: null, over: { status: "complete" } });
-    expect(main(["capture", "--apply"], app, ok, print)).toBe(0);
+    expect(await main(["capture", "--apply"], app, ok, print)).toBe(0);
     expect(readRecord(store)?.merged).toBe(true);
   });
 
-  test("refuses dirty trees and unlinked clones, and records failed captures", () => {
+  test("refuses dirty trees and unlinked clones, and records failed captures", async () => {
     const { home, app } = workspace();
-    expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("not linked");
-    expect(main(["link", "--apply"], app, undefined, print)).toBe(0);
+    await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("not linked");
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     write(app, "src/wip.ts");
-    expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("local changes");
+    await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("local changes");
     rmSync(path.join(app, "src"), { recursive: true });
     // A git check that fails is not evidence of a clean tree.
     const index = readFileSync(path.join(app, ".git/index"));
     writeFileSync(path.join(app, ".git/index"), "corrupt");
-    expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("cannot tell whether it has local changes");
+    await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("cannot tell whether it has local changes");
     writeFileSync(path.join(app, ".git/index"), index);
     // Edits hidden behind assume-unchanged or skip-worktree still count.
     for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
       git(app, "update-index", flag, "package.json");
-      expect(() => main(["capture", "--apply"], app, undefined, print)).toThrow("local changes");
+      await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("local changes");
       git(app, "update-index", flag.replace("--", "--no-"), "package.json");
     }
+    // A submodule whose changes configuration hides still counts.
+    const inner = repo(path.join(home, "inner"), "");
+    git(app, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "inner");
+    git(app, "commit", "-qm", "submodule");
+    git(app, "config", "diff.ignoreSubmodules", "all");
+    write(path.join(app, "inner"), "change.txt");
+    await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("local changes");
+    rmSync(path.join(app, "inner/change.txt"));
     // A partial capture into a store with no record keeps images of unknown provenance.
-    expect(main(["capture", "--apply", "--", "--project=web"], app, { capture: () => 0 }, print)).toBe(1);
+    expect(await main(["capture", "--apply", "--", "--project=web"], app, { capture: async () => ({ code: 0 }) }, print)).toBe(1);
     expect(readRecord(path.join(home, "matrix-artifacts/app/screenshots"))?.status).toBe("incomplete");
 
-    expect(main(["capture", "--apply"], app, { capture: () => 1 }, print)).toBe(1);
+    expect(await main(["capture", "--apply"], app, { capture: async () => ({ code: 1 }) }, print)).toBe(1);
     const store = path.join(home, "matrix-artifacts/app/screenshots");
     expect(readRecord(store)).toMatchObject({ status: "failed", exitCode: 1 });
 
     // A capture that deletes the link and writes a real directory never reaches the store.
-    const replacing: Runner = { capture(cwd) { rmSync(path.join(cwd, LINK)); write(cwd, ".screenshots/web/a.png"); return 0; } };
-    expect(main(["capture", "--apply"], app, replacing, print)).toBe(1);
+    const replacing: Runner = { async capture(cwd) { rmSync(path.join(cwd, LINK)); write(cwd, ".screenshots/web/a.png"); return { code: 0 }; } };
+    expect(await main(["capture", "--apply"], app, replacing, print)).toBe(1);
     // A branch switch during the capture means the record would name the wrong commit.
-    const switching: Runner = { capture(cwd) { git(cwd, "commit", "-q", "--allow-empty", "-m", "moved"); return 0; } };
+    const switching: Runner = { async capture(cwd) { git(cwd, "commit", "-q", "--allow-empty", "-m", "moved"); return { code: 0 }; } };
     rmSync(path.join(app, LINK), { recursive: true });
-    expect(main(["link", "--apply"], app, undefined, print)).toBe(0);
-    expect(main(["capture", "--apply"], app, switching, print)).toBe(1);
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(await main(["capture", "--apply"], app, switching, print)).toBe(1);
     expect(readRecord(store)?.status).toBe("failed");
     expect(readRecord(store)?.status).toBe("failed");
 
     // A partial capture keeps the failed capture's other images, so it cannot mark the store complete.
-    const ok: Runner = { capture: () => 0 };
+    const ok: Runner = { capture: async () => ({ code: 0 }) };
     rmSync(path.join(app, LINK), { recursive: true });
-    expect(main(["link", "--apply", "--supersede"], app, undefined, print)).toBe(0);
-    expect(main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(1);
+    expect(await main(["link", "--apply", "--supersede"], app, undefined, print)).toBe(0);
+    expect(await main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(1);
     expect(readRecord(store)).toMatchObject({ status: "incomplete", over: { status: "failed" } });
-    expect(main(["capture", "--apply"], app, ok, print)).toBe(0);
+    expect(await main(["capture", "--apply"], app, ok, print)).toBe(0);
     expect(readRecord(store)).toMatchObject({ status: "complete", dirty: false });
     expect(readRecord(store)?.over).toBeUndefined();
 
     // A partial clean capture over a dirty one stays dirty until a full clean capture.
     write(app, "src/wip.ts");
-    expect(main(["capture", "--apply", "--allow-dirty"], app, ok, print)).toBe(0);
+    expect(await main(["capture", "--apply", "--allow-dirty"], app, ok, print)).toBe(0);
     rmSync(path.join(app, "src"), { recursive: true });
-    expect(main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(0);
+    expect(await main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(0);
     expect(readRecord(store)).toMatchObject({ status: "complete", dirty: true, over: { dirty: true } });
   });
 
-  test("a live lock blocks a second capture; a dead holder's lock waits for a person", () => {
+  test("a live lock blocks a second capture; a dead holder's lock waits for a person", async () => {
     const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-lock-")));
     temps.push(dir);
     const file = path.join(dir, LOCK);
@@ -267,7 +275,7 @@ try {
     expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);
   });
 
-  test("malformed records read as no record, so partial captures over them stay incomplete", () => {
+  test("malformed records read as no record, so partial captures over them stay incomplete", async () => {
     const good = { schemaVersion: 1, project: "app", status: "complete", commit: "a".repeat(40), branch: "main", dirty: false, merged: true, args: [] };
     expect(validRecord(good)).toBe(true);
     expect(validRecord({ status: "complete" })).toBe(false);
@@ -276,14 +284,40 @@ try {
     expect(validRecord({ ...good, status: "done" })).toBe(false);
     expect(validRecord({ ...good, over: { commit: "x", status: "complete" } })).toBe(false);
     const { home, app } = workspace();
-    expect(main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     const store = path.join(home, "matrix-artifacts/app/screenshots");
     writeFileSync(path.join(store, "capture.json"), JSON.stringify({ status: "complete" }));
-    expect(main(["capture", "--apply", "--", "--project=web"], app, { capture: () => 0 }, print)).toBe(1);
+    expect(await main(["capture", "--apply", "--", "--project=web"], app, { capture: async () => ({ code: 0 }) }, print)).toBe(1);
     expect(readRecord(store)).toMatchObject({ status: "incomplete" });
   });
 
-  test("parses commands and rejects options that do not apply", () => {
+  test("holds the lock until the capture's whole process group has exited", async () => {
+    const { home, app } = workspace();
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const lock = path.join(home, "matrix-artifacts/app", LOCK);
+    // The direct child exits at once, leaving a descendant in its group that writes later.
+    const orphaning: Runner = {
+      capture(cwd, _args, env, started) {
+        return new Promise(resolve => {
+          const child = spawn("sh", ["-c", "(sleep 1; echo late > .screenshots/late.txt) & exit 0"], { cwd, env, detached: true, stdio: "ignore" });
+          child.once("spawn", () => started(child.pid!));
+          child.once("exit", code => {
+            expect(JSON.parse(readFileSync(lock, "utf8")).pgid).toBe(child.pid);
+            resolve({ code, pgid: child.pid! });
+          });
+        });
+      },
+    };
+    expect(await main(["capture", "--apply"], app, orphaning, print)).toBe(0);
+    expect(readFileSync(path.join(app, ".screenshots/late.txt"), "utf8").trim()).toBe("late");
+    expect(existsSync(lock)).toBe(false);
+    // A group that ignores the grace period is stopped.
+    const stubborn = spawn("sh", ["-c", "sleep 30"], { detached: true, stdio: "ignore" });
+    await new Promise(done => stubborn.once("spawn", done));
+    expect(await drainGroup(stubborn.pid!, 200, 2_000)).toBe(true);
+  });
+
+  test("parses commands and rejects options that do not apply", async () => {
     expect(parseOptions(["capture", "app", "--apply", "--", "--project", "x"])).toMatchObject({ names: ["app"], apply: true, captureArgs: ["--project", "x"] });
     expect(() => parseOptions(["status", "--apply"])).toThrow("changes nothing");
     expect(() => parseOptions(["link", "--", "x"])).toThrow("only capture");

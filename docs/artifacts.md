@@ -58,8 +58,10 @@ clone selects itself.
   `.gitignore` lists `.screenshots/` with a trailing slash, which does not
   match a symlink.
 - `capture` runs the repository's `screenshots` package script, forwarding
-  arguments after `--`, under the project's lock, so two clones never capture into the
-  store at once. It refuses a clone with local changes, which would publish
+  arguments after `--`, under the project's lock, so two clones never capture
+  into the store at once. The capture runs in its own process group, which
+  receives `SIGINT` and `SIGTERM`, and the lock is held until every process in
+  that group has exited. It refuses a clone with local changes, which would publish
   uncommitted work, unless `--allow-dirty`, which records `dirty: true` so
   builds refuse to publish it until a clean recapture. It records the commit, branch,
   whether that commit is on origin's default branch, and the outcome.

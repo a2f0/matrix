@@ -14,7 +14,7 @@
  *
  * Uses only Node built-ins so it runs by path from any repository.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync,
   renameSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync,
@@ -446,6 +446,14 @@ export function acquireLock(file: string, info: LockInfo): () => void {
   }
 }
 
+/** Rewrites a lock this process holds, atomically. */
+function replaceLock(file: string, info: LockInfo): void {
+  if (readLock(file)?.pid !== info.pid) throw new Error(`the capture lock ${file} is no longer this process's`);
+  const temporary = `${file}.${info.pid}.${process.hrtime.bigint()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(info)}\n`, { flag: "wx", mode: 0o644 });
+  renameSync(temporary, file);
+}
+
 /** Replace the record atomically, so a reader never sees half a file. */
 export function writeRecord(store: string, record: CaptureRecord): void {
   mkdirSync(store, { recursive: true });
@@ -455,17 +463,40 @@ export function writeRecord(store: string, record: CaptureRecord): void {
 }
 
 export interface Runner {
-  /** Runs the repository's capture with inherited output and the given environment; returns its exit code. */
-  capture(root: string, args: string[], env: NodeJS.ProcessEnv): number | null;
+  /**
+   * Starts the repository's capture with inherited output and the given
+   * environment, in a process group of its own when it can. Resolves with its
+   * exit code and that group, which must be empty before the lock is released.
+   */
+  capture(root: string, args: string[], env: NodeJS.ProcessEnv, started: (pgid: number) => void): Promise<{ code: number | null; pgid?: number }>;
 }
 
 const RUNNER: Runner = {
-  capture(root, args, env) {
-    const result = spawnSync("bun", ["run", "screenshots", ...args], { cwd: root, env, stdio: "inherit" });
-    if (result.error) throw new Error(`Could not run bun: ${result.error.message}`);
-    return result.status;
+  capture(root, args, env, started) {
+    return new Promise((resolve, reject) => {
+      // detached gives the capture its own process group, so its descendants can be found, signalled, and waited for.
+      const child = spawn("bun", ["run", "screenshots", ...args], { cwd: root, env, stdio: "inherit", detached: true });
+      child.once("error", error => reject(new Error(`Could not run bun: ${error.message}`)));
+      child.once("spawn", () => { if (child.pid) started(child.pid); });
+      child.once("exit", code => resolve({ code, ...(child.pid ? { pgid: child.pid } : {}) }));
+    });
   },
 };
+
+/** Waits for every process in a group to exit, asking them to stop after `graceMs`; true when the group is empty. */
+export async function drainGroup(pgid: number, graceMs = 30_000, killMs = 10_000): Promise<boolean> {
+  const empty = () => !groupAlive(pgid);
+  const wait = async (ms: number) => {
+    for (const deadline = Date.now() + ms; Date.now() < deadline; await new Promise(done => setTimeout(done, 100))) if (empty()) return true;
+    return empty();
+  };
+  if (await wait(graceMs)) return true;
+  process.stderr.write(`Capture processes in group ${pgid} outlived the capture; stopping them.\n`);
+  try { process.kill(-pgid, "SIGTERM"); } catch { /* exited meanwhile */ }
+  if (await wait(killMs)) return true;
+  try { process.kill(-pgid, "SIGKILL"); } catch { /* exited meanwhile */ }
+  return wait(killMs);
+}
 
 export interface CapturePlan {
   readonly name: string;
@@ -491,10 +522,11 @@ function isDirty(root: string): boolean {
   };
   // `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree entries with S.
   if (checked("ls-files", "-v").split("\n").some(line => /^[a-zS] /.test(line))) return true;
-  return checked("status", "--porcelain=v1", "--untracked-files=normal") !== "";
+  // Configured submodule ignore settings could hide a submodule's changes; count them all.
+  return checked("status", "--porcelain=v1", "--untracked-files=normal", "--ignore-submodules=none") !== "";
 }
 
-export function capture(target: Target, artifacts: string, options: { apply: boolean; allowDirty: boolean; args: string[] }, runner: Runner = RUNNER): CapturePlan {
+export async function capture(target: Target, artifacts: string, options: { apply: boolean; allowDirty: boolean; args: string[] }, runner: Runner = RUNNER): Promise<CapturePlan> {
   if (typeof packageScripts(target.root).screenshots !== "string") {
     throw new Error(`${target.name} has no \`screenshots\` package script; see the take-screenshots skill's repository contract`);
   }
@@ -518,11 +550,16 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   };
   if (!options.apply) return plan;
   const startedAt = new Date().toISOString();
-  const pgid = processGroup(process.pid);
-  const release = acquireLock(path.join(artifacts, target.project, LOCK), { pid: process.pid, ...(pgid ? { pgid } : {}), host: os.hostname(), checkout: target.root, startedAt });
-  // Hold SIGINT and SIGTERM until the capture exits, so the record and lock are settled.
+  const lockFile = path.join(artifacts, target.project, LOCK);
+  const holder: LockInfo = { pid: process.pid, host: os.hostname(), checkout: target.root, startedAt };
+  const release = acquireLock(lockFile, holder);
+  // Forward SIGINT and SIGTERM to the capture's group and finish here, so the record and lock are settled.
   let signal: NodeJS.Signals | undefined;
-  const hold = (received: NodeJS.Signals) => { signal = received; };
+  let group: number | undefined;
+  const hold = (received: NodeJS.Signals) => {
+    signal = received;
+    if (group !== undefined) try { process.kill(-group, received); } catch { /* already gone */ }
+  };
   process.on("SIGINT", hold);
   process.on("SIGTERM", hold);
   try {
@@ -546,21 +583,35 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
     let exitCode: number | null = null;
     // Runners that honor SCREENSHOT_OUTPUT_DIR must write through the link, whatever the caller's shell exports.
     const env = { ...process.env, SCREENSHOT_OUTPUT_DIR: path.join(target.root, LINK) };
-    try { exitCode = runner.capture(target.root, options.args, env); } finally {
+    let drained = true;
+    try {
+      const result = await runner.capture(target.root, options.args, env, pgid => {
+        group = pgid;
+        // Record the capture's own group in the lock, so a person can find leftovers if this process is killed.
+        replaceLock(lockFile, { ...holder, pgid });
+      });
+      exitCode = result.code;
+      if (result.pgid !== undefined) drained = await drainGroup(result.pgid);
+    } finally {
       // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
       const kept = linkState(target, artifacts).state === "linked";
       // The record names one commit: a branch switch or new edit mid-capture makes that untrue.
       const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
       if (moved) process.stderr.write(`${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`);
       if (!kept) process.stderr.write(`${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`);
-      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept || moved ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
+      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept || moved || !drained ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
       Object.assign(plan, { applied: true, record: finished });
     }
-    return plan;
-  } finally {
+    if (!drained) throw new Error(`capture processes in group ${group} would not stop; the lock ${lockFile} stays until they are gone`);
     release();
+    return plan;
+  } catch (error) {
+    // Release only when no capture process can still be writing.
+    if (group === undefined || !groupAlive(group)) release();
+    throw error;
+  } finally {
     process.off("SIGINT", hold);
     process.off("SIGTERM", hold);
   }
@@ -614,7 +665,7 @@ function describeCapture(entry: StatusEntry): string {
   return `${record.status} ${record.finishedAt ?? record.startedAt} at ${record.commit.slice(0, 10)}${record.branch ? ` (${record.branch})` : ""}, ${where}${flags.length ? `; ${flags.join(", ")}` : ""}`;
 }
 
-export function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNER, print: (text: string) => void = text => console.log(text)): number {
+export async function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNER, print: (text: string) => void = text => console.log(text)): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) { print(USAGE); return argv.length === 0 ? 2 : 0; }
   const options = parseOptions(argv);
   const { targets } = resolveTargets(cwd, options.names, options.project);
@@ -639,11 +690,11 @@ export function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNE
           : `${result.applied ? "done" : "would"} ${result.action} -> ${result.store}${result.superseded ? `; its own capture to ${result.superseded}` : ""}`;
       print(`${result.name} [${result.project}] ${outcome}`);
     }
-    if (!options.apply && results.some(result => result.action && !result.blocked)) print("Dry run; rerun with --apply.");
+    if (!options.json && !options.apply && results.some(result => result.action && !result.blocked)) print("Dry run; rerun with --apply.");
     return results.some(result => result.blocked) ? 1 : 0;
   }
   if (targets.length !== 1) throw new Error("capture runs one repository at a time; name it");
-  const plan = capture(targets[0]!, artifacts, { apply: options.apply, allowDirty: options.allowDirty, args: options.captureArgs }, runner);
+  const plan = await capture(targets[0]!, artifacts, { apply: options.apply, allowDirty: options.allowDirty, args: options.captureArgs }, runner);
   if (options.json) print(JSON.stringify(plan, null, 2));
   else if (!plan.applied) {
     print(`Would run \`${plan.command}\` in ${targets[0]!.root} at ${plan.commit.slice(0, 10)}${plan.merged === false ? " (not on origin's default branch)" : ""}, writing ${plan.store}.`);
@@ -654,5 +705,5 @@ export function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNE
 }
 
 if (import.meta.main) {
-  try { process.exitCode = main(process.argv.slice(2)); } catch (error) { console.error((error as Error).message); process.exitCode = 2; }
+  try { process.exitCode = await main(process.argv.slice(2)); } catch (error) { console.error((error as Error).message); process.exitCode = 2; }
 }
