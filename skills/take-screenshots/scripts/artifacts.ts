@@ -161,7 +161,16 @@ export const OWNER = "repository.json";
 export function claimNamespace(target: Target, artifacts: string, apply: boolean): string | undefined {
   const file = path.join(artifacts, target.project, OWNER);
   const identity = target.repo ?? `local:${target.project}`;
-  const read = () => { try { return (JSON.parse(readFileSync(file, "utf8")) as { repo?: string }).repo; } catch { return undefined; } };
+  // Undefined only when absent; a file that exists without a string repo is damaged, not free.
+  const read = (): string | undefined => {
+    let text: string;
+    try { text = readFileSync(file, "utf8"); } catch { return undefined; }
+    try {
+      const repo = (JSON.parse(text) as { repo?: unknown }).repo;
+      if (typeof repo === "string" && repo !== "") return repo;
+    } catch { /* reported below */ }
+    return "(unreadable repository.json)";
+  };
   const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
   const foreign = (holder: string) => `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace`;
   let owner = read();
@@ -173,7 +182,7 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     owner = read();
-    if (owner === undefined) return `${file} is unreadable; fix or remove it`;
+    if (owner === undefined) return `${file} could not be written`;
   }
   return owner !== undefined && !same(owner) ? foreign(owner) : undefined;
 }
@@ -219,6 +228,19 @@ export function resolveTargets(cwd: string, names: string[], project?: string): 
     return realpathSync(top);
   });
   return { workspace, targets: [...new Set(roots)].map(root => targetFor(root, project)) };
+}
+
+/**
+ * The target with its project spelled like an existing namespace that differs
+ * only in case, so a repository whose GitHub name gains capitals keeps its store
+ * on case-sensitive filesystems too.
+ */
+export function existingCase(target: Target, artifacts: string): Target {
+  let entries: string[];
+  try { entries = readdirSync(artifacts); } catch { return target; }
+  if (entries.includes(target.project)) return target;
+  const variant = entries.find(entry => entry.toLowerCase() === target.project.toLowerCase());
+  return variant ? { ...target, project: variant } : target;
 }
 
 export function storeDir(target: Target, artifacts: string): string { return path.join(artifacts, target.project, "screenshots"); }
@@ -692,10 +714,11 @@ function describeCapture(entry: StatusEntry): string {
 export async function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNER, print: (text: string) => void = text => console.log(text), timing: Timing = {}): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) { print(USAGE); return argv.length === 0 ? 2 : 0; }
   const options = parseOptions(argv);
-  const { targets } = resolveTargets(cwd, options.names, options.project);
-  if (targets.length === 0) { print(options.json ? "[]" : "No repository here captures screenshots."); return 0; }
-  const artifacts = artifactsRoot(targets[0]!.root);
-  if (targets.some(target => artifactsRoot(target.root) !== artifacts)) throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
+  const { targets: found } = resolveTargets(cwd, options.names, options.project);
+  if (found.length === 0) { print(options.json ? "[]" : "No repository here captures screenshots."); return 0; }
+  const artifacts = artifactsRoot(found[0]!.root);
+  if (found.some(target => artifactsRoot(target.root) !== artifacts)) throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
+  const targets = found.map(target => existingCase(target, artifacts));
   if (options.command === "status") {
     const entries = targets.map(target => status(target, artifacts));
     if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));

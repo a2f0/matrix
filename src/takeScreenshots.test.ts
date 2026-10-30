@@ -4,7 +4,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import os from "node:os";
 import path from "node:path";
 import {
-  acquireLock, artifactsRoot, drainGroup, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
+  acquireLock, artifactsRoot, claimNamespace, drainGroup, existingCase, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
   type Runner, storeDir, targetFor,
 } from "../skills/take-screenshots/scripts/artifacts";
 
@@ -344,6 +344,40 @@ try {
     expect(await main(["capture", "--apply"], app, lingering, print, { graceMs: 200, killMs: 2_000 })).toBe(1);
     expect(readRecord(path.join(home, "matrix-artifacts/app/screenshots"))?.status).toBe("failed");
     expect(existsSync(lock)).toBe(false);
+  });
+
+  test("asks GitHub about origin by name, and falls back to its URL", async () => {
+    const { home, app } = workspace();
+    const bin = path.join(home, "bin");
+    // A stub gh: names origin's renamed repository, and a fork's parent when asked without a name.
+    write(bin, "gh", `#!/bin/sh
+case "$*" in
+  *"repo view a2f0/app "*) echo a2f0/App ;;
+  *"repo view a2f0/down "*) exit 1 ;;
+  *"repo view --json"*) echo parent/app ;;
+  *) exit 1 ;;
+esac
+`);
+    spawnSync("chmod", ["+x", path.join(bin, "gh")]);
+    const saved = { path: process.env.PATH, noGh: process.env.MATRIX_ARTIFACTS_NO_GH };
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try {
+      git(app, "remote", "add", "upstream", "git@github.com:parent/app.git");
+      expect(targetFor(app)).toMatchObject({ repo: "a2f0/App", project: "App" });
+      git(app, "remote", "set-url", "origin", "git@github.com:a2f0/down.git");
+      expect(targetFor(app)).toMatchObject({ repo: "a2f0/down", project: "down" });
+    } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    // A namespace that differs only in case keeps its existing spelling.
+    const artifacts = path.join(home, "matrix-artifacts");
+    mkdirSync(path.join(artifacts, "app"), { recursive: true });
+    expect(existingCase({ name: "app", root: app, project: "App", repo: "a2f0/App" }, artifacts).project).toBe("app");
+    // A damaged owner file holds the namespace instead of crashing or freeing it.
+    writeFileSync(path.join(artifacts, "app", "repository.json"), JSON.stringify({ repo: null }));
+    expect(claimNamespace({ name: "app", root: app, project: "app", repo: "a2f0/app" }, artifacts, true)).toContain("unreadable repository.json");
   });
 
   test("parses commands and rejects options that do not apply", async () => {
