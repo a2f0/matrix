@@ -61,6 +61,7 @@ describe("audit", () => {
     const result = audit(root, [repo, "a2f0/missing"], selectRules([], false), statusOf, context);
     expect(result.checkouts[0]).toMatchObject({ repo, failed: [], skipped: [
       { rule: "brand-images", detail: "no assets/brand" },
+      { rule: "screenshots-store", detail: "captures no screenshots" },
       { rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" },
     ] });
     expect(result.checkouts[1]).toMatchObject({ repo: "a2f0/missing", error: "checkout missing; run sync" });
@@ -172,6 +173,16 @@ describe("audit", () => {
     expect(failures(checkout("brand", { "assets/brand/logo.svg": "<svg/>", "assets/brand/icon.png": "png", "agent-tool.json": "{}" }))["brand-images"])
       .toBe("agent-tool.json declares no images; committed rasters: assets/brand/icon.png");
     expect(failures(checkout("brand-ok", { "assets/brand/logo.svg": "<svg/>", "agent-tool.json": JSON.stringify({ images: { targets: {} } }) }))).toEqual({});
+  });
+
+  test("requires a screenshots script and an ignore pattern that matches the store link", () => {
+    const rule = (name: string, files: Record<string, string>) => failures(checkout(name, files), ["screenshots-store"])["screenshots-store"];
+    expect(rule("no-capture", {})).toBeUndefined();
+    expect(rule("slashed", { ".gitignore": ".DS_Store\n.screenshots/\n" }))
+      .toBe("ignores .screenshots but has no screenshots package script; the root .gitignore does not list .screenshots without a trailing slash");
+    expect(rule("unignored", { "package.json": JSON.stringify({ scripts: { screenshots: "sh capture.sh" } }) }))
+      .toBe("the root .gitignore does not list .screenshots without a trailing slash");
+    expect(rule("ok", { ".gitignore": ".DS_Store\n/.screenshots\n", "package.json": JSON.stringify({ scripts: { screenshots: "sh capture.sh" } }) })).toBeUndefined();
   });
 
   test("requires an import-cycle guard that counts type-only imports wherever TypeScript or a Python package exists", () => {

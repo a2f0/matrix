@@ -331,6 +331,21 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "screenshots-store",
+    summary: "Screenshot captures run as `bun run screenshots` into .screenshots, ignored so it can link to the shared store",
+    source: "docs/artifacts.md#repository-contract",
+    check: checkout => {
+      const ignore = (checkout.read(".gitignore") ?? "").split("\n").map(line => line.trim());
+      const script = object(checkout.packageJson?.scripts)?.screenshots;
+      if (typeof script !== "string" && !ignore.some(line => /^(\/|\*\*\/)?\.screenshots\/?$/.test(line))) return skip("captures no screenshots");
+      const found: string[] = [];
+      if (typeof script !== "string") found.push("ignores .screenshots but has no screenshots package script");
+      // A trailing slash matches only a directory, so the store link would show as untracked.
+      if (![".screenshots", "/.screenshots", "**/.screenshots"].some(pattern => ignore.includes(pattern))) found.push("the root .gitignore does not list .screenshots without a trailing slash");
+      return problems(found);
+    },
+  },
+  {
     id: "harness-permissions",
     summary: "Generated harness permission rules, checked wherever managed skills are",
     source: "docs/tooling.md#harness-permissions",
