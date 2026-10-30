@@ -195,7 +195,8 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
   const foreign = (holder: string) => `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace`;
   let owner = read();
   const same = (other: string) => other.toLowerCase() === identity.toLowerCase();
-  if (owner === undefined && recorded !== undefined && !same(recorded)) return foreign(recorded);
+  const renamed = (other: string) => target.alias !== undefined && other.toLowerCase() === target.alias.toLowerCase();
+  if (owner === undefined && recorded !== undefined && !same(recorded) && !renamed(recorded)) return foreign(recorded);
   if (owner === undefined && apply) {
     mkdirSync(path.dirname(file), { recursive: true });
     try { writeFileSync(file, `${JSON.stringify({ repo: identity })}\n`, { flag: "wx" }); } catch (error) {
@@ -203,6 +204,16 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
     }
     owner = read();
     if (owner === undefined) return `${file} could not be written`;
+  }
+  // GitHub confirmed origin's old name redirects here: the namespace's recorded owner is this repository before a rename or transfer.
+  if (owner !== undefined && !same(owner) && target.alias && owner.toLowerCase() === target.alias.toLowerCase()) {
+    if (apply) {
+      const previous = readOwner(file);
+      const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
+      writeFileSync(temporary, `${JSON.stringify({ repo: identity, aliases: [...(previous?.aliases ?? []), owner] })}\n`, { flag: "wx" });
+      renameSync(temporary, file);
+    }
+    return undefined;
   }
   if (owner !== undefined && !same(owner)) return foreign(owner);
   if (apply && target.alias) recordAlias(file, target.alias);
@@ -292,6 +303,20 @@ function readOwner(file: string): { repo: string; aliases: string[] } | undefine
   } catch { return undefined; }
 }
 
+/**
+ * A repository renamed or transferred since its namespace was made keeps that
+ * namespace: when GitHub confirms origin's old name and no namespace exists
+ * under the new one, the old directory (owned by the old name) is used.
+ */
+export function renamedNamespace(target: Target, artifacts: string): Target {
+  if (!target.alias || target.explicit) return target;
+  if (lexists(path.join(artifacts, target.project))) return target;
+  const old = target.alias.split("/")[1]!;
+  const owner = readOwner(path.join(artifacts, old, OWNER));
+  const ours = owner && [owner.repo, ...owner.aliases].some(name => name.toLowerCase() === target.alias!.toLowerCase() || name.toLowerCase() === target.repo?.toLowerCase());
+  return ours ? { ...target, project: old } : target;
+}
+
 export function storeDir(target: Target, artifacts: string): string { return path.join(artifacts, target.project, "screenshots"); }
 
 function sameFile(left: string, right: string): boolean {
@@ -350,7 +375,8 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   const blocked = (reason: string): LinkResult => ({ ...base, before: state.state, blocked: reason });
   // A linked clone whose origin now names another repository must not keep reading this namespace.
   if (state.state === "linked") {
-    const foreign = claimNamespace(target, artifacts, false);
+    // With --apply this also records a GitHub-confirmed rename in the owner file.
+    const foreign = claimNamespace(target, artifacts, apply);
     return foreign ? blocked(`${foreign}; remove ${LINK} from this clone`) : { ...base, before: "linked" };
   }
   if (isInside(artifacts, target.root)) return blocked(`the store ${artifacts} is inside the repository`);
@@ -767,7 +793,7 @@ export async function main(argv: string[], cwd = process.cwd(), runner: Runner =
   if (found.length === 0) { print(options.json ? "[]" : "No repository here captures screenshots."); return 0; }
   const artifacts = artifactsRoot(found[0]!.root);
   if (found.some(target => artifactsRoot(target.root) !== artifacts)) throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
-  const targets = found.map(target => existingCase(linkedNamespace(target, artifacts), artifacts));
+  const targets = found.map(target => existingCase(renamedNamespace(linkedNamespace(target, artifacts), artifacts), artifacts));
   if (options.command === "status") {
     const entries = targets.map(target => status(target, artifacts));
     if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));

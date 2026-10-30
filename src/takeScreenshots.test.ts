@@ -395,6 +395,24 @@ esac
     expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
     rmSync(path.join(app, LINK));
 
+    // A store made before a rename keeps serving the repository once GitHub confirms the old name.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/newname\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try {
+      expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+      expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
+    } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname", link: { state: "linked" } });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/newname", aliases: ["a2f0/oldname"] });
+    rmSync(path.join(app, LINK));
+
     // A namespace that differs only in case keeps its existing spelling.
     const artifacts = path.join(home, "matrix-artifacts");
     mkdirSync(path.join(artifacts, "app"), { recursive: true });
