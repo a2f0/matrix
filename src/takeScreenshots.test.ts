@@ -418,6 +418,25 @@ esac
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
     rmSync(path.join(app, LINK));
 
+    // A second rename (oldname -> newname -> third): a clone still on the first name keeps the store.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/third\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/third", aliases: ["a2f0/oldname", "a2f0/newname"] });
+    // An extra namespace chosen with --project never replaces the one a clone already uses.
+    expect(await main(["link", "--project", "aaa", "--json"], app, undefined, print)).toBe(1);
+    mkdirSync(path.join(home, "matrix-artifacts/aaa"), { recursive: true });
+    writeFileSync(path.join(home, "matrix-artifacts/aaa/repository.json"), JSON.stringify({ repo: "a2f0/oldname" }));
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname" });
+    rmSync(path.join(app, LINK));
+
     // An owner-only transfer keeps working offline through the confirmed alias, even with the same project name.
     const transferred = path.join(home, "matrix-artifacts", "moved");
     mkdirSync(path.join(transferred, "screenshots"), { recursive: true });

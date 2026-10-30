@@ -205,12 +205,16 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
     owner = read();
     if (owner === undefined) return `${file} could not be written`;
   }
-  // GitHub confirmed origin's old name redirects here: the namespace's recorded owner is this repository before a rename or transfer.
-  if (owner !== undefined && !same(owner) && target.alias && owner.toLowerCase() === target.alias.toLowerCase()) {
+  // GitHub confirmed origin's old name redirects here, and that name is the namespace's owner or an
+  // alias it confirmed earlier: this is the same repository after one or more renames or transfers.
+  const previous = readOwner(file);
+  const priorName = target.alias !== undefined && previous !== undefined
+    && [previous.repo, ...previous.aliases].some(name => name.toLowerCase() === target.alias!.toLowerCase());
+  if (owner !== undefined && !same(owner) && target.verified && priorName) {
     if (apply) {
-      const previous = readOwner(file);
+      const aliases = [...previous!.aliases, owner].filter((name, index, all) => all.findIndex(other => other.toLowerCase() === name.toLowerCase()) === index);
       const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
-      writeFileSync(temporary, `${JSON.stringify({ repo: identity, aliases: [...(previous?.aliases ?? []), owner] })}\n`, { flag: "wx" });
+      writeFileSync(temporary, `${JSON.stringify({ repo: identity, aliases })}\n`, { flag: "wx" });
       renameSync(temporary, file);
     }
     return undefined;
@@ -269,6 +273,7 @@ export function resolveTargets(cwd: string, names: string[], project?: string): 
  * on case-sensitive filesystems too.
  */
 export function existingCase(target: Target, artifacts: string): Target {
+  if (target.explicit) return target;
   let entries: string[];
   try { entries = readdirSync(artifacts); } catch { return target; }
   if (entries.includes(target.project)) return target;
@@ -297,8 +302,18 @@ export function knownNamespace(target: Target, artifacts: string): Target {
     const verifiedAlias = target.verified && target.alias !== undefined && owner.repo.toLowerCase() === target.alias.toLowerCase();
     return canonical || confirmed || verifiedAlias ? [{ entry, owner, canonical }] : [];
   });
-  // Prefer the namespace the repository's current name owns, then this project's own directory.
-  const chosen = matches.find(match => match.canonical) ?? matches.find(match => match.entry === target.project) ?? matches[0];
+  // Prefer the namespace this clone already links to, then the one its current name owns (its own
+  // directory first), then this project's directory, so an extra --project namespace never takes over.
+  let linked: string | undefined;
+  try {
+    const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
+    if (relative.length === 2 && relative[1] === "screenshots") linked = relative[0];
+  } catch { /* not linked */ }
+  const chosen = matches.find(match => match.entry === linked)
+    ?? matches.find(match => match.canonical && match.entry === target.project)
+    ?? matches.find(match => match.entry === target.project)
+    ?? matches.find(match => match.canonical)
+    ?? matches[0];
   if (!chosen) return target;
   return { ...target, project: chosen.entry, repo: target.verified ? target.repo : chosen.owner.repo };
 }
