@@ -105,8 +105,10 @@ changes before it ends is `failed`.
 
 The first clone to link or capture reserves the namespace in
 `<project>/repository.json` with its GitHub `owner/name`, as `gh repo view`
-reports it for origin; owners compare case-insensitively, and `link` and
-`capture` refuse another owner's repository of the same name. When GitHub
+reports it for origin, and GitHub's node `id` for it, which survives renames
+and transfers; owners compare case-insensitively, and `link` and `capture`
+refuse another owner's repository of the same name, or a repository with a
+different `id` that reuses a recorded name. When GitHub
 reports a different name than origin's URL (a rename, a transfer, or other
 casing), the old name is kept in the file's `aliases`, and a namespace still
 owned by the old name moves to the new one. Every clone, whichever name its

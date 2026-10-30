@@ -91,6 +91,8 @@ export interface Target {
   readonly alias?: string;
   /** --project chose the namespace; nothing may substitute another. */
   readonly explicit?: boolean;
+  /** GitHub's node id for `repo`, which survives renames and transfers. */
+  readonly id?: string;
 }
 
 /** Git without hooks, prompts, or variables that bind it to another repository. */
@@ -137,23 +139,28 @@ export function githubRepo(url: string): string | undefined {
  * `upstream` remote and would name a fork's parent. MATRIX_ARTIFACTS_NO_GH
  * skips the network (offline use and tests).
  */
-function canonicalRepo(root: string, parsed?: string): string | undefined {
+function canonicalRepo(root: string, parsed?: string): Resolved | undefined {
   if (process.env.MATRIX_ARTIFACTS_NO_GH) return undefined;
   if (!parsed && gitValue(root, "remote", "get-url", "origin") === undefined) return undefined;
-  const result = spawnSync("gh", ["repo", "view", ...(parsed ? [parsed] : []), "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  const name = result.status === 0 ? result.stdout.trim() : "";
-  return /^[^/\s]+\/[^/\s]+$/.test(name) ? name : undefined;
+  const result = spawnSync("gh", ["repo", "view", ...(parsed ? [parsed] : []), "--json", "nameWithOwner,id", "--jq", ".nameWithOwner + \" \" + .id"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const [repo, id] = result.status === 0 ? result.stdout.trim().split(/\s+/) : [];
+  return repo && /^[^/\s]+\/[^/\s]+$/.test(repo) ? { repo, ...(id ? { id } : {}) } : undefined;
 }
+
+/** GitHub's current name for a repository and its node id, which survives renames and transfers. */
+export interface Resolved { readonly repo: string; readonly id?: string }
 
 /**
  * A repository's store namespace: its GitHub name, like matrix-secrets'. GitHub
  * names it when reachable (a clone's remote can carry a pre-rename name or other
  * casing); otherwise origin's URL does. A repository with neither needs --project.
  */
-export function targetFor(root: string, project?: string, resolve: (root: string, parsed?: string) => string | undefined = canonicalRepo): Target {
+export function targetFor(root: string, project?: string, resolve: (root: string, parsed?: string) => Resolved | string | undefined = canonicalRepo): Target {
   const remote = gitValue(root, "remote", "get-url", "origin");
   const parsed = remote ? githubRepo(remote) : undefined;
-  const canonical = resolve(root, parsed);
+  const resolved = resolve(root, parsed);
+  const canonical = typeof resolved === "string" ? resolved : resolved?.repo;
+  const id = typeof resolved === "string" ? undefined : resolved?.id;
   const repo = canonical ?? parsed;
   if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
   const name = project ?? repo!.split("/")[1]!;
@@ -162,6 +169,7 @@ export function targetFor(root: string, project?: string, resolve: (root: string
     name: path.basename(root), root, project: name, ...(repo ? { repo } : {}), verified: canonical !== undefined,
     ...(canonical && parsed && parsed !== canonical ? { alias: parsed } : {}),
     ...(project ? { explicit: true } : {}),
+    ...(id ? { id } : {}),
   };
 }
 
@@ -169,11 +177,18 @@ export function targetFor(root: string, project?: string, resolve: (root: string
 export const OWNER = "repository.json";
 
 /** Adds a GitHub-confirmed remote name to the owner file, atomically, so offline clones still find the namespace. */
-function recordAlias(file: string, alias: string): void {
+function recordAlias(file: string, alias: string | undefined, id: string | undefined): void {
   const owner = readOwner(file);
-  if (!owner || owner.aliases.some(known => known.toLowerCase() === alias.toLowerCase())) return;
+  if (!owner) return;
+  const newAlias = alias !== undefined && !owner.aliases.some(known => known.toLowerCase() === alias.toLowerCase()) && owner.repo.toLowerCase() !== alias.toLowerCase();
+  const newId = id !== undefined && owner.id === undefined;
+  if (!newAlias && !newId) return;
+  writeOwner(file, { repo: owner.repo, aliases: newAlias ? [...owner.aliases, alias!] : owner.aliases, id: owner.id ?? id });
+}
+
+function writeOwner(file: string, owner: { repo: string; aliases: string[]; id?: string | undefined }): void {
   const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ repo: owner.repo, aliases: [...owner.aliases, alias] })}\n`, { flag: "wx" });
+  writeFileSync(temporary, `${JSON.stringify({ repo: owner.repo, ...(owner.aliases.length ? { aliases: owner.aliases } : {}), ...(owner.id ? { id: owner.id } : {}) })}\n`, { flag: "wx" });
   renameSync(temporary, file);
 }
 
@@ -199,7 +214,7 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
   if (owner === undefined && recorded !== undefined && !same(recorded) && !renamed(recorded)) return foreign(recorded);
   if (owner === undefined && apply) {
     mkdirSync(path.dirname(file), { recursive: true });
-    try { writeFileSync(file, `${JSON.stringify({ repo: identity })}\n`, { flag: "wx" }); } catch (error) {
+    try { writeFileSync(file, `${JSON.stringify({ repo: identity, ...(target.verified && target.id ? { id: target.id } : {}) })}\n`, { flag: "wx" }); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     owner = read();
@@ -208,19 +223,20 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
   // GitHub confirmed origin's old name redirects here, and that name is the namespace's owner or an
   // alias it confirmed earlier: this is the same repository after one or more renames or transfers.
   const previous = readOwner(file);
+  // GitHub's node id survives renames and transfers; a different id is a different repository, whatever its name.
+  const idDiffers = target.verified === true && target.id !== undefined && previous?.id !== undefined && previous.id !== target.id;
+  if (idDiffers) return foreign(`${previous!.repo} (another GitHub repository, ${previous!.id})`);
   const priorName = target.alias !== undefined && previous !== undefined
     && [previous.repo, ...previous.aliases].some(name => name.toLowerCase() === target.alias!.toLowerCase());
   if (owner !== undefined && !same(owner) && target.verified && priorName) {
     if (apply) {
       const aliases = [...previous!.aliases, owner].filter((name, index, all) => all.findIndex(other => other.toLowerCase() === name.toLowerCase()) === index);
-      const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
-      writeFileSync(temporary, `${JSON.stringify({ repo: identity, aliases })}\n`, { flag: "wx" });
-      renameSync(temporary, file);
+      writeOwner(file, { repo: identity, aliases, id: previous!.id ?? target.id });
     }
     return undefined;
   }
   if (owner !== undefined && !same(owner)) return foreign(owner);
-  if (apply && target.alias) recordAlias(file, target.alias);
+  if (apply && target.verified) recordAlias(file, target.alias, target.id);
   return undefined;
 }
 
@@ -319,12 +335,12 @@ export function knownNamespace(target: Target, artifacts: string): Target {
 }
 
 /** A namespace's owner file: its repository and the remote names GitHub confirmed for it. */
-function readOwner(file: string): { repo: string; aliases: string[] } | undefined {
+function readOwner(file: string): { repo: string; aliases: string[]; id?: string } | undefined {
   try {
-    const value = JSON.parse(readFileSync(file, "utf8")) as { repo?: unknown; aliases?: unknown };
+    const value = JSON.parse(readFileSync(file, "utf8")) as { repo?: unknown; aliases?: unknown; id?: unknown };
     if (typeof value.repo !== "string" || value.repo === "") return undefined;
     const aliases = Array.isArray(value.aliases) ? value.aliases.filter((alias): alias is string => typeof alias === "string") : [];
-    return { repo: value.repo, aliases };
+    return { repo: value.repo, aliases, ...(typeof value.id === "string" ? { id: value.id } : {}) };
   } catch { return undefined; }
 }
 

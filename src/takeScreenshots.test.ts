@@ -352,9 +352,9 @@ try {
     // A stub gh: names origin's renamed repository, and a fork's parent when asked without a name.
     write(bin, "gh", `#!/bin/sh
 case "$*" in
-  *"repo view a2f0/app "*) echo a2f0/App ;;
+  *"repo view a2f0/app "*) echo a2f0/App R_app ;;
   *"repo view a2f0/down "*) exit 1 ;;
-  *"repo view --json"*) echo parent/app ;;
+  *"repo view --json"*) echo parent/app R_parent ;;
   *) exit 1 ;;
 esac
 `);
@@ -364,7 +364,7 @@ esac
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
     try {
       git(app, "remote", "add", "upstream", "git@github.com:parent/app.git");
-      expect(targetFor(app)).toMatchObject({ repo: "a2f0/App", project: "App" });
+      expect(targetFor(app)).toMatchObject({ repo: "a2f0/App", project: "App", id: "R_app" });
       git(app, "remote", "set-url", "origin", "git@github.com:a2f0/down.git");
       expect(targetFor(app)).toMatchObject({ repo: "a2f0/down", project: "down" });
     } finally {
@@ -373,7 +373,7 @@ esac
     }
     // Linked online under GitHub's new name, a clone keeps that namespace offline.
     git(app, "remote", "set-url", "origin", "git@github.com:a2f0/stealth.git");
-    write(bin, "gh", "#!/bin/sh\necho a2f0/renamed\n");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/renamed R_renamed\n");
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
     try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
@@ -383,7 +383,7 @@ esac
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/renamed/screenshots");
     expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "renamed", link: { state: "linked" } });
-    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/renamed/repository.json"), "utf8"))).toEqual({ repo: "a2f0/renamed", aliases: ["a2f0/stealth"] });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/renamed/repository.json"), "utf8"))).toEqual({ repo: "a2f0/renamed", aliases: ["a2f0/stealth"], id: "R_renamed" });
     // --project keeps its own namespace, even offline in a linked clone.
     expect(await main(["status", "--json", "--project", "isolated"], app, undefined, print)).toBe(1);
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "isolated" });
@@ -399,7 +399,7 @@ esac
     git(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
-    write(bin, "gh", "#!/bin/sh\necho a2f0/newname\n");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/newname R_old\n");
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
     try {
@@ -410,7 +410,7 @@ esac
       process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
     }
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname", link: { state: "linked" } });
-    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/newname", aliases: ["a2f0/oldname"] });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/newname", aliases: ["a2f0/oldname"], id: "R_old" });
     rmSync(path.join(app, LINK));
     // Clones whose remote already uses the new name share the same store.
     git(app, "remote", "set-url", "origin", "git@github.com:a2f0/newname.git");
@@ -420,7 +420,7 @@ esac
 
     // A second rename (oldname -> newname -> third): a clone still on the first name keeps the store.
     git(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
-    write(bin, "gh", "#!/bin/sh\necho a2f0/third\n");
+    write(bin, "gh", "#!/bin/sh\necho a2f0/third R_old\n");
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
     try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
@@ -428,7 +428,18 @@ esac
       process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
     }
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
-    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/third", aliases: ["a2f0/oldname", "a2f0/newname"] });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/third", aliases: ["a2f0/oldname", "a2f0/newname"], id: "R_old" });
+    // A different repository that reused the old name (new id) cannot claim the store through the alias.
+    write(bin, "gh", "#!/bin/sh\necho a2f0/fourth R_other\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try {
+      expect(await main(["link", "--json"], app, undefined, print)).toBe(1);
+      expect(output.at(-1)).toContain("another GitHub repository, R_old");
+    } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
     // An extra namespace chosen with --project never replaces the one a clone already uses.
     expect(await main(["link", "--project", "aaa", "--json"], app, undefined, print)).toBe(1);
     mkdirSync(path.join(home, "matrix-artifacts/aaa"), { recursive: true });
