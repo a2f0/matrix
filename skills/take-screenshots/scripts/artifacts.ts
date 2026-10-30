@@ -236,6 +236,8 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   const blocked = (reason: string): LinkResult => ({ ...base, before: state.state, blocked: reason });
   if (isInside(artifacts, target.root)) return blocked(`the store ${artifacts} is inside the repository`);
   if (!ignorePatternMatchesFile(target.root)) return blocked(`the root .gitignore must list ${LINK} without a trailing slash, so the link is ignored`);
+  const stored = readRecord(store);
+  if (stored?.repo && target.repo && stored.repo !== target.repo) return blocked(`the store holds captures of ${stored.repo}, not ${target.repo}; pass --project to use another namespace`);
   if (state.state === "elsewhere") return blocked(`${LINK} already links to ${state.target}; remove it by hand if that is stale`);
   if (state.state === "other") return blocked(`${LINK} is neither a directory nor a link`);
   let action: LinkResult["action"] = "link";
@@ -371,13 +373,13 @@ export function writeRecord(store: string, record: CaptureRecord): void {
 }
 
 export interface Runner {
-  /** Runs the repository's capture with inherited output; returns its exit code. */
-  capture(root: string, args: string[]): number | null;
+  /** Runs the repository's capture with inherited output and the given environment; returns its exit code. */
+  capture(root: string, args: string[], env: NodeJS.ProcessEnv): number | null;
 }
 
 const RUNNER: Runner = {
-  capture(root, args) {
-    const result = spawnSync("bun", ["run", "screenshots", ...args], { cwd: root, stdio: "inherit" });
+  capture(root, args, env) {
+    const result = spawnSync("bun", ["run", "screenshots", ...args], { cwd: root, env, stdio: "inherit" });
     if (result.error) throw new Error(`Could not run bun: ${result.error.message}`);
     return result.status;
   },
@@ -433,19 +435,26 @@ export function capture(target: Target, artifacts: string, options: { apply: boo
   try {
     // Re-read under the lock: the previous capture is now settled.
     const previous = readRecord(store);
+    if (previous?.repo && target.repo && previous.repo !== target.repo) {
+      throw new Error(`the store ${store} holds captures of ${previous.repo}, not ${target.repo}; pass --project to use another namespace`);
+    }
     // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
     const partial = options.args.length > 0;
     const inheritsDirty = partial && previous !== undefined && previous.dirty;
     const inheritsIncomplete = partial && (previous === undefined || previous.status !== "complete");
     const base = {
       schemaVersion: 1 as const, project: target.project, ...(target.repo ? { repo: target.repo } : {}),
-      commit, branch, dirty: dirty || inheritsDirty, merged, args: options.args,
+      commit, branch, dirty: dirty || inheritsDirty, args: options.args,
+      // Kept images are only as merged as the capture that made them.
+      merged: partial && previous && previous.merged !== true && merged !== false ? previous.merged : merged,
       ...(partial && previous ? { over: { commit: previous.commit, status: previous.status, dirty: previous.dirty } } : {}),
       checkout: target.root, host: os.hostname(), startedAt,
     };
     writeRecord(store, { ...base, status: "running" });
     let exitCode: number | null = null;
-    try { exitCode = runner.capture(target.root, options.args); } finally {
+    // Runners that honor SCREENSHOT_OUTPUT_DIR must write through the link, whatever the caller's shell exports.
+    const env = { ...process.env, SCREENSHOT_OUTPUT_DIR: path.join(target.root, LINK) };
+    try { exitCode = runner.capture(target.root, options.args, env); } finally {
       // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
       const kept = linkState(target, artifacts).state === "linked";
       if (!kept) process.stderr.write(`${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`);

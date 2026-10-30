@@ -113,8 +113,9 @@ describe("take-screenshots artifacts", () => {
 
     const runs: string[][] = [];
     const runner: Runner = {
-      capture(cwd, args) {
+      capture(cwd, args, env) {
         runs.push(args);
+        expect(env.SCREENSHOT_OUTPUT_DIR).toBe(path.join(cwd, LINK));
         expect(existsSync(path.join(artifacts, "app", LOCK))).toBe(true);
         expect(readRecord(storeDir(targetFor(cwd), artifacts))?.status).toBe("running");
         write(cwd, ".screenshots/web/light/home.png", "png");
@@ -135,6 +136,26 @@ describe("take-screenshots artifacts", () => {
     git(clone, "commit", "-qm", "next");
     expect(relation(clone, record.commit)).toEqual({ relation: "behind", commits: 1 });
     expect(relation(app, record.commit)).toEqual({ relation: "current" });
+
+    // Another owner's repository of the same name cannot write into this namespace.
+    const fork = repo(path.join(home, "fork", "app"), ".screenshots\n");
+    git(fork, "remote", "set-url", "origin", "git@github.com:someone/app.git");
+    expect(link(targetFor(fork), artifacts, true).blocked).toContain("holds captures of a2f0/app");
+  });
+
+  test("partial captures keep the merge state of the images they keep", () => {
+    const { app } = workspace();
+    expect(main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const ok: Runner = { capture: () => 0 };
+    // No origin/HEAD here, so merged is unknown (null); a full capture records that.
+    expect(main(["capture", "--apply"], app, ok, print)).toBe(0);
+    const store = storeDir(targetFor(app), artifactsRoot(app));
+    expect(readRecord(store)?.merged).toBeNull();
+    git(app, "update-ref", "refs/remotes/origin/HEAD", "HEAD");
+    expect(main(["capture", "--apply", "--", "--project=web"], app, ok, print)).toBe(0);
+    expect(readRecord(store)).toMatchObject({ merged: null, over: { status: "complete" } });
+    expect(main(["capture", "--apply"], app, ok, print)).toBe(0);
+    expect(readRecord(store)?.merged).toBe(true);
   });
 
   test("refuses dirty trees and unlinked clones, and records failed captures", () => {
