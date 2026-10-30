@@ -170,6 +170,13 @@ host's apply (skyline); every host serves its own icons at the root. Merging
 does not put a favicon live where a repository deploys only on request; report
 those deploys rather than running them.
 
+## Screenshots
+
+Screenshots are captured once into `../matrix-artifacts` and shared by every
+clone; capture and check them with the
+[take-screenshots skill](skills/take-screenshots/SKILL.md)
+([docs/artifacts.md](docs/artifacts.md)), never per deploy.
+
 ## Store releases
 
 Repositories that ship iOS or Android store builds follow

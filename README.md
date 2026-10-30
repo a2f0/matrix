@@ -36,6 +36,7 @@ bun run status
 | `bun run audit [repo...] [--rule <id>]... [--remote]` | Check checkouts against the shared standards; `--remote` also fails agent-tool pins that trail a release by a week |
 | `bun run health [--remote] [--markdown]` | Combine disk space, status, audit, discovery, and sweep friction into suggested next steps |
 | `bun run space [repo...] [--builds] [--deps] [--machine] [--apply]` | List regenerable, git-ignored output and caches to free disk space; `--apply` removes them |
+| `bun run artifacts <status\|link\|capture> [repo...] [--apply]` | Share screenshots through `../matrix-artifacts`: link each clone's `.screenshots`, capture under a lock, and report each capture's commit |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 | `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |
@@ -104,6 +105,14 @@ gitignored `.secrets` there. Backups and GitHub Actions values are managed from
 this workspace; see [docs/secrets.md](docs/secrets.md). Terraform state lives
 in one Cloudflare R2 bucket per repository; see
 [docs/terraform-state.md](docs/terraform-state.md).
+
+## Screenshots
+
+Captured screenshots for every managed repository live in `../matrix-artifacts`,
+one namespace per repository, and each clone links its gitignored
+`.screenshots` there. A capture in one clone updates every clone, so a deploy
+from any of them publishes the newest screenshots without recapturing; see
+[docs/artifacts.md](docs/artifacts.md).
 
 ## Sweeps
 
