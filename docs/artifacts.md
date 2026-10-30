@@ -105,14 +105,17 @@ changes before it ends is `failed`.
 
 The first clone to link or capture reserves the namespace in
 `<project>/repository.json` with its GitHub `owner/name`, as `gh repo view`
-reports it for origin, so a remote with a pre-rename name or other casing
-still finds it; such a confirmed remote name is kept in the file's `aliases`.
-Origin's URL is used when GitHub is unreachable or `MATRIX_ARTIFACTS_NO_GH` is
-set, and a clone already linked into a namespace that lists its remote name as
-an alias keeps that namespace unless `--project` names another. Owners compare case-insensitively, and `link`
-and `capture` refuse another owner's repository of the same name; pass
-`--project` to give it its own namespace, as a repository without a GitHub
-origin must.
+reports it for origin; owners compare case-insensitively, and `link` and
+`capture` refuse another owner's repository of the same name. When GitHub
+reports a different name than origin's URL (a rename, a transfer, or other
+casing), the old name is kept in the file's `aliases`, and a namespace still
+owned by the old name moves to the new one. Every clone, whichever name its
+remote uses and whether or not GitHub is reachable (origin's URL is used when
+it is not, or when `MATRIX_ARTIFACTS_NO_GH` is set), uses the namespace whose
+owner or confirmed aliases match it. A clone whose remote already uses a new
+name finds an older namespace only after one old-name clone has run `link`
+or `capture` online to record the rename. Pass `--project` to choose a
+namespace explicitly, as a repository without a GitHub origin must.
 
 ## Locks
 

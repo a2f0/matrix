@@ -277,20 +277,30 @@ export function existingCase(target: Target, artifacts: string): Target {
 }
 
 /**
- * Offline, origin's URL can still carry a pre-rename name. A clone already
- * linked into another namespace of this store keeps it, with the owner that
- * namespace recorded when it was verified, so going offline never moves it.
+ * The namespace that already serves this repository: one whose owner file names
+ * its GitHub repository, or lists origin's name as an alias GitHub confirmed
+ * earlier. Renames and transfers therefore keep one store whether a clone's
+ * remote uses the old or the new name, online or offline. --project is never
+ * overridden.
  */
-export function linkedNamespace(target: Target, artifacts: string): Target {
-  if (target.verified !== false || target.explicit || !target.repo) return target;
-  let destination: string;
-  try { destination = path.resolve(target.root, readlinkSync(path.join(target.root, LINK))); } catch { return target; }
-  const relative = path.relative(artifacts, destination).split(path.sep);
-  if (relative.length !== 2 || relative[1] !== "screenshots" || relative[0] === target.project || relative[0]!.startsWith(".")) return target;
-  const owner = readOwner(path.join(artifacts, relative[0]!, OWNER));
-  // Only a rename GitHub confirmed earlier: origin's name must be one the namespace recorded as an alias.
-  const known = owner?.aliases.some(alias => alias.toLowerCase() === target.repo!.toLowerCase());
-  return owner && known ? { ...target, project: relative[0]!, repo: owner.repo } : target;
+export function knownNamespace(target: Target, artifacts: string): Target {
+  if (target.explicit || !target.repo) return target;
+  let entries: string[];
+  try { entries = readdirSync(artifacts); } catch { return target; }
+  const names = [target.repo, target.alias].filter((name): name is string => name !== undefined).map(name => name.toLowerCase());
+  const matches = entries.filter(entry => !entry.startsWith(".")).flatMap(entry => {
+    const owner = readOwner(path.join(artifacts, entry, OWNER));
+    if (!owner) return [];
+    const canonical = owner.repo.toLowerCase() === target.repo!.toLowerCase();
+    // Offline, origin's name counts only as an alias GitHub confirmed for that namespace.
+    const confirmed = owner.aliases.some(alias => names.includes(alias.toLowerCase()));
+    const verifiedAlias = target.verified && target.alias !== undefined && owner.repo.toLowerCase() === target.alias.toLowerCase();
+    return canonical || confirmed || verifiedAlias ? [{ entry, owner, canonical }] : [];
+  });
+  // Prefer the namespace the repository's current name owns, then this project's own directory.
+  const chosen = matches.find(match => match.canonical) ?? matches.find(match => match.entry === target.project) ?? matches[0];
+  if (!chosen) return target;
+  return { ...target, project: chosen.entry, repo: target.verified ? target.repo : chosen.owner.repo };
 }
 
 /** A namespace's owner file: its repository and the remote names GitHub confirmed for it. */
@@ -301,20 +311,6 @@ function readOwner(file: string): { repo: string; aliases: string[] } | undefine
     const aliases = Array.isArray(value.aliases) ? value.aliases.filter((alias): alias is string => typeof alias === "string") : [];
     return { repo: value.repo, aliases };
   } catch { return undefined; }
-}
-
-/**
- * A repository renamed or transferred since its namespace was made keeps that
- * namespace: when GitHub confirms origin's old name and no namespace exists
- * under the new one, the old directory (owned by the old name) is used.
- */
-export function renamedNamespace(target: Target, artifacts: string): Target {
-  if (!target.alias || target.explicit) return target;
-  if (lexists(path.join(artifacts, target.project))) return target;
-  const old = target.alias.split("/")[1]!;
-  const owner = readOwner(path.join(artifacts, old, OWNER));
-  const ours = owner && [owner.repo, ...owner.aliases].some(name => name.toLowerCase() === target.alias!.toLowerCase() || name.toLowerCase() === target.repo?.toLowerCase());
-  return ours ? { ...target, project: old } : target;
 }
 
 export function storeDir(target: Target, artifacts: string): string { return path.join(artifacts, target.project, "screenshots"); }
@@ -793,7 +789,7 @@ export async function main(argv: string[], cwd = process.cwd(), runner: Runner =
   if (found.length === 0) { print(options.json ? "[]" : "No repository here captures screenshots."); return 0; }
   const artifacts = artifactsRoot(found[0]!.root);
   if (found.some(target => artifactsRoot(target.root) !== artifacts)) throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
-  const targets = found.map(target => existingCase(renamedNamespace(linkedNamespace(target, artifacts), artifacts), artifacts));
+  const targets = found.map(target => existingCase(knownNamespace(target, artifacts), artifacts));
   if (options.command === "status") {
     const entries = targets.map(target => status(target, artifacts));
     if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));

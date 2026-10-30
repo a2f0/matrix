@@ -412,6 +412,22 @@ esac
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname", link: { state: "linked" } });
     expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/newname", aliases: ["a2f0/oldname"] });
     rmSync(path.join(app, LINK));
+    // Clones whose remote already uses the new name share the same store.
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/newname.git");
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
+    rmSync(path.join(app, LINK));
+
+    // An owner-only transfer keeps working offline through the confirmed alias, even with the same project name.
+    const transferred = path.join(home, "matrix-artifacts", "moved");
+    mkdirSync(path.join(transferred, "screenshots"), { recursive: true });
+    writeFileSync(path.join(transferred, "repository.json"), JSON.stringify({ repo: "neworg/moved", aliases: ["a2f0/moved"] }));
+    git(app, "remote", "set-url", "origin", "git@github.com:a2f0/moved.git");
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "moved", link: { state: "linked" } });
+    expect(output.at(-1)).not.toContain("foreign");
+    rmSync(path.join(app, LINK));
 
     // A namespace that differs only in case keeps its existing spelling.
     const artifacts = path.join(home, "matrix-artifacts");
