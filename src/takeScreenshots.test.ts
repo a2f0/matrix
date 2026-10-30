@@ -449,6 +449,17 @@ esac
     writeFileSync(path.join(home, "matrix-artifacts/aaa/repository.json"), JSON.stringify({ repo: "a2f0/third", explicit: true }));
     expect(await main(["status", "--json"], app, undefined, print)).toBe(1);
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname" });
+    // With only an explicit namespace matching, an unlinked clone gets its own, never the extra.
+    const lone = repo(path.join(home, "lone"), ".screenshots\n");
+    git(lone, "remote", "set-url", "origin", "git@github.com:a2f0/lone.git");
+    mkdirSync(path.join(home, "matrix-artifacts/isolated"), { recursive: true });
+    writeFileSync(path.join(home, "matrix-artifacts/isolated/repository.json"), JSON.stringify({ repo: "a2f0/lone", explicit: true }));
+    expect(await main(["status", "--json"], lone, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "lone" });
+    // Offline, --project accepts a confirmed old name of that namespace's owner.
+    writeFileSync(path.join(home, "matrix-artifacts/isolated/repository.json"), JSON.stringify({ repo: "a2f0/lone-renamed", aliases: ["a2f0/lone"], explicit: true }));
+    expect(await main(["link", "--project", "isolated", "--apply"], lone, undefined, print)).toBe(0);
+    expect(readlinkSync(path.join(lone, LINK))).toContain("matrix-artifacts/isolated/screenshots");
 
     // An owner-only transfer keeps working offline through the confirmed alias, even with the same project name.
     const transferred = path.join(home, "matrix-artifacts", "moved");

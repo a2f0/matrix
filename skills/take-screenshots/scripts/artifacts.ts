@@ -340,7 +340,13 @@ export function existingCase(target: Target, artifacts: string): Target {
  * overridden.
  */
 export function knownNamespace(target: Target, artifacts: string): Target {
-  if (target.explicit || !target.repo) return target;
+  if (!target.repo) return target;
+  if (target.explicit) {
+    // The chosen namespace stays; offline, a confirmed old name of its owner still counts as that owner.
+    const owner = readOwner(path.join(artifacts, target.project, OWNER));
+    const confirmed = !target.verified && owner?.aliases.some(alias => alias.toLowerCase() === target.repo!.toLowerCase());
+    return confirmed ? { ...target, repo: owner!.repo } : target;
+  }
   let entries: string[];
   try { entries = readdirSync(artifacts); } catch { return target; }
   const names = [target.repo, target.alias].filter((name): name is string => name !== undefined).map(name => name.toLowerCase());
@@ -360,14 +366,13 @@ export function knownNamespace(target: Target, artifacts: string): Target {
     const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
     if (relative.length === 2 && relative[1] === "screenshots") linked = relative[0];
   } catch { /* not linked */ }
-  // Namespaces made with --project are extras: chosen implicitly only when nothing else matches.
+  // Namespaces made with --project are extras: used implicitly only by a clone already linked to one.
   const primary = matches.filter(match => !match.owner.explicit);
   const chosen = matches.find(match => match.entry === linked)
     ?? primary.find(match => match.canonical && match.entry === target.project)
     ?? primary.find(match => match.entry === target.project)
     ?? primary.find(match => match.canonical)
-    ?? primary[0]
-    ?? matches[0];
+    ?? primary[0];
   if (!chosen) return target;
   return { ...target, project: chosen.entry, repo: target.verified ? target.repo : chosen.owner.repo };
 }
