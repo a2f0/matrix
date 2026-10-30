@@ -16,7 +16,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import {
-  existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync,
+  existsSync, linkSync, lstatSync, statSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync,
   renameSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -178,18 +178,49 @@ export const OWNER = "repository.json";
 
 /** Adds a GitHub-confirmed remote name to the owner file, atomically, so offline clones still find the namespace. */
 function recordAlias(file: string, alias: string | undefined, id: string | undefined): void {
-  const owner = readOwner(file);
-  if (!owner) return;
-  const newAlias = alias !== undefined && !owner.aliases.some(known => known.toLowerCase() === alias.toLowerCase()) && owner.repo.toLowerCase() !== alias.toLowerCase();
-  const newId = id !== undefined && owner.id === undefined;
-  if (!newAlias && !newId) return;
-  writeOwner(file, { repo: owner.repo, aliases: newAlias ? [...owner.aliases, alias!] : owner.aliases, id: owner.id ?? id });
+  updateOwner(file, owner => {
+    if (!owner) return undefined;
+    const newAlias = alias !== undefined && !owner.aliases.some(known => known.toLowerCase() === alias.toLowerCase()) && owner.repo.toLowerCase() !== alias.toLowerCase();
+    const newId = id !== undefined && owner.id === undefined;
+    return newAlias || newId ? { ...owner, aliases: newAlias ? [...owner.aliases, alias!] : owner.aliases, id: owner.id ?? id } : undefined;
+  });
 }
 
-function writeOwner(file: string, owner: { repo: string; aliases: string[]; id?: string | undefined }): void {
+function writeOwner(file: string, owner: Owner): void {
   const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ repo: owner.repo, ...(owner.aliases.length ? { aliases: owner.aliases } : {}), ...(owner.id ? { id: owner.id } : {}) })}\n`, { flag: "wx" });
+  const body = { repo: owner.repo, ...(owner.aliases.length ? { aliases: owner.aliases } : {}), ...(owner.id ? { id: owner.id } : {}), ...(owner.explicit ? { explicit: true } : {}) };
+  writeFileSync(temporary, `${JSON.stringify(body)}\n`, { flag: "wx" });
   renameSync(temporary, file);
+}
+
+/**
+ * Read, change, and write the owner file under its own short lock, so two
+ * clones recording different aliases at once both keep theirs. `change`
+ * returns the new owner, or undefined to leave the file alone.
+ */
+export function updateOwner(file: string, change: (owner: Owner | undefined) => Owner | undefined): void {
+  const lock = `${file}.lock`;
+  const mine = `${lock}.${process.pid}.${process.hrtime.bigint()}`;
+  writeFileSync(mine, `${process.pid}\n`, { flag: "wx" });
+  try {
+    for (const deadline = Date.now() + 10_000; ;) {
+      try { linkSync(mine, lock); break; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        // An update takes milliseconds; a lock older than a minute was left by a killed process.
+        try { if (Date.now() - statSync(lock).mtimeMs > 60_000) { unlinkSync(lock); continue; } } catch { continue; }
+        if (Date.now() > deadline) throw new Error(`${lock} is held; remove it if no link or capture is running`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+    try {
+      const next = change(readOwner(file));
+      if (next) writeOwner(file, next);
+    } finally {
+      unlinkSync(lock);
+    }
+  } finally {
+    unlinkSync(mine);
+  }
 }
 
 /** Reserve the namespace for this repository, or explain whose it is. */
@@ -214,7 +245,8 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
   if (owner === undefined && recorded !== undefined && !same(recorded) && !renamed(recorded)) return foreign(recorded);
   if (owner === undefined && apply) {
     mkdirSync(path.dirname(file), { recursive: true });
-    try { writeFileSync(file, `${JSON.stringify({ repo: identity, ...(target.verified && target.id ? { id: target.id } : {}) })}\n`, { flag: "wx" }); } catch (error) {
+    const body = { repo: identity, ...(target.verified && target.id ? { id: target.id } : {}), ...(target.explicit ? { explicit: true } : {}) };
+    try { writeFileSync(file, `${JSON.stringify(body)}\n`, { flag: "wx" }); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     owner = read();
@@ -230,8 +262,11 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
     && [previous.repo, ...previous.aliases].some(name => name.toLowerCase() === target.alias!.toLowerCase());
   if (owner !== undefined && !same(owner) && target.verified && priorName) {
     if (apply) {
-      const aliases = [...previous!.aliases, owner].filter((name, index, all) => all.findIndex(other => other.toLowerCase() === name.toLowerCase()) === index);
-      writeOwner(file, { repo: identity, aliases, id: previous!.id ?? target.id });
+      updateOwner(file, current => {
+        if (!current) return undefined;
+        const aliases = [...current.aliases, current.repo].filter((name, index, all) => name.toLowerCase() !== identity.toLowerCase() && all.findIndex(other => other.toLowerCase() === name.toLowerCase()) === index);
+        return { ...current, repo: identity, aliases, id: current.id ?? target.id };
+      });
     }
     return undefined;
   }
@@ -325,22 +360,27 @@ export function knownNamespace(target: Target, artifacts: string): Target {
     const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
     if (relative.length === 2 && relative[1] === "screenshots") linked = relative[0];
   } catch { /* not linked */ }
+  // Namespaces made with --project are extras: chosen implicitly only when nothing else matches.
+  const primary = matches.filter(match => !match.owner.explicit);
   const chosen = matches.find(match => match.entry === linked)
-    ?? matches.find(match => match.canonical && match.entry === target.project)
-    ?? matches.find(match => match.entry === target.project)
-    ?? matches.find(match => match.canonical)
+    ?? primary.find(match => match.canonical && match.entry === target.project)
+    ?? primary.find(match => match.entry === target.project)
+    ?? primary.find(match => match.canonical)
+    ?? primary[0]
     ?? matches[0];
   if (!chosen) return target;
   return { ...target, project: chosen.entry, repo: target.verified ? target.repo : chosen.owner.repo };
 }
 
 /** A namespace's owner file: its repository and the remote names GitHub confirmed for it. */
-function readOwner(file: string): { repo: string; aliases: string[]; id?: string } | undefined {
+interface Owner { repo: string; aliases: string[]; id?: string | undefined; explicit?: boolean | undefined }
+
+function readOwner(file: string): Owner | undefined {
   try {
-    const value = JSON.parse(readFileSync(file, "utf8")) as { repo?: unknown; aliases?: unknown; id?: unknown };
+    const value = JSON.parse(readFileSync(file, "utf8")) as { repo?: unknown; aliases?: unknown; id?: unknown; explicit?: unknown };
     if (typeof value.repo !== "string" || value.repo === "") return undefined;
     const aliases = Array.isArray(value.aliases) ? value.aliases.filter((alias): alias is string => typeof alias === "string") : [];
-    return { repo: value.repo, aliases, ...(typeof value.id === "string" ? { id: value.id } : {}) };
+    return { repo: value.repo, aliases, ...(typeof value.id === "string" ? { id: value.id } : {}), ...(value.explicit === true ? { explicit: true } : {}) };
   } catch { return undefined; }
 }
 

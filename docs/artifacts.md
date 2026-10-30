@@ -117,7 +117,10 @@ it is not, or when `MATRIX_ARTIFACTS_NO_GH` is set), uses the namespace whose
 owner or confirmed aliases match it. A clone whose remote already uses a new
 name finds an older namespace only after one old-name clone has run `link`
 or `capture` online to record the rename. Pass `--project` to choose a
-namespace explicitly, as a repository without a GitHub origin must.
+namespace explicitly, as a repository without a GitHub origin must; such a
+namespace is marked `explicit`, and other clones use it only with the same
+`--project` or when already linked to it. Owner-file updates hold a short
+`repository.json.lock`.
 
 ## Locks
 

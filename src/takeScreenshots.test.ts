@@ -440,13 +440,15 @@ esac
       process.env.PATH = saved.path;
       process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
     }
-    // An extra namespace chosen with --project never replaces the one a clone already uses.
-    expect(await main(["link", "--project", "aaa", "--json"], app, undefined, print)).toBe(1);
-    mkdirSync(path.join(home, "matrix-artifacts/aaa"), { recursive: true });
-    writeFileSync(path.join(home, "matrix-artifacts/aaa/repository.json"), JSON.stringify({ repo: "a2f0/oldname" }));
-    expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
-    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname" });
+    // An extra namespace made with --project never replaces the one a clone already uses,
+    // and an unlinked clone picks the repository's own namespace, not the extra.
     rmSync(path.join(app, LINK));
+    expect(await main(["link", "--project", "aaa", "--apply"], app, undefined, print)).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/aaa/repository.json"), "utf8"))).toMatchObject({ repo: "a2f0/oldname", explicit: true });
+    rmSync(path.join(app, LINK));
+    writeFileSync(path.join(home, "matrix-artifacts/aaa/repository.json"), JSON.stringify({ repo: "a2f0/third", explicit: true }));
+    expect(await main(["status", "--json"], app, undefined, print)).toBe(1);
+    expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname" });
 
     // An owner-only transfer keeps working offline through the confirmed alias, even with the same project name.
     const transferred = path.join(home, "matrix-artifacts", "moved");
@@ -466,6 +468,22 @@ esac
     // A damaged owner file holds the namespace instead of crashing or freeing it.
     writeFileSync(path.join(artifacts, "app", "repository.json"), JSON.stringify({ repo: null }));
     expect(claimNamespace({ name: "app", root: app, project: "app", repo: "a2f0/app" }, artifacts, true)).toContain("unreadable repository.json");
+  });
+
+  test("owner updates from concurrent processes are all kept", async () => {
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-owner-")));
+    temps.push(dir);
+    const file = path.join(dir, "repository.json");
+    writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const script = path.join(dir, "alias.ts");
+    writeFileSync(script, `import { updateOwner } from ${JSON.stringify(module)};
+const alias = process.argv[2]!;
+updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...owner.aliases, alias] });
+`);
+    const children = Array.from({ length: 8 }, (_, index) => Bun.spawn([process.execPath, script, `a2f0/old${index}`]));
+    await Promise.all(children.map(child => child.exited));
+    expect(JSON.parse(readFileSync(file, "utf8")).aliases.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `a2f0/old${index}`));
   });
 
   test("parses commands and rejects options that do not apply", async () => {
