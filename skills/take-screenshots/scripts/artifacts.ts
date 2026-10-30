@@ -85,6 +85,8 @@ export interface Target {
   readonly root: string;
   readonly project: string;
   readonly repo?: string;
+  /** GitHub confirmed `repo`; false when it came from origin's URL alone. */
+  readonly verified?: boolean;
 }
 
 /** Git without hooks, prompts, or variables that bind it to another repository. */
@@ -147,11 +149,12 @@ function canonicalRepo(root: string, parsed?: string): string | undefined {
 export function targetFor(root: string, project?: string, resolve: (root: string, parsed?: string) => string | undefined = canonicalRepo): Target {
   const remote = gitValue(root, "remote", "get-url", "origin");
   const parsed = remote ? githubRepo(remote) : undefined;
-  const repo = resolve(root, parsed) ?? parsed;
+  const canonical = resolve(root, parsed);
+  const repo = canonical ?? parsed;
   if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
   const name = project ?? repo!.split("/")[1]!;
   if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") throw new Error(`'${name}' is not a usable project name`);
-  return { name: path.basename(root), root, project: name, ...(repo ? { repo } : {}) };
+  return { name: path.basename(root), root, project: name, ...(repo ? { repo } : {}), verified: canonical !== undefined };
 }
 
 /** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
@@ -241,6 +244,27 @@ export function existingCase(target: Target, artifacts: string): Target {
   if (entries.includes(target.project)) return target;
   const variant = entries.find(entry => entry.toLowerCase() === target.project.toLowerCase());
   return variant ? { ...target, project: variant } : target;
+}
+
+/**
+ * Offline, origin's URL can still carry a pre-rename name. A clone already
+ * linked into another namespace of this store keeps it, with the owner that
+ * namespace recorded when it was verified, so going offline never moves it.
+ */
+export function linkedNamespace(target: Target, artifacts: string): Target {
+  if (target.verified !== false) return target;
+  let destination: string;
+  try { destination = path.resolve(target.root, readlinkSync(path.join(target.root, LINK))); } catch { return target; }
+  const relative = path.relative(artifacts, destination).split(path.sep);
+  if (relative.length !== 2 || relative[1] !== "screenshots" || relative[0] === target.project || relative[0]!.startsWith(".")) return target;
+  try {
+    const repo = (JSON.parse(readFileSync(path.join(artifacts, relative[0]!, OWNER), "utf8")) as { repo?: unknown }).repo;
+    // Only a namespace owned by the same account under the GitHub name it now has.
+    if (typeof repo === "string" && target.repo && repo.split("/")[0]!.toLowerCase() === target.repo.split("/")[0]!.toLowerCase() && repo.split("/")[1] === relative[0]) {
+      return { ...target, project: relative[0]!, repo };
+    }
+  } catch { /* not a namespace this clone can claim */ }
+  return target;
 }
 
 export function storeDir(target: Target, artifacts: string): string { return path.join(artifacts, target.project, "screenshots"); }
@@ -718,7 +742,7 @@ export async function main(argv: string[], cwd = process.cwd(), runner: Runner =
   if (found.length === 0) { print(options.json ? "[]" : "No repository here captures screenshots."); return 0; }
   const artifacts = artifactsRoot(found[0]!.root);
   if (found.some(target => artifactsRoot(target.root) !== artifacts)) throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
-  const targets = found.map(target => existingCase(target, artifacts));
+  const targets = found.map(target => existingCase(linkedNamespace(target, artifacts), artifacts));
   if (options.command === "status") {
     const entries = targets.map(target => status(target, artifacts));
     if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));
