@@ -314,7 +314,21 @@ try {
     // A group that ignores the grace period is stopped.
     const stubborn = spawn("sh", ["-c", "sleep 30"], { detached: true, stdio: "ignore" });
     await new Promise(done => stubborn.once("spawn", done));
-    expect(await drainGroup(stubborn.pid!, 200, 2_000)).toBe(true);
+    expect(await drainGroup(stubborn.pid!, 200, 2_000)).toBe("stopped");
+
+    // A capture whose leftover workers had to be stopped is incomplete, so it fails.
+    const lingering: Runner = {
+      capture(cwd, _args, env, started) {
+        return new Promise(resolve => {
+          const child = spawn("sh", ["-c", "sleep 30 & exit 0"], { cwd, env, detached: true, stdio: "ignore" });
+          child.once("spawn", () => started(child.pid!));
+          child.once("exit", code => resolve({ code, pgid: child.pid! }));
+        });
+      },
+    };
+    expect(await main(["capture", "--apply"], app, lingering, print, { graceMs: 200, killMs: 2_000 })).toBe(1);
+    expect(readRecord(path.join(home, "matrix-artifacts/app/screenshots"))?.status).toBe("failed");
+    expect(existsSync(lock)).toBe(false);
   });
 
   test("parses commands and rejects options that do not apply", async () => {

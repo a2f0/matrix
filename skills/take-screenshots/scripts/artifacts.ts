@@ -483,19 +483,23 @@ const RUNNER: Runner = {
   },
 };
 
-/** Waits for every process in a group to exit, asking them to stop after `graceMs`; true when the group is empty. */
-export async function drainGroup(pgid: number, graceMs = 30_000, killMs = 10_000): Promise<boolean> {
+/**
+ * Waits for every process in a group to exit, stopping them after `graceMs`.
+ * `exited` means they finished on their own; `stopped` that they had to be
+ * killed, so their output is incomplete; `stuck` that some still run.
+ */
+export async function drainGroup(pgid: number, graceMs = 30_000, killMs = 10_000): Promise<"exited" | "stopped" | "stuck"> {
   const empty = () => !groupAlive(pgid);
   const wait = async (ms: number) => {
     for (const deadline = Date.now() + ms; Date.now() < deadline; await new Promise(done => setTimeout(done, 100))) if (empty()) return true;
     return empty();
   };
-  if (await wait(graceMs)) return true;
-  process.stderr.write(`Capture processes in group ${pgid} outlived the capture; stopping them.\n`);
+  if (await wait(graceMs)) return "exited";
+  process.stderr.write(`Capture processes in group ${pgid} outlived the capture; stopping them, so this capture fails.\n`);
   try { process.kill(-pgid, "SIGTERM"); } catch { /* exited meanwhile */ }
-  if (await wait(killMs)) return true;
+  if (await wait(killMs)) return "stopped";
   try { process.kill(-pgid, "SIGKILL"); } catch { /* exited meanwhile */ }
-  return wait(killMs);
+  return (await wait(killMs)) ? "stopped" : "stuck";
 }
 
 export interface CapturePlan {
@@ -526,7 +530,10 @@ function isDirty(root: string): boolean {
   return checked("status", "--porcelain=v1", "--untracked-files=normal", "--ignore-submodules=none") !== "";
 }
 
-export async function capture(target: Target, artifacts: string, options: { apply: boolean; allowDirty: boolean; args: string[] }, runner: Runner = RUNNER): Promise<CapturePlan> {
+/** How long leftover capture processes get before they are stopped; tests shorten it. */
+export interface Timing { readonly graceMs?: number; readonly killMs?: number }
+
+export async function capture(target: Target, artifacts: string, options: { apply: boolean; allowDirty: boolean; args: string[] }, runner: Runner = RUNNER, timing: Timing = {}): Promise<CapturePlan> {
   if (typeof packageScripts(target.root).screenshots !== "string") {
     throw new Error(`${target.name} has no \`screenshots\` package script; see the take-screenshots skill's repository contract`);
   }
@@ -583,7 +590,7 @@ export async function capture(target: Target, artifacts: string, options: { appl
     let exitCode: number | null = null;
     // Runners that honor SCREENSHOT_OUTPUT_DIR must write through the link, whatever the caller's shell exports.
     const env = { ...process.env, SCREENSHOT_OUTPUT_DIR: path.join(target.root, LINK) };
-    let drained = true;
+    let drained: Awaited<ReturnType<typeof drainGroup>> = "exited";
     try {
       const result = await runner.capture(target.root, options.args, env, pgid => {
         group = pgid;
@@ -591,7 +598,7 @@ export async function capture(target: Target, artifacts: string, options: { appl
         replaceLock(lockFile, { ...holder, pgid });
       });
       exitCode = result.code;
-      if (result.pgid !== undefined) drained = await drainGroup(result.pgid);
+      if (result.pgid !== undefined) drained = await drainGroup(result.pgid, timing.graceMs, timing.killMs);
     } finally {
       // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
       const kept = linkState(target, artifacts).state === "linked";
@@ -599,12 +606,12 @@ export async function capture(target: Target, artifacts: string, options: { appl
       const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
       if (moved) process.stderr.write(`${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`);
       if (!kept) process.stderr.write(`${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`);
-      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept || moved || !drained ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
+      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept || moved || drained !== "exited" ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
       Object.assign(plan, { applied: true, record: finished });
     }
-    if (!drained) throw new Error(`capture processes in group ${group} would not stop; the lock ${lockFile} stays until they are gone`);
+    if (drained === "stuck") throw new Error(`capture processes in group ${group} would not stop; the lock ${lockFile} stays until they are gone`);
     release();
     return plan;
   } catch (error) {
@@ -665,7 +672,7 @@ function describeCapture(entry: StatusEntry): string {
   return `${record.status} ${record.finishedAt ?? record.startedAt} at ${record.commit.slice(0, 10)}${record.branch ? ` (${record.branch})` : ""}, ${where}${flags.length ? `; ${flags.join(", ")}` : ""}`;
 }
 
-export async function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNER, print: (text: string) => void = text => console.log(text)): Promise<number> {
+export async function main(argv: string[], cwd = process.cwd(), runner: Runner = RUNNER, print: (text: string) => void = text => console.log(text), timing: Timing = {}): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) { print(USAGE); return argv.length === 0 ? 2 : 0; }
   const options = parseOptions(argv);
   const { targets } = resolveTargets(cwd, options.names, options.project);
@@ -694,7 +701,7 @@ export async function main(argv: string[], cwd = process.cwd(), runner: Runner =
     return results.some(result => result.blocked) ? 1 : 0;
   }
   if (targets.length !== 1) throw new Error("capture runs one repository at a time; name it");
-  const plan = await capture(targets[0]!, artifacts, { apply: options.apply, allowDirty: options.allowDirty, args: options.captureArgs }, runner);
+  const plan = await capture(targets[0]!, artifacts, { apply: options.apply, allowDirty: options.allowDirty, args: options.captureArgs }, runner, timing);
   if (options.json) print(JSON.stringify(plan, null, 2));
   else if (!plan.applied) {
     print(`Would run \`${plan.command}\` in ${targets[0]!.root} at ${plan.commit.slice(0, 10)}${plan.merged === false ? " (not on origin's default branch)" : ""}, writing ${plan.store}.`);
