@@ -120,7 +120,7 @@ or `capture` online to record the rename. Pass `--project` to choose a
 namespace explicitly, as a repository without a GitHub origin must; such a
 namespace is marked `explicit`, and other clones use it only with the same
 `--project` or when already linked to it. Owner-file updates hold a short
-`repository.json.lock`.
+`repository.json.lock`, which, like the capture lock, is never broken automatically.
 
 ## Locks
 

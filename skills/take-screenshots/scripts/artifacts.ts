@@ -16,7 +16,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import {
-  existsSync, linkSync, lstatSync, statSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync,
+  existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync,
   renameSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -198,17 +198,16 @@ function writeOwner(file: string, owner: Owner): void {
  * clones recording different aliases at once both keep theirs. `change`
  * returns the new owner, or undefined to leave the file alone.
  */
-export function updateOwner(file: string, change: (owner: Owner | undefined) => Owner | undefined): void {
+export function updateOwner(file: string, change: (owner: Owner | undefined) => Owner | undefined, waitMs = 10_000): void {
   const lock = `${file}.lock`;
   const mine = `${lock}.${process.pid}.${process.hrtime.bigint()}`;
   writeFileSync(mine, `${process.pid}\n`, { flag: "wx" });
   try {
-    for (const deadline = Date.now() + 10_000; ;) {
+    for (const deadline = Date.now() + waitMs; ;) {
       try { linkSync(mine, lock); break; } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        // An update takes milliseconds; a lock older than a minute was left by a killed process.
-        try { if (Date.now() - statSync(lock).mtimeMs > 60_000) { unlinkSync(lock); continue; } } catch { continue; }
-        if (Date.now() > deadline) throw new Error(`${lock} is held; remove it if no link or capture is running`);
+        // Never broken automatically: two recovering processes could each remove the other's fresh lock.
+        if (Date.now() > deadline) throw new Error(`${lock} is held; an update takes milliseconds, so if no link or capture is running it was left by a killed process: remove it`);
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
       }
     }
@@ -260,7 +259,9 @@ export function claimNamespace(target: Target, artifacts: string, apply: boolean
   if (idDiffers) return foreign(`${previous!.repo} (another GitHub repository, ${previous!.id})`);
   const priorName = target.alias !== undefined && previous !== undefined
     && [previous.repo, ...previous.aliases].some(name => name.toLowerCase() === target.alias!.toLowerCase());
-  if (owner !== undefined && !same(owner) && target.verified && priorName) {
+  // The same GitHub repository by node id, whatever its name now (a rename back to an earlier name included).
+  const sameId = target.verified === true && target.id !== undefined && previous?.id === target.id;
+  if (owner !== undefined && !same(owner) && target.verified && (priorName || sameId)) {
     if (apply) {
       updateOwner(file, current => {
         if (!current) return undefined;

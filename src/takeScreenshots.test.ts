@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, utimesSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
   acquireLock, artifactsRoot, claimNamespace, drainGroup, existingCase, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
-  type Runner, storeDir, targetFor,
+  type Runner, storeDir, targetFor, updateOwner,
 } from "../skills/take-screenshots/scripts/artifacts";
 
 // Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
@@ -429,6 +429,15 @@ esac
     }
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
     expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/third", aliases: ["a2f0/oldname", "a2f0/newname"], id: "R_old" });
+    // Renamed back to an earlier name, the same repository (same id) keeps its store.
+    write(bin, "gh", "#!/bin/sh\necho a2f0/oldname R_old\n");
+    process.env.PATH = `${bin}:${saved.path}`;
+    delete process.env.MATRIX_ARTIFACTS_NO_GH;
+    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+      process.env.PATH = saved.path;
+      process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
+    }
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toMatchObject({ repo: "a2f0/oldname", id: "R_old" });
     // A different repository that reused the old name (new id) cannot claim the store through the alias.
     write(bin, "gh", "#!/bin/sh\necho a2f0/fourth R_other\n");
     process.env.PATH = `${bin}:${saved.path}`;
@@ -495,6 +504,19 @@ updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...
     const children = Array.from({ length: 8 }, (_, index) => Bun.spawn([process.execPath, script, `a2f0/old${index}`]));
     await Promise.all(children.map(child => child.exited));
     expect(JSON.parse(readFileSync(file, "utf8")).aliases.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `a2f0/old${index}`));
+  });
+
+  test("a held owner lock is never broken automatically", () => {
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-owner-lock-")));
+    temps.push(dir);
+    const file = path.join(dir, "repository.json");
+    writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
+    writeFileSync(`${file}.lock`, "1\n");
+    utimesSync(`${file}.lock`, new Date(0), new Date(0));
+    const started = Date.now();
+    expect(() => updateOwner(file, owner => owner, 200)).toThrow("left by a killed process");
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(existsSync(`${file}.lock`)).toBe(true);
   });
 
   test("parses commands and rejects options that do not apply", async () => {
