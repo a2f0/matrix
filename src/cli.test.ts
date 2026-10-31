@@ -66,6 +66,7 @@ test("audit exits zero only when every selected checkout passes", () => {
 
 /** Services that record output and stand in for GitHub and the registry. */
 const GIB = 1024 ** 3;
+const CLEAN_TEARDOWN = { ok: true, leftover: [], kept: [], stopped: [], untracked: [], worktrees: [], unavailable: [], skipped: [] };
 
 function fakeServices(overrides: Partial<Services> = {}) {
   const writes: string[] = [];
@@ -78,6 +79,7 @@ function fakeServices(overrides: Partial<Services> = {}) {
     // Released long enough ago that a pin without it is past the grace period.
     registryReleases: () => { calls.registry++; return { "0.1.21": "2026-01-01T00:00:00.000Z", "0.1.23": "2026-02-01T00:00:00.000Z" }; },
     diskSpace: () => ({ free: 200 * GIB, total: 500 * GIB }),
+    teardown: () => CLEAN_TEARDOWN,
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -108,6 +110,48 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(markdown).toContain("- Audit (14 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
+});
+
+test("teardown inspects the workspace and each present checkout, and exits 1 while anything remains", () => {
+  const calls: Array<[string, boolean]> = [];
+  const { services, writes } = fakeServices({
+    teardown: (_root, directory, apply) => {
+      calls.push([path.relative(root, directory) || ".", apply]);
+      return directory.endsWith("good") && !apply
+        ? { ...CLEAN_TEARDOWN, ok: false, leftover: [{ id: "0123abcd", label: "site", ports: ["127.0.0.1:4000"] }], untracked: [{ pid: 9, command: "python3 -m http.server", ports: ["*:8000"] }, { pid: 10, command: "zsh", ports: [] }] }
+        : { ...CLEAN_TEARDOWN, stopped: apply ? [{ id: "0123abcd", stopped: true }] : [] };
+    },
+  });
+  expect(main(["teardown"], root, undefined, services)).toBe(1);
+  // The missing checkout is skipped; the workspace comes first.
+  expect(calls).toEqual([[".", false], ["checkouts/good", false]]);
+  expect(JSON.parse(writes.join(""))).toEqual({
+    ok: false,
+    applied: false,
+    repos: [
+      { repo: "workspace", path: root, ok: true, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [] },
+      { repo: "a2f0/good", path: path.join(root, "checkouts", "good"), ok: false, leftover: ["site (0123abcd) on 127.0.0.1:4000"], listeners: ["pid 9 on *:8000: python3 -m http.server"], kept: [], stopped: [], worktrees: [], problems: [] },
+    ],
+  });
+  calls.length = 0; writes.length = 0;
+  expect(main(["teardown", "good", "--apply"], root, undefined, services)).toBe(0);
+  expect(calls).toEqual([["checkouts/good", true]]);
+  expect(JSON.parse(writes.join(""))).toMatchObject({ ok: true, applied: true, repos: [{ repo: "a2f0/good", stopped: ["0123abcd"] }] });
+  // One repository failing to inspect is reported, and the rest still run.
+  const failing = fakeServices({ teardown: (_root, directory) => { if (directory === root) throw new Error("agent-tool teardown could not run: ENOENT"); return CLEAN_TEARDOWN; } });
+  expect(main(["teardown"], root, undefined, failing.services)).toBe(1);
+  expect(JSON.parse(failing.writes.join("")).repos.map((item: { repo: string; ok: boolean; problems: string[] }) => [item.repo, item.ok, item.problems])).toEqual([
+    ["workspace", false, ["agent-tool teardown could not run: ENOENT"]],
+    ["a2f0/good", true, []],
+  ]);
+});
+
+test("health suggests stopping what teardown finds", () => {
+  const { services, writes } = fakeServices({ teardown: (_root, directory) => directory === root ? CLEAN_TEARDOWN : { ...CLEAN_TEARDOWN, ok: false, unavailable: ["listening ports (lsof)"] } });
+  expect(main(["health", "--markdown"], root, undefined, services)).toBe(0);
+  const markdown = writes.join("");
+  expect(markdown).toContain("- Running: teardown fails in a2f0/good.");
+  expect(markdown).toContain("1. Stop what earlier work left running in a2f0/good: `bun run teardown` lists it, `--apply` stops recorded processes, and untracked ones need stopping by hand.");
 });
 
 test("health rejects arguments it does not take", () => {

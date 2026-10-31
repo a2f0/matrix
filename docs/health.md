@@ -12,11 +12,25 @@ bun run health --remote --markdown
 
 It reads and reports only, and always exits 0; `bun run audit` is the check
 that fails. Suggestions come in this order: free disk space below 50 GiB on the
-volume holding the checkouts, checkouts that are not ready, stale installs,
+volume holding the checkouts, repositories where `bun run teardown` fails,
+checkouts that are not ready, stale installs,
 repositories to onboard or that discovery lost, failing audit rules, recurring
 sweep friction without a recorded resolution, unfinished sweep entries, and
 unmanaged checkout entries. JSON output has the same parts for agents;
 `--markdown` is for people.
+
+## Leftover processes
+
+`bun run teardown [repo...]` runs agent-tool's `teardown` for the workspace and
+every present checkout (or only the named ones), with the workspace's pinned
+agent-tool and `--repo`. It lists processes recorded with `agent-tool proc
+start` that still run, untracked processes inside a repository that listen on a
+port, kept processes, and added worktrees, and exits 1 while anything remains or
+an inspection fails. `--apply` stops recorded processes that were not started
+with `--keep`; untracked processes and worktrees are only reported. Inside a
+single checkout, `agent-tool teardown` is the same check, and the shared
+`ship-pr`, `open-pr`, and `reset` skills run it before reporting work done, in
+every harness.
 
 ## Freeing disk space
 
