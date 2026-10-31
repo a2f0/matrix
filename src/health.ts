@@ -1,6 +1,7 @@
 import type { Audit } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
 import { notReady, type Recurrence, type Retro } from "./sweeps";
+import type { Teardown } from "./teardown";
 
 /** Bytes available to this user, and the volume's size. */
 export interface DiskSpace {
@@ -24,6 +25,8 @@ export interface HealthInputs {
   readonly disk?: DiskSpace;
   /** Present only with --remote, which asks GitHub for the owner's repositories. */
   readonly discovery?: { added: string[]; notDiscovered: string[] };
+  /** What the workspace and its checkouts still run, from `matrix teardown`. */
+  readonly running?: Teardown;
 }
 
 export interface Health {
@@ -41,6 +44,8 @@ export interface Health {
   readonly audit: { readonly rules: string[]; readonly failures: Record<string, string[]>; readonly unaudited: string[] };
   readonly discovery?: { added: string[]; notDiscovered: string[] };
   readonly disk?: DiskSpace & { readonly low: boolean };
+  /** Repositories where teardown fails: earlier work left something running, or could not be inspected. */
+  readonly running?: { readonly leftover: string[] };
   readonly sweeps: {
     readonly read: string[];
     readonly recurring: Array<Pick<Recurrence, "kind" | "cause" | "repos" | "sweeps">>;
@@ -48,7 +53,7 @@ export interface Health {
     readonly resolved: Array<Pick<Recurrence, "kind" | "cause">>;
     readonly unfinished: Retro["unfinished"];
   };
-  /** Highest-leverage work first: disk space, checkout state, new repositories, standards, then friction. */
+  /** Highest-leverage work first: disk space, leftover processes, checkout state, new repositories, standards, then friction. */
   readonly suggestions: string[];
 }
 
@@ -70,6 +75,8 @@ export function assessHealth(inputs: HealthInputs): Health {
   const suggestions: string[] = [];
   const low = inputs.disk !== undefined && inputs.disk.free < MIN_FREE_DISK_GIB * GIB;
   if (low) suggestions.push(`Free disk space before the next sweep: ${gib(inputs.disk!.free)} free of ${gib(inputs.disk!.total)}; validation needs at least ${MIN_FREE_DISK_GIB} GiB; \`bun run space\` lists what is safe to remove.`);
+  const leftover = inputs.running?.repos.filter(item => !item.ok).map(item => item.repo) ?? [];
+  if (leftover.length > 0) suggestions.push(`Stop what earlier work left running in ${list(leftover)}: \`bun run teardown\` lists it, \`--apply\` stops recorded processes, and untracked ones need stopping by hand.`);
   for (const { repo, reason } of notReadyList) suggestions.push(`Inspect ${repo} before the next sweep: ${reason}.`);
   if (staleInstalls.length > 0) suggestions.push(`Reinstall dependencies in ${list(staleInstalls)}; their node_modules hold a different agent-tool than they pin.`);
   for (const repo of inputs.discovery?.added ?? []) suggestions.push(`Onboard ${repo}: \`bun run discover --apply\`, then the onboarding steps in AGENTS.md.`);
@@ -93,6 +100,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     },
     ...(inputs.discovery && { discovery: inputs.discovery }),
     ...(inputs.disk && { disk: { ...inputs.disk, low } }),
+    ...(inputs.running && { running: { leftover } }),
     sweeps: {
       read: inputs.retro.sweeps,
       recurring: inputs.retro.recurring.map(({ kind, cause, repos, sweeps }) => ({ kind, cause, repos, sweeps })),
@@ -105,7 +113,7 @@ export function assessHealth(inputs: HealthInputs): Health {
 
 /** The report as Markdown, for a person, a scheduled run's message, or an issue. */
 export function markdownHealth(health: Health, at = new Date()): string {
-  const { checkouts, audit, discovery, disk, sweeps } = health;
+  const { checkouts, audit, discovery, disk, running, sweeps } = health;
   const failing = Object.entries(audit.failures);
   const lines = [
     "# Matrix health",
@@ -118,6 +126,7 @@ export function markdownHealth(health: Health, at = new Date()): string {
       ...(audit.unaudited.length > 0 ? [`${list(audit.unaudited)} not audited`] : []),
     ].join("; ")}.`,
     ...(disk ? [`- Disk: ${gib(disk.free)} free of ${gib(disk.total)}${disk.low ? `, under the ${MIN_FREE_DISK_GIB} GiB a sweep needs` : ""}.`] : []),
+    ...(running ? [`- Running: ${running.leftover.length === 0 ? "nothing left running" : `teardown fails in ${list(running.leftover)}`}.`] : []),
     `- Discovery: ${discovery ? (discovery.added.length + discovery.notDiscovered.length === 0 ? "matrix.json matches the owner's repositories" : `${plural(discovery.added.length, "new repository", "new repositories")}, ${discovery.notDiscovered.length} no longer found`) : "not checked; run with --remote"}.`,
     `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no unresolved recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}${sweeps.resolved.length > 0 ? ` (${sweeps.resolved.length} resolved)` : ""}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`,
     "",

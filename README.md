@@ -35,6 +35,7 @@ bun run status
 | `bun run discover [--apply]` | Compare `matrix.json` with the owner's repositories; `--apply` adds new ones |
 | `bun run audit [repo...] [--rule <id>]... [--remote]` | Check checkouts against the shared standards; `--remote` also fails agent-tool pins that trail a release by a week |
 | `bun run health [--remote] [--markdown]` | Combine disk space, status, audit, discovery, and sweep friction into suggested next steps |
+| `bun run teardown [repo...] [--apply]` | Report what the workspace and each checkout still run (recorded processes, untracked listeners, worktrees); `--apply` stops recorded processes |
 | `bun run space [repo...] [--builds] [--deps] [--machine] [--apply]` | List regenerable, git-ignored output and caches to free disk space; `--apply` removes them |
 | `bun run artifacts <status\|link\|capture> [repo...] [--apply]` | Share screenshots through `../matrix-artifacts`: link each clone's `.screenshots`, capture under a lock, and report each capture's commit |
 | `bun run perf <serve\|measure\|shot\|diff\|graph> [args...] [--from checkouts/<name>]` | Measure page load from a checkout: serve a build over HTTP/2, time cold loads to a ready signal, and diff screenshots for fidelity |

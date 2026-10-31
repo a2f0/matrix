@@ -43,7 +43,8 @@
           "src/git.ts",
           "src/manifest.ts",
           "src/markdown.ts",
-          "src/options.ts"
+          "src/options.ts",
+          "src/teardown.ts"
         ]
       },
       {

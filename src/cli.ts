@@ -1,12 +1,14 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, statfsSync, writeSync } from "node:fs";
 import path from "node:path";
 import { audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
 import { assessHealth, type DiskSpace, markdownHealth } from "./health";
-import { cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
+import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
 import { deployAll, type Gh, runGh, secretsRoot } from "./secrets";
+import { type AgentToolTeardown, teardownAll } from "./teardown";
 import { knownCauses, listSweeps, markdownReport, parseUpdate, recordEntry, recordResolution, retro, startSweep, sweepReport } from "./sweeps";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
@@ -35,6 +37,9 @@ export const HELP = `Usage: matrix <command>
                         Group friction across sweeps; recurring causes need a lesson
   sweep resolve <kind> <cause> --resolution text [--pr url]
                         Record a recurring cause's fix, guidance, or decision
+  teardown [repo...] [--apply]
+                        What the workspace and each checkout still run (agent-tool teardown);
+                        --apply stops recorded processes. Exits 1 while anything remains
   --help
 
 Repos are owner/name or checkout name; none selects all. Output is JSON.
@@ -51,6 +56,17 @@ export interface Services {
   listOwnerRepos(discover: Manifest["discover"]): string[];
   registryReleases(name: string): Record<string, string>;
   diskSpace(directory: string): DiskSpace;
+  /** agent-tool's `teardown` for one repository, run with the workspace's pinned agent-tool. */
+  teardown(root: string, directory: string, apply: boolean): AgentToolTeardown;
+}
+
+function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
+  const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), ["--repo", directory, "teardown", ...(apply ? ["--apply"] : [])], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (result.error) throw new Error(`agent-tool teardown could not run: ${result.error.message}`);
+  // It exits 1 when something remains, with the same report.
+  if (result.status !== 0 && result.status !== 1) throw new Error(`agent-tool teardown failed: ${(result.stderr || result.stdout).trim().split("\n").at(-1) ?? `exit ${result.status}`}`);
+  try { return JSON.parse(result.stdout) as AgentToolTeardown; }
+  catch { throw new Error(`agent-tool teardown printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`); }
 }
 
 function diskSpace(directory: string): DiskSpace {
@@ -64,7 +80,14 @@ const SERVICES: Services = {
   listOwnerRepos,
   registryReleases,
   diskSpace,
+  teardown,
 };
+
+/** The workspace, then every checkout present, or only the named checkouts. */
+function teardownTargets(root: string, manifest: Manifest, names: string[]): Array<{ repo: string; path: string }> {
+  const checkouts = selectRepos(manifest, names).map(repo => ({ repo, path: checkoutPath(root, repo) })).filter(target => existsSync(target.path));
+  return names.length > 0 ? checkouts : [{ repo: "workspace", path: root }, ...checkouts];
+}
 
 function json(services: Services, value: unknown): void { services.write(`${JSON.stringify(value, null, 2)}\n`); }
 
@@ -212,6 +235,7 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
       audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry(services)),
       retro: retro(root),
       disk: services.diskSpace(root),
+      running: teardownAll(teardownTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
       ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
     });
     if (booleans.has("markdown")) services.write(markdownHealth(health));
@@ -219,5 +243,11 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
     return 0;
   }
   if (command === "sweep") return sweepCommand(args, root, manifest, services);
+  if (command === "teardown") {
+    const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "teardown");
+    const result = teardownAll(teardownTargets(root, manifest, positional), (directory, apply) => services.teardown(root, directory, apply), booleans.has("apply"));
+    output(result);
+    return result.ok ? 0 : 1;
+  }
   throw new Error(`Unknown command '${command}'. Run matrix --help.`);
 }

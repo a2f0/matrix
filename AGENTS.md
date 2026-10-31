@@ -74,6 +74,7 @@ when a session has no specific task. Its suggestions are proposals: acting on
 one still needs a request that authorizes it. To free disk space, here or in any
 repository, follow the [space-cleanup skill](skills/space-cleanup/SKILL.md);
 to speed up page loads, the [performance-pass skill](skills/performance-pass/SKILL.md).
+Before reporting work done, `bun run teardown` must pass.
 
 ## Onboarding a repository
 
