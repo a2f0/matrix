@@ -10,7 +10,7 @@
 //   diff <a.png> <b.png>                count differing pixels between two screenshots
 //   graph <dir> <entry...>              an ES module's relative static and dynamic imports
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createSecureServer, type Http2ServerRequest, type Http2ServerResponse } from "node:http2";
 import { createRequire } from "node:module";
@@ -33,6 +33,7 @@ export interface Options {
   out: string | undefined;
   hide: string | undefined;
   eval: string | undefined;
+  from: string | undefined;
   waterfall: boolean;
   profile: boolean;
   json: boolean;
@@ -41,14 +42,14 @@ export interface Options {
 }
 
 const NUMBERS = new Set(["runs", "latency", "mbps", "cpu", "width", "height", "port"]);
-const STRINGS = new Set(["ready", "out", "hide", "eval"]);
+const STRINGS = new Set(["ready", "out", "hide", "eval", "from"]);
 const FLAGS = new Set(["waterfall", "profile", "json", "seed", "http1"]);
 
 export function parseOptions(argv: string[]): Options {
   const options: Options = {
     command: argv[0] ?? "help", args: [], ready: "document.readyState === 'complete'",
     runs: 5, latency: 40, mbps: 20, cpu: 1, width: 1600, height: 900, port: 8765,
-    out: undefined, hide: undefined, eval: undefined, waterfall: false, profile: false, json: false, seed: true, http1: false,
+    out: undefined, hide: undefined, eval: undefined, from: undefined, waterfall: false, profile: false, json: false, seed: true, http1: false,
   };
   const record = options as unknown as Record<string, unknown>;
   for (let i = 1; i < argv.length; i += 1) {
@@ -129,25 +130,47 @@ function certificate(): { key: Buffer; cert: Buffer } {
  * `no-cache` with an ETag. Paths outside `root` 404.
  */
 export function serve(root: string, port: number, http1 = false) {
-  const base = path.resolve(root);
+  const base = realpathSync(path.resolve(root));
   const cache = new Map<string, { key: string; body: Buffer }>();
+  // The file a path names, resolved through symlinks, or undefined when that leaves the root.
+  const inside = (pathname: string) => {
+    try {
+      const file = realpathSync(path.resolve(base, `.${pathname}`));
+      return file.startsWith(base + path.sep) && statSync(file).isFile() ? file : undefined;
+    } catch { return undefined; }
+  };
+  const compressed = (file: string, etag: string, body: Buffer) => {
+    if (cache.get(file)?.key !== etag) cache.set(file, { key: etag, body: gzipSync(body, { level: 9 }) });
+    return cache.get(file)!.body;
+  };
+  // Compress every text file before serving, so the first measured load pays no compression.
+  // Symlinked directories are left to be compressed on request.
+  const warm = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) { warm(full); continue; }
+      const file = inside(`/${path.relative(base, full).split(path.sep).join("/")}`);
+      if (!file || !COMPRESSED.has(path.extname(file).toLowerCase())) continue;
+      const stats = statSync(file);
+      compressed(file, `"${stats.size}-${stats.mtimeMs}"`, readFileSync(file));
+    }
+  };
+  warm(base);
   const handler = (request: IncomingMessage | Http2ServerRequest, raw: ServerResponse | Http2ServerResponse) => {
     const response = raw as unknown as { writeHead(status: number, headers?: Record<string, string>): { end(body?: Buffer): unknown } };
-    let pathname = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);
+    let pathname: string;
+    try { pathname = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname); } catch { pathname = ""; }
     if (pathname.endsWith("/")) pathname += "index.html";
-    const file = path.resolve(base, `.${pathname}`);
-    let stats;
-    try { stats = file.startsWith(base + path.sep) ? statSync(file) : undefined; } catch { stats = undefined; }
-    if (!stats?.isFile()) { response.writeHead(404).end(); return; }
+    const file = pathname ? inside(pathname) : undefined;
+    if (!file) { response.writeHead(404).end(); return; }
+    const stats = statSync(file);
     const extension = path.extname(file).toLowerCase();
     const etag = `"${stats.size}-${stats.mtimeMs}"`;
     const headers: Record<string, string> = { "content-type": TYPES[extension] ?? "application/octet-stream", "cache-control": "no-cache", etag };
     if (request.headers["if-none-match"] === etag) { response.writeHead(304, headers).end(); return; }
     let body: Buffer = readFileSync(file);
     if (COMPRESSED.has(extension) && /\bgzip\b/.test(String(request.headers["accept-encoding"] ?? ""))) {
-      const held = cache.get(file);
-      if (held?.key !== etag) cache.set(file, { key: etag, body: gzipSync(body, { level: 9 }) });
-      body = cache.get(file)!.body;
+      body = compressed(file, etag, body);
       headers["content-encoding"] = "gzip";
     }
     response.writeHead(200, headers).end(body);
@@ -159,17 +182,25 @@ export function serve(root: string, port: number, http1 = false) {
 // A deterministic Math.random for screenshots, so randomly placed decoration matches between rounds.
 const SEED_SCRIPT = "{ let s = 0x2545f491; Math.random = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; }";
 
-async function chromium() {
-  const require = createRequire(path.join(process.cwd(), "package.json"));
+async function chromium(from = process.cwd()) {
+  const require = createRequire(path.join(path.resolve(from), "package.json"));
   let resolved: string;
   try { resolved = require.resolve("playwright"); } catch {
-    throw new Error("perf.ts drives Chrome through the measured repository's `playwright`; run it from a repository that installs it.");
+    throw new Error(`perf.ts drives Chrome through the measured repository's \`playwright\`, which ${path.resolve(from)} does not install; run it there or pass --from <repository>.`);
   }
   const playwright = await import(resolved);
   return (playwright.chromium ?? playwright.default.chromium).launch({ channel: "chrome", args: ["--ignore-gpu-blocklist", "--enable-gpu"] });
 }
 
 interface Request { url: string; start: number; end?: number; bytes?: number }
+
+/**
+ * Opens the page and returns once its navigation commits, so a ready signal that comes before
+ * the `load` event is timed when it comes, and slow unrelated assets cannot hold the wait.
+ */
+export function navigate(page: { goto(url: string, options: { waitUntil: "commit" }): Promise<unknown> }, url: string): Promise<unknown> {
+  return page.goto(url, { waitUntil: "commit" });
+}
 
 async function load(browser: any, url: string, options: Options, capture: { profile?: boolean; seed?: boolean } = {}) {
   // The local server's certificate is self-signed.
@@ -199,7 +230,7 @@ async function load(browser: any, url: string, options: Options, capture: { prof
       await cdp.send("Profiler.start");
     }
     const started = Date.now();
-    await page.goto(url);
+    await navigate(page, url);
     await page.waitForFunction(options.ready, null, { timeout: 180_000, polling: 20 });
     const ready = Date.now() - started;
     const profile = capture.profile ? (await cdp.send("Profiler.stop")).profile : undefined;
@@ -235,7 +266,7 @@ export function profileTable(profile: { nodes: any[]; samples: number[]; timeDel
 async function measure(options: Options) {
   const url = options.args[0];
   if (!url) throw new Error("measure needs a URL.");
-  const browser = await chromium();
+  const browser = await chromium(options.from);
   try {
     const samples: number[] = [];
     let first: { requests: Request[]; profile: unknown } | undefined;
@@ -251,7 +282,9 @@ async function measure(options: Options) {
       url, conditions: { latencyMs: options.latency, mbps: options.mbps || "unthrottled", cpuSlowdown: options.cpu, viewport: `${options.width}x${options.height}` },
       readyMs: summarize(samples), samples,
       requests: requests.length, transferredBytes: requests.reduce((sum, request) => sum + (request.bytes ?? 0), 0),
-      networkDoneMs: Math.round((Math.max(...requests.map((request) => request.end ?? request.start)) - origin) * 1000),
+      networkDoneMs: Math.round((Math.max(origin, ...requests.flatMap((request) => request.end === undefined ? [] : [request.end])) - origin) * 1000),
+      // Requests still loading, or failed, when the page was ready: network-done excludes them.
+      pendingRequests: requests.filter((request) => request.end === undefined).length,
       waterfall: options.waterfall ? requests.sort((a, b) => a.start - b.start).map((request) => ({
         start: Math.round((request.start - origin) * 1000), end: request.end === undefined ? null : Math.round((request.end - origin) * 1000),
         bytes: request.bytes ?? null, path: request.url.replace(/^https?:\/\/[^/]+/, ""),
@@ -261,7 +294,7 @@ async function measure(options: Options) {
     if (options.json) { console.log(JSON.stringify(report, null, 2)); return; }
     const { readyMs } = report;
     console.log(`${url}  ready median ${readyMs.median} ms (min ${readyMs.min}, max ${readyMs.max}, ${readyMs.runs} runs)`);
-    console.log(`  ${report.requests} requests, ${report.transferredBytes} bytes, network done at ${report.networkDoneMs} ms; ${JSON.stringify(report.conditions)}`);
+    console.log(`  ${report.requests} requests, ${report.transferredBytes} bytes, network done at ${report.networkDoneMs} ms${report.pendingRequests ? ` (${report.pendingRequests} still pending)` : ""}; ${JSON.stringify(report.conditions)}`);
     for (const row of report.waterfall ?? []) console.log(`  ${String(row.start).padStart(6)} ${String(row.end ?? "-").padStart(6)} ${String(row.bytes ?? "").padStart(8)} ${row.path}`);
     if (report.cpu) {
       console.log("  CPU self (ms):");
@@ -277,7 +310,7 @@ async function measure(options: Options) {
 async function shot(options: Options) {
   const url = options.args[0];
   if (!url || !options.out) throw new Error("shot needs a URL and --out <png>.");
-  const browser = await chromium();
+  const browser = await chromium(options.from);
   try {
     const result = await load(browser, url, { ...options, latency: 0, mbps: 0, cpu: 1 }, { seed: options.seed });
     // An interaction to compare after, such as switching a mode on; it may return a promise.
@@ -297,7 +330,7 @@ async function shot(options: Options) {
 async function diff(options: Options) {
   const [a, b] = options.args;
   if (!a || !b) throw new Error("diff needs two PNG paths.");
-  const browser = await chromium();
+  const browser = await chromium(options.from);
   try {
     const page = await browser.newPage();
     const result = await page.evaluate(async ([first, second]: [string, string]) => {

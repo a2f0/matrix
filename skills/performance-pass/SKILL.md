@@ -12,15 +12,16 @@ pixel, a mesh, or a behaviour is a regression, not a win.
 
 ## The measuring script
 
-`scripts/perf.ts` beside this file runs under Bun from the repository being
-measured, driving Chrome through that repository's own `playwright`. From the
-matrix workspace it is `bun run perf <command>`; elsewhere,
+`scripts/perf.ts` beside this file runs under Bun and drives Chrome through
+the measured repository's own `playwright`, found from the working directory
+or `--from <repository>`. From the matrix workspace it is
+`bun run perf <command> --from checkouts/<name>`; inside a repository,
 `bun <skill-dir>/scripts/perf.ts <command>`.
 
 | Command | Does |
 | --- | --- |
-| `serve <dir> [--port N] [--http1]` | Serves a production build over HTTP/2 with gzip and ETag revalidation, as a CDN does. Run it in the background. |
-| `measure <url> --ready <js>` | Cold, cache-disabled loads; prints the median time until the `--ready` expression is true, requests, bytes, and when the network finished. `--waterfall` lists requests; `--profile` adds the first run's CPU self and inclusive times. |
+| `serve <dir> [--port N] [--http1]` | Serves a production build over HTTP/2 with gzip (compressed before the first request) and ETag revalidation, as a CDN does, never following links out of the directory. Run it in the background. |
+| `measure <url> --ready <js>` | Cold, cache-disabled loads timed from navigation commit; prints the median time until the `--ready` expression is true, requests, bytes, when the finished requests ended, and how many were still pending. `--waterfall` lists requests; `--profile` adds the first run's CPU self and inclusive times. |
 | `shot <url> --ready <js> --out <png>` | Screenshot of the ready state with a seeded `Math.random`, for fidelity diffs. `--eval <js>` runs an interaction first (switch a mode on); `--hide <css>` hides random decoration, reaching into open shadow roots. |
 | `diff <a.png> <b.png>` | Counts differing pixels; exits 1 on any. |
 | `graph <dir> <entry...>` | Relative static and dynamic import closure of ES modules. |
