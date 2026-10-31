@@ -37,6 +37,7 @@ bun run status
 | `bun run health [--remote] [--markdown]` | Combine disk space, status, audit, discovery, and sweep friction into suggested next steps |
 | `bun run space [repo...] [--builds] [--deps] [--machine] [--apply]` | List regenerable, git-ignored output and caches to free disk space; `--apply` removes them |
 | `bun run artifacts <status\|link\|capture> [repo...] [--apply]` | Share screenshots through `../matrix-artifacts`: link each clone's `.screenshots`, capture under a lock, and report each capture's commit |
+| `bun run perf <serve\|measure\|shot\|diff\|graph> [args...] [--from checkouts/<name>]` | Measure page load from a checkout: serve a build over HTTP/2, time cold loads to a ready signal, and diff screenshots for fidelity |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
 | `bun run sweep <start\|record\|report\|list\|retro>` | Record a sweep's per-repository ledger and group its friction across sweeps |

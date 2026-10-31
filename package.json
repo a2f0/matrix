@@ -18,6 +18,7 @@
     "sweep": "bun src/index.ts sweep",
     "space": "bun skills/space-cleanup/scripts/space-cleanup.ts",
     "artifacts": "bun skills/take-screenshots/scripts/artifacts.ts",
+    "perf": "bun skills/performance-pass/scripts/perf.ts",
     "secrets:backup": "bash scripts/secrets/backupSecrets.sh",
     "secrets:deploy": "bun src/index.ts deploy-secrets",
     "typecheck": "tsc --noEmit",
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@a2f0/agent-tool": "0.1.30",
     "@types/bun": "1.4.3",
+    "playwright": "1.64.1",
     "typescript": "7.0.2"
   }
 }
