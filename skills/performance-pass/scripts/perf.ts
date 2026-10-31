@@ -6,7 +6,7 @@
 //
 //   serve <dir> [--port 8765]           serve a production build, compressed, revalidating
 //   measure <url> --ready <js> [...]    cold loads: median time to ready, requests, bytes
-//   shot <url> --ready <js> --out <png> a seeded screenshot of the ready state; --hide <css>
+//   shot <url> --ready <js> --out <png> a seeded screenshot of the ready state; --eval <js>, --hide <css>
 //   diff <a.png> <b.png>                count differing pixels between two screenshots
 //   graph <dir> <entry...>              an ES module's relative static and dynamic imports
 import { spawnSync } from "node:child_process";
@@ -32,6 +32,7 @@ export interface Options {
   port: number;
   out: string | undefined;
   hide: string | undefined;
+  eval: string | undefined;
   waterfall: boolean;
   profile: boolean;
   json: boolean;
@@ -40,14 +41,14 @@ export interface Options {
 }
 
 const NUMBERS = new Set(["runs", "latency", "mbps", "cpu", "width", "height", "port"]);
-const STRINGS = new Set(["ready", "out", "hide"]);
+const STRINGS = new Set(["ready", "out", "hide", "eval"]);
 const FLAGS = new Set(["waterfall", "profile", "json", "seed", "http1"]);
 
 export function parseOptions(argv: string[]): Options {
   const options: Options = {
     command: argv[0] ?? "help", args: [], ready: "document.readyState === 'complete'",
     runs: 5, latency: 40, mbps: 20, cpu: 1, width: 1600, height: 900, port: 8765,
-    out: undefined, hide: undefined, waterfall: false, profile: false, json: false, seed: true, http1: false,
+    out: undefined, hide: undefined, eval: undefined, waterfall: false, profile: false, json: false, seed: true, http1: false,
   };
   const record = options as unknown as Record<string, unknown>;
   for (let i = 1; i < argv.length; i += 1) {
@@ -279,7 +280,9 @@ async function shot(options: Options) {
   const browser = await chromium();
   try {
     const result = await load(browser, url, { ...options, latency: 0, mbps: 0, cpu: 1 }, { seed: options.seed });
-    // Let a frame or two settle after the ready signal.
+    // An interaction to compare after, such as switching a mode on; it may return a promise.
+    if (options.eval) await result.page.evaluate(options.eval);
+    // Let a frame or two settle after the ready signal or the interaction.
     await result.page.waitForTimeout(500);
     // Decoration that is random by design, hidden by a CSS selector that reaches into open shadow roots.
     if (options.hide) await result.page.locator(options.hide).evaluateAll((elements: HTMLElement[]) => elements.forEach((element) => { element.style.visibility = "hidden"; }));

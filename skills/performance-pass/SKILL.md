@@ -21,7 +21,7 @@ matrix workspace it is `bun run perf <command>`; elsewhere,
 | --- | --- |
 | `serve <dir> [--port N] [--http1]` | Serves a production build over HTTP/2 with gzip and ETag revalidation, as a CDN does. Run it in the background. |
 | `measure <url> --ready <js>` | Cold, cache-disabled loads; prints the median time until the `--ready` expression is true, requests, bytes, and when the network finished. `--waterfall` lists requests; `--profile` adds the first run's CPU self and inclusive times. |
-| `shot <url> --ready <js> --out <png>` | Screenshot of the ready state with a seeded `Math.random`, for fidelity diffs. |
+| `shot <url> --ready <js> --out <png>` | Screenshot of the ready state with a seeded `Math.random`, for fidelity diffs. `--eval <js>` runs an interaction first (switch a mode on); `--hide <css>` hides random decoration, reaching into open shadow roots. |
 | `diff <a.png> <b.png>` | Counts differing pixels; exits 1 on any. |
 | `graph <dir> <entry...>` | Relative static and dynamic import closure of ES modules. |
 
@@ -85,4 +85,11 @@ phone's CPU, not the network, is often what remains.
   a shadow root) and should be removed once loading settles; skip assets a
   host replaces, such as a shared engine.
 - Medians of one or two runs are noise; run at least five, seven for a
-  close call.
+  close call. Check `uptime` first: other sessions' test suites inflate the
+  CPU-throttled profile most. Under load, interleave base and change runs,
+  and back a CPU change with `--profile`, comparing the changed function's
+  inclusive time against what remains, rather than wall medians alone.
+- Deferring work is only output-neutral if nothing the deferred work reads
+  changes before it runs. Find every writer of its inputs and make it run
+  before the first one, then test a deferred instance against an eager one
+  step by step.

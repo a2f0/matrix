@@ -3,6 +3,14 @@
 Cross-repository findings from performance passes, newest first. Each names
 the repository and PR it came from; recheck before relying on one.
 
+## Layers that change nothing until used can wait for first use
+
+skyline built its colour-trial layer, which reads every vertex of every
+building, before the first frame, though its shaders install only when colour,
+a previewed time or a celebration is used. Making it on first use (and before
+a celebration rewrites the greys it reads) took its 160 to 270 ms off the
+first frame, pixel-identical in seven before/after interaction shots.
+
 ## Unbundled ES module graphs pay one round trip per import level
 
 skyline (a2f0/skyline) ships tsc output without a bundler, so the viewer's
