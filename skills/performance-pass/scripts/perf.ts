@@ -84,6 +84,7 @@ export function summarize(samples: number[]): { median: number; min: number; max
  * The source with comments blanked and every string literal's contents replaced by a
  * placeholder, keeping its quotes, so a scan for imports sees neither commented-out imports nor
  * text that only looks like one. Specifiers are kept in `strings`, indexed by placeholder.
+ * Regular expression literals are not recognised: a quote inside one can hide later imports.
  */
 function tokens(source: string): { code: string; strings: string[] } {
   let code = "", i = 0;
