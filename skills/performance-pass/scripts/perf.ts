@@ -17,7 +17,7 @@ import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
+import { gzipSync, inflateSync } from "node:zlib";
 
 export interface Options {
   command: string;
@@ -80,15 +80,49 @@ export function summarize(samples: number[]): { median: number; min: number; max
   return { median: Math.round(median), min: sorted[0]!, max: sorted.at(-1)!, runs: sorted.length };
 }
 
+/**
+ * The source with comments blanked and every string literal's contents replaced by a
+ * placeholder, keeping its quotes, so a scan for imports sees neither commented-out imports nor
+ * text that only looks like one. Specifiers are kept in `strings`, indexed by placeholder.
+ */
+function tokens(source: string): { code: string; strings: string[] } {
+  let code = "", i = 0;
+  const strings: string[] = [];
+  while (i < source.length) {
+    const char = source[i]!, next = source[i + 1];
+    if (char === "/" && next === "/") { while (i < source.length && source[i] !== "\n") i += 1; continue; }
+    if (char === "/" && next === "*") { const end = source.indexOf("*/", i + 2); i = end < 0 ? source.length : end + 2; code += " "; continue; }
+    if (char === "'" || char === '"' || char === "`") {
+      let j = i + 1, text = "";
+      while (j < source.length && source[j] !== char) {
+        if (source[j] === "\\") { text += source[j]! + (source[j + 1] ?? ""); j += 2; continue; }
+        text += source[j]!;
+        j += 1;
+      }
+      code += `${char}${strings.length}${char}`;
+      strings.push(text);
+      i = j + 1;
+      continue;
+    }
+    code += char;
+    i += 1;
+  }
+  return { code, strings };
+}
+
 /** Relative imports of an ES module's source: static `import`/`export from`, bare `import "x"`, and literal `import("x")`. */
 export function importsOf(source: string): string[] {
+  const { code, strings } = tokens(source);
   const found = new Set<string>();
   const patterns = [
-    /(?:^|[;\s}])(?:import|export)\s[^;'"]*?\sfrom\s*["']([^"']+)["']/g,
-    /(?:^|[;\s])import\s*["']([^"']+)["']/g,
-    /\bimport\s*\(\s*(?:\/\*[^]*?\*\/\s*)*["']([^"']+)["']\s*\)/g,
+    /(?:^|[^\w$.])(?:import|export)\b[^;'"`]*?\bfrom\s*["'](\d+)["']/g,
+    /(?:^|[^\w$.])import\s*["'](\d+)["']/g,
+    /(?:^|[^\w$.])import\s*\(\s*["'](\d+)["']\s*\)/g,
   ];
-  for (const pattern of patterns) for (const match of source.matchAll(pattern)) if (match[1]!.startsWith(".")) found.add(match[1]!);
+  for (const pattern of patterns) for (const match of code.matchAll(pattern)) {
+    const specifier = strings[Number(match[1])]!;
+    if (specifier.startsWith(".")) found.add(specifier);
+  }
   return [...found];
 }
 
@@ -176,7 +210,8 @@ export function serve(root: string, port: number, http1 = false) {
     response.writeHead(200, headers).end(body);
   };
   const server = http1 ? createServer(handler) : createSecureServer({ ...certificate(), allowHTTP1: true }, handler);
-  return server.listen(port, () => console.log(`Serving ${base} at ${http1 ? "http" : "https"}://localhost:${(server.address() as AddressInfo).port}/`));
+  // Loopback only: the build is for this machine's browser, not the network.
+  return server.listen(port, "127.0.0.1", () => console.log(`Serving ${base} at ${http1 ? "http" : "https"}://127.0.0.1:${(server.address() as AddressInfo).port}/`));
 }
 
 // A deterministic Math.random for screenshots, so randomly placed decoration matches between rounds.
@@ -263,7 +298,8 @@ export function profileTable(profile: { nodes: any[]; samples: number[]; timeDel
   return { self: top(self), inclusive: top(total) };
 }
 
-async function measure(options: Options) {
+/** Times cold loads of `options.args[0]` and reports them; `measure` prints the report. */
+export async function measureLoad(options: Options) {
   const url = options.args[0];
   if (!url) throw new Error("measure needs a URL.");
   const browser = await chromium(options.from);
@@ -291,8 +327,16 @@ async function measure(options: Options) {
       })) : undefined,
       cpu: first!.profile ? profileTable(first!.profile as any) : undefined,
     };
+    return report;
+  } finally {
+    await browser.close();
+  }
+}
+
+async function measure(options: Options) {
+    const report = await measureLoad(options);
     if (options.json) { console.log(JSON.stringify(report, null, 2)); return; }
-    const { readyMs } = report;
+    const { url, readyMs } = report;
     console.log(`${url}  ready median ${readyMs.median} ms (min ${readyMs.min}, max ${readyMs.max}, ${readyMs.runs} runs)`);
     console.log(`  ${report.requests} requests, ${report.transferredBytes} bytes, network done at ${report.networkDoneMs} ms${report.pendingRequests ? ` (${report.pendingRequests} still pending)` : ""}; ${JSON.stringify(report.conditions)}`);
     for (const row of report.waterfall ?? []) console.log(`  ${String(row.start).padStart(6)} ${String(row.end ?? "-").padStart(6)} ${String(row.bytes ?? "").padStart(8)} ${row.path}`);
@@ -302,12 +346,9 @@ async function measure(options: Options) {
       console.log("  CPU inclusive (ms):");
       for (const row of report.cpu.inclusive) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
     }
-  } finally {
-    await browser.close();
-  }
 }
 
-async function shot(options: Options) {
+export async function shot(options: Options): Promise<void> {
   const url = options.args[0];
   if (!url || !options.out) throw new Error("shot needs a URL and --out <png>.");
   const browser = await chromium(options.from);
@@ -327,43 +368,75 @@ async function shot(options: Options) {
   }
 }
 
-async function diff(options: Options) {
+/** An 8-bit RGB or RGBA, non-interlaced PNG, as Chrome writes screenshots, decoded to RGBA. */
+export function decodePng(file: Buffer): { width: number; height: number; data: Uint8Array } {
+  if (file.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("Not a PNG.");
+  let width = 0, height = 0, channels = 0;
+  const chunks: Buffer[] = [];
+  for (let at = 8; at < file.length;) {
+    const length = file.readUInt32BE(at), type = file.toString("latin1", at + 4, at + 8), body = file.subarray(at + 8, at + 8 + length);
+    if (type === "IHDR") {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      const [depth, colour, , , interlace] = [body[8], body[9], body[10], body[11], body[12]];
+      channels = colour === 6 ? 4 : colour === 2 ? 3 : 0;
+      if (depth !== 8 || !channels || interlace !== 0) throw new Error("Only 8-bit RGB or RGBA, non-interlaced PNGs are supported.");
+    } else if (type === "IDAT") chunks.push(body);
+    at += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(chunks)), stride = width * channels;
+  const pixels = new Uint8Array(stride * height), data = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)]!, row = y * stride;
+    for (let x = 0; x < stride; x += 1) {
+      const value = raw[y * (stride + 1) + 1 + x]!;
+      const left = x >= channels ? pixels[row + x - channels]! : 0, up = y ? pixels[row - stride + x]! : 0;
+      const corner = x >= channels && y ? pixels[row - stride + x - channels]! : 0;
+      let predicted = 0;
+      if (filter === 1) predicted = left;
+      else if (filter === 2) predicted = up;
+      else if (filter === 3) predicted = (left + up) >> 1;
+      else if (filter === 4) {
+        const estimate = left + up - corner, a = Math.abs(estimate - left), b = Math.abs(estimate - up), c = Math.abs(estimate - corner);
+        predicted = a <= b && a <= c ? left : b <= c ? up : corner;
+      }
+      pixels[row + x] = (value + predicted) & 255;
+    }
+  }
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    for (let c = 0; c < channels; c += 1) data[pixel * 4 + c] = pixels[pixel * channels + c]!;
+    if (channels === 3) data[pixel * 4 + 3] = 255;
+  }
+  return { width, height, data };
+}
+
+/** Counts the pixels that differ between two PNG screenshots; `diff` prints the result. */
+export function compareImages(options: Options) {
   const [a, b] = options.args;
   if (!a || !b) throw new Error("diff needs two PNG paths.");
-  const browser = await chromium(options.from);
-  try {
-    const page = await browser.newPage();
-    const result = await page.evaluate(async ([first, second]: [string, string]) => {
-      const decode = async (data: string) => {
-        const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${data}`)).blob());
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-        const context = canvas.getContext("2d")!;
-        context.drawImage(bitmap, 0, 0);
-        return context.getImageData(0, 0, bitmap.width, bitmap.height);
-      };
-      const [x, y] = await Promise.all([decode(first), decode(second)]);
-      if (x.width !== y.width || x.height !== y.height) return { sizeMismatch: true, differing: -1, total: 0, maxChannelDelta: 255, cells: [] };
-      // Differences per 50-pixel cell, so a few moved stars read differently from a changed building.
-      const CELL = 50, cells = new Map<string, number>();
-      let differing = 0, maxChannelDelta = 0;
-      for (let i = 0; i < x.data.length; i += 4) {
-        let pixel = 0;
-        for (let c = 0; c < 4; c += 1) pixel = Math.max(pixel, Math.abs(x.data[i + c]! - y.data[i + c]!));
-        if (pixel > 0) {
-          differing += 1;
-          const index = i / 4, key = `${Math.floor((index % x.width) / CELL) * CELL},${Math.floor(index / x.width / CELL) * CELL}`;
-          cells.set(key, (cells.get(key) ?? 0) + 1);
-        }
-        maxChannelDelta = Math.max(maxChannelDelta, pixel);
-      }
-      const busiest = [...cells].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([at, pixels]) => ({ at, pixels }));
-      return { sizeMismatch: false, differing, total: x.width * x.height, maxChannelDelta, cells: busiest };
-    }, [readFileSync(a).toString("base64"), readFileSync(b).toString("base64")] as [string, string]);
-    console.log(JSON.stringify(result));
-    if (result.differing !== 0) process.exitCode = 1;
-  } finally {
-    await browser.close();
+  const x = decodePng(readFileSync(a)), y = decodePng(readFileSync(b));
+  if (x.width !== y.width || x.height !== y.height) return { sizeMismatch: true, differing: -1, total: 0, maxChannelDelta: 255, cells: [] as { at: string; pixels: number }[] };
+  // Differences per 50-pixel cell, so a few moved stars read differently from a changed building.
+  const CELL = 50, cells = new Map<string, number>();
+  let differing = 0, maxChannelDelta = 0;
+  for (let i = 0; i < x.data.length; i += 4) {
+    let pixel = 0;
+    for (let c = 0; c < 4; c += 1) pixel = Math.max(pixel, Math.abs(x.data[i + c]! - y.data[i + c]!));
+    if (pixel > 0) {
+      differing += 1;
+      const index = i / 4, key = `${Math.floor((index % x.width) / CELL) * CELL},${Math.floor(index / x.width / CELL) * CELL}`;
+      cells.set(key, (cells.get(key) ?? 0) + 1);
+    }
+    maxChannelDelta = Math.max(maxChannelDelta, pixel);
   }
+  const busiest = [...cells].sort((first, second) => second[1] - first[1]).slice(0, 20).map(([at, pixels]) => ({ at, pixels }));
+  return { sizeMismatch: false, differing, total: x.width * x.height, maxChannelDelta, cells: busiest };
+}
+
+function diff(options: Options) {
+  const result = compareImages(options);
+  console.log(JSON.stringify(result));
+  if (result.differing !== 0) process.exitCode = 1;
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
