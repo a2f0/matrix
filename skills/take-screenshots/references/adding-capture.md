@@ -18,7 +18,7 @@ app's routes, seed data, and devices.
   `.screenshots` itself, and leaves `capture.json` alone.
 - Builds never capture. A `build:*` or deploy script reads `.screenshots`
   only. A build that publishes screenshots checks `.screenshots/capture.json`
-  (see [deploy guard](#deploy-guard)).
+  (see [deploy guard and gallery](#deploy-guard-and-gallery)).
 - Document the prerequisites and output layout in the repository's own docs,
   and point agents at this skill from `AGENTS.md` in one sentence.
 
@@ -45,7 +45,10 @@ and `packages/app-web/screenshots/`):
 - One project per layout:
   - `web`: `viewport: { width: 1440, height: 900 }`, `deviceScaleFactor: 2`;
   - `ipad`: `...devices["iPad Pro 11"]`;
-  - `mobile`: `...devices["iPhone 13"]`;
+  - `mobile`: `...devices["iPhone 13"]` with `viewport` and `screen` set to
+    `{ width: 390, height: 844 }`, the full phone screen of an installed app
+    (1170x2532 PNGs). The profile's own 390x664 viewport is Safari's visible
+    area and makes framed phones look too wide;
   - `browserName: "chromium"` for all three, so output does not depend on
     WebKit; the device profiles still give touch input, viewport, and scale.
 - Its own `webServer` entries on fixed, repository-specific ports with
@@ -76,55 +79,33 @@ The pattern nc uses (`scripts/testing/takeIosScreenshots.sh`,
 - Maestro's driver uses port 7001 for every device, so one Maestro run drives
   this machine at a time: check for a running `maestro` before starting.
 
-## Deploy guard
+## Deploy guard and gallery
 
-A build that copies screenshots into a site or upload checks the record before
-and after copying. Every capture writes a `running` record before it touches
-an image, so an unchanged `complete` record on both sides proves no capture
-overlapped the copy:
+A website that publishes screenshots stages them with
+`agent-tool screenshots build <target>` from the pinned `@a2f0/agent-tool`
+(0.1.32 or later), configured in the `screenshots` section of
+`agent-tool.json`, rather than its own copy script. It copies the allowlisted
+`<project>/<theme>/<screen>.png` files with content-hashed URLs and writes a
+manifest, and it checks `.screenshots/capture.json` before and after copying.
+Every capture writes a `running` record before it touches an image, so an
+unchanged `complete` record on both sides proves no capture overlapped the
+copy. It refuses a capture that is not complete, names no 40-hex commit, is
+dirty, or changed meanwhile, and a linked, non-empty store with no record
+(its images have no known commit, as after `link` moves an older capture into
+the store). A missing or plain `.screenshots` (CI, an unlinked clone) builds
+with what it holds, or an empty manifest.
 
-```ts
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
+Pages render that manifest with the package's framework-free elements from
+`@a2f0/agent-tool/screenshots/gallery` and its stylesheet:
+`<screenshot-gallery>` for a `/screenshots/[...slug]` route (deep links per
+project and screen, a scrolling stage, a filmstrip, phone bezels) and
+`<screenshot-carousel>` for a looping row of every phone screen on a home
+page. Sites theme them with `--shots-*` custom properties. The package's
+`docs/screenshots.md` has the configuration, attributes, and an Astro example;
+tearleads and balebase are the references.
 
-interface CaptureRecord { status?: string; commit?: string; dirty?: boolean; finishedAt?: string; args?: string[] }
-
-function readCapture(screenshotsDir: string): string | undefined {
-  try {
-    return readFileSync(path.join(screenshotsDir, "capture.json"), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-/** Copies shared screenshots only from a finished, committed capture that no capture overlapped. */
-export async function withSharedCapture<T>(screenshotsDir: string, copy: () => Promise<T>): Promise<T> {
-  const before = readCapture(screenshotsDir);
-  // CI and unlinked clones have a plain directory, or none; the shared store always has a record.
-  const shared = lstatSync(screenshotsDir, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
-  if (before === undefined && shared && readdirSync(screenshotsDir).length > 0) {
-    throw new Error("The shared screenshots have no capture record; capture once through the take-screenshots skill.");
-  }
-  if (before !== undefined) {
-    const record = JSON.parse(before) as CaptureRecord;
-    if (record.status !== "complete") throw new Error(`The shared screenshot capture is ${record.status}; wait for it or recapture.`);
-    if (typeof record.commit !== "string" || !/^[0-9a-f]{40}$/.test(record.commit)) throw new Error("The shared screenshot capture record names no commit; recapture.");
-    if (record.dirty !== false) throw new Error("The shared screenshots were captured from uncommitted changes; recapture from a commit.");
-    const partial = record.args?.length ? ` (partial: ${record.args.join(" ")})` : "";
-    console.log(`Screenshots from ${record.commit?.slice(0, 10)}, captured ${record.finishedAt}${partial}.`);
-  }
-  const result = await copy();
-  if (readCapture(screenshotsDir) !== before) throw new Error("A screenshot capture started while copying; build again once it finishes.");
-  return result;
-}
-```
-
-Without a record, a plain `.screenshots` directory (CI, or a clone not yet
-linked) builds as before, but a linked, non-empty store does not: its images
-have no known commit, as after `link` moves an older capture into the store,
-until one capture through the skill records them. Copy into the build
-output inside `copy`, and publish only what was copied.
+A non-website consumer (a store upload) that copies captures itself must apply
+the same before-and-after record check.
 
 ## Build caches
 
