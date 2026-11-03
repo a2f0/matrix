@@ -346,6 +346,27 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "screenshots-gallery",
+    summary: "A website that shows captured screenshots stages them with agent-tool's screenshots build, not a copied guard",
+    source: "docs/artifacts.md#repository-contract",
+    check: checkout => {
+      const script = object(checkout.packageJson?.scripts)?.screenshots;
+      const websites = checkout.tracked(":(glob)**/astro.config.*");
+      if (typeof script !== "string" || websites.length === 0) return skip("no website that shows captured screenshots");
+      const found: string[] = [];
+      const targets = object(object(json(checkout.read("agent-tool.json"))?.screenshots)?.targets);
+      if (!targets || Object.keys(targets).length === 0) found.push("agent-tool.json declares no screenshots targets");
+      // A declared target proves nothing unless some build or dev script runs it.
+      const scripts = checkout.tracked(":(glob)**/package.json")
+        .flatMap(file => Object.values(object(object(json(checkout.read(file)))?.scripts) ?? {}));
+      if (!scripts.some(value => typeof value === "string" && /\bagent-tool\b[^&|;]*\sscreenshots build\b/.test(value))) found.push("no package script runs agent-tool screenshots build");
+      const copies = checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)**/*.${extension}`))
+        .filter(file => !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
+      if (copies.length > 0) found.push(`copies the capture guard: ${copies.join(", ")}`);
+      return problems(found);
+    },
+  },
+  {
     id: "harness-permissions",
     summary: "Generated harness permission rules, checked wherever managed skills are",
     source: "docs/tooling.md#harness-permissions",
