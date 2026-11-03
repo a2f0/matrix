@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { AGENT_TOOL_GRACE_DAYS, type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
+import { AGENT_TOOL_GRACE_DAYS, AGENTS_MD_MAX_CHARS, type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
 
 let root: string;
@@ -83,6 +83,14 @@ describe("audit", () => {
       "ds-store-ignored": "root .gitignore does not list .DS_Store",
       "output-capture": "no AGENTS.md for the Output capture section",
     });
+  });
+
+  test("counts characters, not bytes, in every AGENTS.md against the context limit", () => {
+    const at = (chars: number) => GUIDANCE + "x".repeat(chars - GUIDANCE.length);
+    // Multi-byte characters count once: 20,000 of them pass although they take 60,000 bytes.
+    expect(failures(checkout("at-limit", { "AGENTS.md": GUIDANCE + "€".repeat(AGENTS_MD_MAX_CHARS - GUIDANCE.length), "packages/web/AGENTS.md": at(AGENTS_MD_MAX_CHARS) }))["agents-md-size"]).toBeUndefined();
+    expect(failures(checkout("over", { "AGENTS.md": at(AGENTS_MD_MAX_CHARS + 1), "packages/web/AGENTS.md": at(45_248) }))["agents-md-size"])
+      .toBe(`AGENTS.md has ${AGENTS_MD_MAX_CHARS + 1} characters; packages/web/AGENTS.md has 45248 characters; the limit is ${AGENTS_MD_MAX_CHARS}`);
   });
 
   test("reads the working tree, so an unstaged deletion fails", () => {
