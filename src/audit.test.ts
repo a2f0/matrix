@@ -202,6 +202,8 @@ describe("audit", () => {
     const target = JSON.stringify({ screenshots: { targets: { website: { dir: "packages/website/public/shots" } } } });
     expect(rule("unused", { "package.json": capture, "packages/website/astro.config.ts": "export default {};\n", "agent-tool.json": target }))
       .toBe("no package script runs agent-tool screenshots build");
+    expect(rule("capture-script", { "package.json": JSON.stringify({ scripts: { screenshots: "sh capture.sh", build: "bun run screenshots build website" } }), "packages/website/astro.config.ts": "export default {};\n", "agent-tool.json": target }))
+      .toBe("no package script runs agent-tool screenshots build");
     expect(rule("shared", {
       "package.json": capture,
       "packages/website/astro.config.ts": "export default {};\n",
