@@ -41,4 +41,5 @@ not retarget the PR concurrently with merging.
 Confirm GitHub reports MERGED before any cleanup. A failed or uncertain mutation
 is not evidence of a merge. Preserve the branch on failure. After a confirmed
 merge, perform checkout cleanup only when requested or as part of an authorized
-shipping workflow. Report the PR and merge result.
+shipping workflow, with `agent-tool repo cleanup <PR-number> <reviewed-head>
+--apply` rather than raw `git branch -D`. Report the PR and merge result.
