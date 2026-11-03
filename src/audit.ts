@@ -188,6 +188,9 @@ function managedSkills(checkout: Checkout): string[] {
 
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
 
+/** Hermes truncates a context file past this many characters (Unicode code points), dropping its middle. */
+export const AGENTS_MD_MAX_CHARS = 20_000;
+
 export const RULES: readonly Rule[] = [
   {
     id: "agents-md",
@@ -196,6 +199,18 @@ export const RULES: readonly Rule[] = [
     check: checkout => {
       if (checkout.tracked("AGENTS.md").length === 0) return fail("no tracked AGENTS.md at the root");
       return checkout.read("AGENTS.md") === undefined ? fail("AGENTS.md is tracked but missing from the working tree") : pass;
+    },
+  },
+  {
+    id: "agents-md-size",
+    summary: `Every AGENTS.md fits Hermes's ${AGENTS_MD_MAX_CHARS.toLocaleString("en-US")}-character context limit`,
+    source: "docs/tooling.md#agent-guidance",
+    check: checkout => {
+      const oversized = checkout.tracked(":(glob)**/AGENTS.md").flatMap(file => {
+        const chars = [...checkout.read(file) ?? ""].length;
+        return chars > AGENTS_MD_MAX_CHARS ? [`${file} has ${chars} characters`] : [];
+      });
+      return oversized.length === 0 ? pass : fail(`${oversized.join("; ")}; the limit is ${AGENTS_MD_MAX_CHARS}`);
     },
   },
   {

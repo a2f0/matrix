@@ -251,6 +251,11 @@ such as verification reports or hook receipts, after it. An `AGENTS.md`
 without sections carries the same text as a paragraph. READMEs do not mention
 output capture.
 
+Every `AGENTS.md`, at the root or nested, stays within 20,000 characters.
+Hermes loads it into the system prompt and, past that floor, keeps only its
+head and tail; Claude Code warns from 40,000. Move reference material into
+`docs/` and link it, rather than letting the guidance grow.
+
 ```markdown
 ## Output capture
 
