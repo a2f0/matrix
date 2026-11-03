@@ -62,6 +62,7 @@ describe("audit", () => {
     expect(result.checkouts[0]).toMatchObject({ repo, failed: [], skipped: [
       { rule: "brand-images", detail: "no assets/brand" },
       { rule: "screenshots-store", detail: "captures no screenshots" },
+      { rule: "screenshots-gallery", detail: "no website that shows captured screenshots" },
       { rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" },
     ] });
     expect(result.checkouts[1]).toMatchObject({ repo: "a2f0/missing", error: "checkout missing; run sync" });
@@ -183,6 +184,24 @@ describe("audit", () => {
     expect(rule("unignored", { "package.json": JSON.stringify({ scripts: { screenshots: "sh capture.sh" } }) }))
       .toBe("the root .gitignore does not list .screenshots without a trailing slash");
     expect(rule("ok", { ".gitignore": ".DS_Store\n/.screenshots\n", "package.json": JSON.stringify({ scripts: { screenshots: "sh capture.sh" } }) })).toBeUndefined();
+  });
+
+  test("requires websites that show captures to stage them with agent-tool", () => {
+    const rule = (name: string, files: Record<string, string>) => failures(checkout(name, files), ["screenshots-gallery"])["screenshots-gallery"];
+    const capture = JSON.stringify({ scripts: { screenshots: "sh capture.sh" } });
+    expect(rule("store-only", { "package.json": capture })).toBeUndefined();
+    expect(rule("site-only", { "packages/website/astro.config.ts": "export default {};\n" })).toBeUndefined();
+    expect(rule("copied", {
+      "package.json": capture,
+      "packages/website/astro.config.ts": "export default {};\n",
+      "packages/website/scripts/sharedCapture.ts": "export async function withSharedCapture() {}\n",
+      "packages/website/scripts/sharedCapture.test.ts": "withSharedCapture\n",
+    })).toBe("agent-tool.json declares no screenshots targets; copies the capture guard: packages/website/scripts/sharedCapture.ts");
+    expect(rule("shared", {
+      "package.json": capture,
+      "packages/website/astro.config.ts": "export default {};\n",
+      "agent-tool.json": JSON.stringify({ screenshots: { targets: { website: { dir: "packages/website/public/shots" } } } }),
+    })).toBeUndefined();
   });
 
   test("requires an import-cycle guard that counts type-only imports wherever TypeScript or a Python package exists", () => {

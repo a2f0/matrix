@@ -152,7 +152,8 @@ A repository that captures screenshots:
 - keeps build caches honest: a cached task that copies screenshots must hash
   them through the link, or run uncached.
 
-`bun run audit --rule screenshots-store` checks the script and ignore pattern.
+`bun run audit --rule screenshots-store` checks the script and ignore pattern, and
+`--rule screenshots-gallery` checks that a website stages captures with agent-tool.
 [Adding capture to a repository](../skills/take-screenshots/references/adding-capture.md)
 describes the shared capture conventions.
 
