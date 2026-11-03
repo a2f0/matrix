@@ -146,8 +146,9 @@ A repository that captures screenshots:
   non-empty store with no record, and printing the capture's commit (a
   website does this with agent-tool's `screenshots build` and renders the
   result with its gallery elements);
-- captures phones at the full 390x844 screen, so framed phones keep a real
-  phone's proportions;
+- captures browser phone layouts at the full 390x844 screen, so framed phones
+  keep a real phone's proportions (native store captures keep each device's
+  required size);
 - keeps build caches honest: a cached task that copies screenshots must hash
   them through the link, or run uncached.
 
