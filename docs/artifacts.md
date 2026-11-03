@@ -143,7 +143,11 @@ A repository that captures screenshots:
   a build that publishes screenshots reads `.screenshots/capture.json` before
   and after copying them, failing on a `running`, `failed`, `incomplete`, or
   `dirty` capture, a record that changed during the copy, or a linked,
-  non-empty store with no record, and printing the capture's commit;
+  non-empty store with no record, and printing the capture's commit (a
+  website does this with agent-tool's `screenshots build` and renders the
+  result with its gallery elements);
+- captures phones at the full 390x844 screen, so framed phones keep a real
+  phone's proportions;
 - keeps build caches honest: a cached task that copies screenshots must hash
   them through the link, or run uncached.
 
