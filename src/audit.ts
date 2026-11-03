@@ -356,8 +356,12 @@ export const RULES: readonly Rule[] = [
       const found: string[] = [];
       const targets = object(object(json(checkout.read("agent-tool.json"))?.screenshots)?.targets);
       if (!targets || Object.keys(targets).length === 0) found.push("agent-tool.json declares no screenshots targets");
+      // A declared target proves nothing unless some build or dev script runs it.
+      const scripts = checkout.tracked(":(glob)**/package.json")
+        .flatMap(file => Object.values(object(object(json(checkout.read(file)))?.scripts) ?? {}));
+      if (!scripts.some(value => typeof value === "string" && /\bscreenshots build\b/.test(value))) found.push("no package script runs agent-tool screenshots build");
       const copies = checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)**/*.${extension}`))
-        .filter(file => !/\.test\.[cm]?[jt]s$/.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
+        .filter(file => !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
       if (copies.length > 0) found.push(`copies the capture guard: ${copies.join(", ")}`);
       return problems(found);
     },

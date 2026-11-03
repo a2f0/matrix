@@ -196,11 +196,17 @@ describe("audit", () => {
       "packages/website/astro.config.ts": "export default {};\n",
       "packages/website/scripts/sharedCapture.ts": "export async function withSharedCapture() {}\n",
       "packages/website/scripts/sharedCapture.test.ts": "withSharedCapture\n",
-    })).toBe("agent-tool.json declares no screenshots targets; copies the capture guard: packages/website/scripts/sharedCapture.ts");
+      "packages/website/scripts/sharedCapture.spec.ts": "withSharedCapture\n",
+      "packages/website/__tests__/guard.ts": "withSharedCapture\n",
+    })).toBe("agent-tool.json declares no screenshots targets; no package script runs agent-tool screenshots build; copies the capture guard: packages/website/scripts/sharedCapture.ts");
+    const target = JSON.stringify({ screenshots: { targets: { website: { dir: "packages/website/public/shots" } } } });
+    expect(rule("unused", { "package.json": capture, "packages/website/astro.config.ts": "export default {};\n", "agent-tool.json": target }))
+      .toBe("no package script runs agent-tool screenshots build");
     expect(rule("shared", {
       "package.json": capture,
       "packages/website/astro.config.ts": "export default {};\n",
-      "agent-tool.json": JSON.stringify({ screenshots: { targets: { website: { dir: "packages/website/public/shots" } } } }),
+      "agent-tool.json": target,
+      "packages/website/package.json": JSON.stringify({ scripts: { prebuild: "agent-tool --repo ../.. screenshots build website" } }),
     })).toBeUndefined();
   });
 
