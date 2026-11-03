@@ -53,6 +53,7 @@
       "Bash(bun run agent-tool teardown *)",
       "Bash(bun run agent-tool branch push *)",
       "Bash(bun run agent-tool pr open *)",
+      "Bash(bun run agent-tool pr cancel-runs *)",
       "Bash(bun run agent-tool pr threads reply *)",
       "Bash(bun run agent-tool pr threads resolve *)",
       "Bash(bun run agent-tool checkVersions *)",
@@ -113,6 +114,7 @@
       "Bash(node_modules/.bin/agent-tool teardown *)",
       "Bash(node_modules/.bin/agent-tool branch push *)",
       "Bash(node_modules/.bin/agent-tool pr open *)",
+      "Bash(node_modules/.bin/agent-tool pr cancel-runs *)",
       "Bash(node_modules/.bin/agent-tool pr threads reply *)",
       "Bash(node_modules/.bin/agent-tool pr threads resolve *)",
       "Bash(node_modules/.bin/agent-tool checkVersions *)",
@@ -173,6 +175,7 @@
       "Bash(agent-tool teardown *)",
       "Bash(agent-tool branch push *)",
       "Bash(agent-tool pr open *)",
+      "Bash(agent-tool pr cancel-runs *)",
       "Bash(agent-tool pr threads reply *)",
       "Bash(agent-tool pr threads resolve *)",
       "Bash(agent-tool checkVersions *)",
@@ -187,6 +190,6 @@
   },
   "codex": {
     "file": ".codex/rules/agent-tool.rules",
-    "sha256": "b9f965350a26504fdcfb6e3ed95aeba265aae120bc060fb06e4b91edadca9ea8"
+    "sha256": "b6f1d2ceb30f75dc9b80584cb972daa2b5ddea9ec7d011e81523e25862bff574"
   }
 }

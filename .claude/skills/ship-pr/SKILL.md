@@ -57,7 +57,10 @@ command, so they can be found and stopped.
    Validate, commit, push, and independently review every feedback or CI repair.
    Wait with `agent-tool pr checks --wait --head <reviewed-head>`, whose limit
    defaults to `agent-tool.json` `merge.checksTimeoutSeconds`; when a job
-   fails, read its log with `agent-tool pr logs --head <reviewed-head>`. Then run
+   fails, read its log with `agent-tool pr logs --head <reviewed-head>`. When it
+   stops with `behind: true`, the base moved: cancel the stale head's CI with
+   `agent-tool pr cancel-runs --head <reviewed-head>`, integrate the reported
+   base, validate, review, push the new head, and wait on it. Then run
    `agent-tool pr preflight <reviewed-head> <base-branch> <reviewed-base>` to
    recheck CI, live base, PR identity, local state, and explicit version policy.
    A changed base requires integration, validation, and another review. When

@@ -92,15 +92,15 @@ prefix_rule(pattern=["agent-tool", "proc", "stop"], decision="allow", match=["ag
 
 # share: Publishes work for review without changing a shared branch: pushes a feature branch, opens a PR, or answers review threads.
 prefix_rule(pattern=["bun", "run", "agent-tool", "branch", "push"], decision="allow", match=["bun run agent-tool branch push"])
-prefix_rule(pattern=["bun", "run", "agent-tool", "pr", "open"], decision="allow", match=["bun run agent-tool pr open"])
+prefix_rule(pattern=["bun", "run", "agent-tool", "pr", ["open", "cancel-runs"]], decision="allow", match=["bun run agent-tool pr open"])
 prefix_rule(pattern=["bun", "run", "agent-tool", "pr", "threads", ["reply", "resolve"]], decision="allow", match=["bun run agent-tool pr threads reply"])
 prefix_rule(pattern=["bun", "run", "agent-tool", "openPr"], decision="allow", match=["bun run agent-tool openPr"])
 prefix_rule(pattern=["node_modules/.bin/agent-tool", "branch", "push"], decision="allow", match=["node_modules/.bin/agent-tool branch push"])
-prefix_rule(pattern=["node_modules/.bin/agent-tool", "pr", "open"], decision="allow", match=["node_modules/.bin/agent-tool pr open"])
+prefix_rule(pattern=["node_modules/.bin/agent-tool", "pr", ["open", "cancel-runs"]], decision="allow", match=["node_modules/.bin/agent-tool pr open"])
 prefix_rule(pattern=["node_modules/.bin/agent-tool", "pr", "threads", ["reply", "resolve"]], decision="allow", match=["node_modules/.bin/agent-tool pr threads reply"])
 prefix_rule(pattern=["node_modules/.bin/agent-tool", "openPr"], decision="allow", match=["node_modules/.bin/agent-tool openPr"])
 prefix_rule(pattern=["agent-tool", "branch", "push"], decision="allow", match=["agent-tool branch push"])
-prefix_rule(pattern=["agent-tool", "pr", "open"], decision="allow", match=["agent-tool pr open"])
+prefix_rule(pattern=["agent-tool", "pr", ["open", "cancel-runs"]], decision="allow", match=["agent-tool pr open"])
 prefix_rule(pattern=["agent-tool", "pr", "threads", ["reply", "resolve"]], decision="allow", match=["agent-tool pr threads reply"])
 prefix_rule(pattern=["agent-tool", "openPr"], decision="allow", match=["agent-tool openPr"])
 
