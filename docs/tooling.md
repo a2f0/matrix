@@ -283,7 +283,7 @@ Repositories that do not use Bun's test runner keep `agent:run` for their tests;
 Agents can work without blanket approval when routine commands run freely and
 consequential ones ask. agent-tool assigns each of its commands a permission
 class and generates Claude Code and Codex rules from them, as its
-[permissions guide](https://github.com/a2f0/agent-tool/blob/43e8334cc4001442fb1faf6c14099dac8c1739a2/docs/permissions.md)
+[permissions guide](https://github.com/a2f0/agent-tool/blob/b1b9d0419233082bb5f4946566c2e84605ae42f3/docs/permissions.md)
 describes. Every managed repository that pins agent-tool:
 
 - commits the generated `.claude/settings.json`, `.codex/rules/agent-tool.rules`,

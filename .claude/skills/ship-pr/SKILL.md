@@ -66,9 +66,12 @@ command, so they can be found and stopped.
    A changed base requires integration, validation, and another review. When
    versions are managed, `agent-tool versions check <base-oid>` must pass for the
    live base. Use the squash-merge skill to merge the exact reviewed HEAD.
-5. After confirmed MERGED, use the reset skill to return to the updated default
-   branch and prune the shipped local feature branch as part of cleanup, honoring
-   stronger repository cleanup rules. If the user requested keep-branch, preserve
+5. After confirmed MERGED, follow the reset skill: run
+   `agent-tool repo cleanup <PR-number> <reviewed-head> --apply` to return to the
+   updated default branch and prune the shipped feature branch, honoring
+   stronger repository cleanup rules. Never prune with raw `git branch -D` or
+   `git push --delete`: the cleanup command checks the merge and both refs
+   first, and harness command guards prompt for raw force deletes. If the user requested keep-branch, preserve
    both feature refs. Check the cleanup receipt and verify the local feature ref
    is absent unless preserved; report incomplete cleanup explicitly. Apply
    documented dependency/hook setup.
