@@ -93,9 +93,10 @@ serve deploys and source maps, and an organization token there carries only
 `org:ci`, which cannot read issues or events.
 
 `scripts/sentry/mcp.sh` starts the stdio Sentry MCP server (exact version pinned
-in the script) with that token, and replaces any `SENTRY_AUTH_TOKEN` inherited
-from a repository's environment. It runs from matrix against the public npm
-registry, so a checkout's `.npmrc` or npm settings cannot choose the package.
+in the script) with that token. It drops the caller's environment except locale
+and terminal settings, runs `npx` from system tool directories only, and pins
+the npm registry from matrix, so a checkout's `SENTRY_AUTH_TOKEN`, `PATH`,
+`NODE_OPTIONS`, or `.npmrc` cannot reach the process that holds the token.
 Register it once per harness by absolute path from the primary clone, so no
 harness configuration holds the value:
 
