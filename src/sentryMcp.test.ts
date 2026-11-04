@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ROOT } from "./cli";
@@ -76,5 +76,33 @@ test("ignores the caller's directory and inherited npm configuration", () => {
   expect(result.status).toBe(0);
   const lines = result.stdout.trim().split("\n");
   expect(lines).toContain(`cwd=${realpathSync(ROOT)}`);
-  expect(lines.filter(line => /^(npm_config_|NPM_CONFIG_)/i.test(line))).toEqual(["npm_config_registry=https://registry.npmjs.org/"]);
+  expect(lines.filter(line => /^(npm_config_|NPM_CONFIG_)/i.test(line))).toEqual([
+    "npm_config_globalconfig=/dev/null",
+    "npm_config_registry=https://registry.npmjs.org/",
+    `npm_config_userconfig=${path.join(realpathSync(ROOT), "scripts", "sentry", "npmrc")}`,
+  ]);
+});
+
+test("pins every registry, including the @sentry scope, in its npm user config", () => {
+  const npmrc = readFileSync(path.join(ROOT, "scripts", "sentry", "npmrc"), "utf8");
+  const settings = npmrc.split("\n").filter(line => line && !line.startsWith("#"));
+  expect(settings).toEqual(["registry=https://registry.npmjs.org/", "@sentry:registry=https://registry.npmjs.org/"]);
+});
+
+test("never runs an npx that the calling checkout puts on PATH", () => {
+  for (const directory of [path.join(checkout, "node_modules", ".bin"), path.join(checkout, "tools"), path.join(temporary, "elsewhere", "node_modules", ".bin")]) {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(path.join(directory, "npx"), "#!/usr/bin/env bash\necho shadowed\nenv\n", { mode: 0o755 });
+  }
+  const shadowed = `${checkout}/node_modules/.bin:${checkout}/tools:${temporary}/elsewhere/node_modules/.bin:node_modules/.bin:.:`;
+  const result = launch({ PATH: `${shadowed}${bin}:/usr/bin:/bin` });
+  expect(result.status).toBe(0);
+  expect(result.stdout).not.toContain("shadowed");
+  expect(result.stdout).toContain(`SENTRY_ACCESS_TOKEN=${TOKEN}`);
+
+  rmSync(path.join(bin, "npx"));
+  const missing = launch({ PATH: `${shadowed}/usr/bin:/bin` });
+  expect(missing.status).toBe(1);
+  expect(missing.stderr).toContain("npx is not on a trusted PATH entry");
+  expect(missing.stdout).not.toContain(TOKEN);
 });

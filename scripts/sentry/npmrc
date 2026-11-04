@@ -1,0 +1,4 @@
+# npm user config for scripts/sentry/mcp.sh, replacing ~/.npmrc so no user,
+# global, or checkout setting can redirect the package that gets the token.
+registry=https://registry.npmjs.org/
+@sentry:registry=https://registry.npmjs.org/
