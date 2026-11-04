@@ -13,9 +13,9 @@ let temporary: string, matrix: string, script: string, secrets: string, bin: str
 
 interface Launch { status: number | null; stdout: string; stderr: string }
 
-/** Runs a copy of the launcher whose trusted PATH holds only fixture tools and a stub `npx`. */
+/** Executes a copy of the launcher (through its shebang) whose trusted PATH holds only fixture tools and a stub `npx`. */
 function launch(env: Record<string, string> = {}, ...args: string[]): Launch {
-  const result = spawnSync("/bin/bash", [script, ...args], {
+  const result = spawnSync(script, args, {
     cwd: checkout,
     env: { HOME: checkout, PATH: bin, MATRIX_SECRETS_DIR: secrets, ...env },
     encoding: "utf8",
@@ -61,9 +61,34 @@ beforeEach(() => {
 
 afterEach(() => rmSync(temporary, { recursive: true, force: true }));
 
-test("the shipped launcher trusts only system tool directories", () => {
+test("the shipped launcher uses a fixed privileged-mode bash and system tool directories", () => {
   const source = readFileSync(path.join(SOURCE, "mcp.sh"), "utf8");
+  expect(source.split("\n")[0]).toBe("#!/bin/bash -p");
   expect(source.match(TRUSTED_PATH_LINE)?.[0]).toBe('TRUSTED_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"');
+  // PATH is replaced before the first external command.
+  const firstCommand = source.indexOf("$(");
+  expect(source.indexOf('PATH="$TRUSTED_PATH"')).toBeGreaterThan(-1);
+  expect(source.indexOf('PATH="$TRUSTED_PATH"')).toBeLessThan(firstCommand);
+});
+
+test("runs none of the caller's startup files, functions, or commands", () => {
+  const marker = path.join(temporary, "injected");
+  const startup = path.join(checkout, "startup.sh");
+  writeFileSync(startup, `touch ${marker}\n`);
+  const hostile = path.join(checkout, "tools");
+  for (const tool of ["sed", "tail", "id", "dirname", "env", "bash"]) writeExecutable(path.join(hostile, tool), ["#!/bin/sh", `touch ${marker}`, "exit 1"]);
+  const result = launch({
+    PATH: `${hostile}:${bin}`,
+    BASH_ENV: startup,
+    ENV: startup,
+    SHELLOPTS: "xtrace",
+    CDPATH: checkout,
+    "BASH_FUNC_sed%%": `() { touch ${marker}; }`,
+  });
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(result.stdout).toContain(`SENTRY_ACCESS_TOKEN=${TOKEN}`);
+  expect(() => readFileSync(marker)).toThrow();
 });
 
 test("fails without the token and never starts the server", () => {

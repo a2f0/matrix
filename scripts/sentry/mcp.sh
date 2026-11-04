@@ -1,18 +1,23 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
 # Start the Sentry MCP server (stdio) with the workspace's personal Sentry token.
 # The token comes from matrix-secrets/root/root.env and never appears in
-# harness configuration or process arguments.
+# harness configuration or process arguments. A fixed interpreter in privileged
+# mode (-p) ignores the caller's PATH, BASH_ENV, SHELLOPTS and exported functions.
 set -euo pipefail
+
+# System tool directories only, set before any external command runs. The
+# caller's PATH is never used: a checkout's node_modules/.bin, version-manager
+# shims or symlinked tool folders could put their own sed, npx or node in front
+# of the token.
+TRUSTED_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+PATH="$TRUSTED_PATH"
+export PATH
 
 MATRIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 SECRETS_DIR="${MATRIX_SECRETS_DIR:-$MATRIX_ROOT/../matrix-secrets}"
 ROOT_ENV="$SECRETS_DIR/root/root.env"
 # Bump deliberately: the server runs with a broadly scoped token.
 SERVER_PACKAGE="@sentry/mcp-server@0.42.0"
-# System tool directories only. The caller's PATH is never used: a checkout's
-# node_modules/.bin, version-manager shims or symlinked tool folders could put
-# their own npx or node in front of the token.
-TRUSTED_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 # Inherited variables that survive; everything else (NODE_OPTIONS, npm_config_*,
 # SENTRY_*, BUN_*, ...) is dropped, so the calling checkout cannot inject code
 # or configuration into the process that holds the token.
