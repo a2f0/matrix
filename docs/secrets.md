@@ -94,8 +94,10 @@ serve deploys and source maps, and an organization token there carries only
 
 `scripts/sentry/mcp.sh` starts the stdio Sentry MCP server (exact version pinned
 in the script) with that token, and replaces any `SENTRY_AUTH_TOKEN` inherited
-from a repository's environment. Register it once per harness by absolute path
-from the primary clone, so no harness configuration holds the value:
+from a repository's environment. It runs from matrix against the public npm
+registry, so a checkout's `.npmrc` or npm settings cannot choose the package.
+Register it once per harness by absolute path from the primary clone, so no
+harness configuration holds the value:
 
 ```sh
 claude mcp add --scope user sentry -- ~/github/matrix/scripts/sentry/mcp.sh
