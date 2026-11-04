@@ -83,6 +83,33 @@ repository-level settings are managed; environment secrets stay manual.
 GitHub cannot return a secret's value. An `unmanaged` secret has to be refilled
 from its source before the file can own it.
 
+## Sentry MCP
+
+Every project's Sentry projects live in the one `tearleads` organization. The
+personal token `SENTRY_MCP_AUTH_TOKEN` in `root/root.env` reads and triages
+all of them; use it for every repository's error investigation. It is not an
+upload credential: the `SENTRY_AUTH_TOKEN` copies in project tiers and `ci/`
+serve deploys and source maps, and an organization token there carries only
+`org:ci`, which cannot read issues or events.
+
+`scripts/sentry/mcp.sh` starts the stdio Sentry MCP server (exact version pinned
+in the script) with that token, and replaces any `SENTRY_AUTH_TOKEN` inherited
+from a repository's environment. Register it once per harness by absolute path
+from the primary clone, so no harness configuration holds the value:
+
+```sh
+claude mcp add --scope user sentry -- ~/github/matrix/scripts/sentry/mcp.sh
+codex mcp add sentry -- ~/github/matrix/scripts/sentry/mcp.sh
+hermes mcp add sentry --command ~/github/matrix/scripts/sentry/mcp.sh
+```
+
+Without an MCP client, read the token into a shell variable and call the API
+(`https://sentry.io/api/0/organizations/tearleads/issues/`) with it, never on a
+command line or in output. API events carry only allowlisted fields, so a
+message reads "Application error (message omitted)"; diagnose from the
+source-mapped frames, tags, and release commit. Rotating the token means
+replacing that one line.
+
 ## Terraform state
 
 Each project's Terraform state bucket key (`TF_STATE_*`) lives in its tier
