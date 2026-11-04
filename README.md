@@ -10,6 +10,7 @@ matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
 src/                 The matrix CLI: sync, status, discover, audit, deploy-secrets, sweep
 scripts/secrets/     Backup entrypoint for ../matrix-secrets
+scripts/sentry/      Sentry MCP launcher for every harness
 AGENTS.md            Coordinator rules for sweeps
 ```
 
@@ -104,7 +105,8 @@ including adopting agent-tool in one that lacks it.
 Secrets for every managed repository live in `../matrix-secrets`, one namespace
 per repository with `staging/`, `prod/`, and `ci/` folders. Each clone links its
 gitignored `.secrets` there. Backups and GitHub Actions values are managed from
-this workspace; see [docs/secrets.md](docs/secrets.md). Terraform state lives
+this workspace; see [docs/secrets.md](docs/secrets.md), which also registers
+the Sentry MCP server that reads every project's errors. Terraform state lives
 in one Cloudflare R2 bucket per repository; see
 [docs/terraform-state.md](docs/terraform-state.md).
 

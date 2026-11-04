@@ -56,9 +56,9 @@ and resolve only fully addressed findings.
 ## Secrets
 
 Secrets live in `../matrix-secrets/<project>/{staging,prod,ci}`, linked from each
-clone's gitignored `.secrets`; `docs/secrets.md` describes the layout, backups,
-and CI deployment. Never read, print, log, or commit secret values; names are
-fine. Change that folder only on request, and back it up first.
+clone's gitignored `.secrets`; `docs/secrets.md` covers layout, backups, CI
+deployment, Sentry MCP. Never read, print, log, or commit secret values; names
+are fine. Change that folder only on request, and back it up first.
 
 ## Checking standards
 
