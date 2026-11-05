@@ -9,7 +9,7 @@
  * named checkouts; elsewhere, the repository holding the working directory.
  * Uses only Node built-ins so it runs by path from any repository.
  */
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { git } from "./git";
 import { type FileReport, language, scanFile } from "./scan";
@@ -41,7 +41,7 @@ workspace and every checkout, or the named checkouts; elsewhere, the repository
 holding the working directory.
 
   --limit N       files listed per repository (default 25; 0 lists all)
-  --min-score N   skip files scoring below N (default 4)
+  --min-score N   skip files scoring below N (default 3: one status with three values)
   --json          JSON output for agents`;
 
 function count(flag: string, value: string | undefined): number {
@@ -53,7 +53,7 @@ function count(flag: string, value: string | undefined): number {
 
 export function parseOptions(argv: string[]): Options {
   const names: string[] = [];
-  let json = false, limit = 25, minScore = 4;
+  let json = false, limit = 25, minScore = 3;
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--json") json = true;
@@ -63,6 +63,23 @@ export function parseOptions(argv: string[]): Options {
     else names.push(arg);
   }
   return { names, json, limit, minScore };
+}
+
+/**
+ * A tracked file's text, or undefined when it is a symlink or resolves outside
+ * the repository: a tracked link must never make the scan read an ignored
+ * secret or another tree.
+ */
+export function readInside(root: string, file: string): string | undefined {
+  const full = path.join(root, file);
+  try {
+    if (!lstatSync(full).isFile()) return undefined;
+    const real = realpathSync(full);
+    if (!real.startsWith(realpathSync(root) + path.sep)) return undefined;
+    return readFileSync(real, "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 /** Scans the files git tracks in one repository (submodules and nested checkouts excluded). */
@@ -75,8 +92,8 @@ export function scanRepository(name: string, root: string, options: Pick<Options
     // checkouts/ is gitignored in a workspace, so a checkout's files are never
     // listed under the workspace; each checkout is scanned as its own target.
     if (!file || !language(file)) continue;
-    let text: string;
-    try { text = readFileSync(path.join(root, file), "utf8"); } catch { continue; }
+    const text = readInside(root, file);
+    if (text === undefined) continue;
     scanned++;
     const report = scanFile(file, text);
     if (report && report.score >= options.minScore) files.push(report);

@@ -32,7 +32,7 @@ three or more places. It is read-only and needs only Bun.
   `~/.agents/skills/explicit-state-machines` or
   `~/.claude/skills/explicit-state-machines`.
 - `--limit N` (default 25 per repository, 0 for all), `--min-score N`
-  (default 4), `--json` for agents.
+  (default 3), `--json` for agents.
 
 The script finds leads, not verdicts, and it misses whole families. Also read
 for these by hand, starting from the places state lives (stores, providers,
@@ -89,8 +89,10 @@ Follow `references/patterns.md` for the language at hand. In every language:
    "is it loading?" check, which accepts `start(A) -> reset -> start(B) ->
    succeed(A)`. Test that sequence.
 5. Move side effects out of the transition: effects run on entering a state
-   (an effect keyed on `state.status`, a worker loop that switches on it), not
-   inside the reducer.
+   (a worker loop that switches on it, or an effect keyed on the state's whole
+   identity: `status` plus its request tag), not inside the reducer. An
+   effect keyed on `status` alone misses `loading(A) -> loading(B)` and never
+   starts B; test a replacement request.
 6. Keep call sites small: derive old booleans from the state
    (`const isLoading = state.status === "loading"`) where many readers use
    them, rather than rewriting every consumer in the same change.

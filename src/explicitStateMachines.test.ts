@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { codeLines, language, scanFile, scanText } from "../skills/explicit-state-machines/scripts/scan";
-import { main, parseOptions } from "../skills/explicit-state-machines/scripts/state-machines";
+import { main, parseOptions, readInside } from "../skills/explicit-state-machines/scripts/state-machines";
 import { resolveTargets } from "../skills/explicit-state-machines/scripts/targets";
 import { resolveTargets as cleanupTargets } from "../skills/space-cleanup/scripts/targets";
 
@@ -140,6 +140,27 @@ describe("explicit-state-machines CLI", () => {
     expect(main(["app", "--limit", "0"], path.join(root, "checkouts", "worker"), text => output.push(text))).toBe(2);
     expect(main(["--help"], home, text => output.push(text))).toBe(0);
     expect(output.at(-1)).toContain("Usage: state-machines");
+  });
+
+  test("defaults to listing a lone three-value status, and never reads through tracked symlinks", () => {
+    expect(parseOptions([]).minScore).toBe(3);
+    const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "explicit-state-machines-")));
+    temps.push(home);
+    write(home, "secret/worker.py", WORKER);
+    const status = "def a(self):\n    self.status = \"one\"\ndef b(self):\n    self.status = \"two\"\ndef c(self):\n    self.status = \"three\"\n";
+    const root = repo(path.join(home, "repo"), { "status.py": status });
+    symlinkSync(path.join(home, "secret", "worker.py"), path.join(root, "linked.py"));
+    symlinkSync(path.join(home, "secret"), path.join(root, "linked-dir"));
+    git(root, "add", "linked.py", "linked-dir");
+    git(root, "commit", "-qm", "links");
+    expect(readInside(root, "linked.py")).toBeUndefined();
+    expect(readInside(root, "linked-dir/worker.py")).toBeUndefined();
+    expect(readInside(root, "../secret/worker.py")).toBeUndefined();
+    expect(readInside(root, "status.py")).toBe(status);
+    const output: string[] = [];
+    expect(main(["--json"], root, text => output.push(text))).toBe(0);
+    const [report] = JSON.parse(output.join("\n")).repos;
+    expect(report.files.map((file: { path: string; score: number }) => [file.path, file.score])).toEqual([["status.py", 3]]);
   });
 
   test("resolves targets exactly as space-cleanup does", () => {

@@ -54,6 +54,17 @@ function assertNever(value: never): never {
 // In the component:
 const [state, dispatch] = useReducer(transition, { status: "idle" });
 const isLoading = state.status === "loading";
+// Keyed on the request, not just the status, so a replacement request starts.
+const request = state.status === "loading" ? state.request : undefined;
+useEffect(() => {
+  if (request === undefined) return;
+  const abort = new AbortController();
+  fetchItems(abort.signal).then(
+    items => dispatch({ type: "succeed", request, items }),
+    error => dispatch({ type: "fail", request, error }),
+  );
+  return () => abort.abort();
+}, [request]);
 ```
 
 - Never drop a cancellation guard without replacing it. A bare
