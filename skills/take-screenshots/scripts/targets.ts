@@ -46,25 +46,35 @@ export function resolveTargets(cwd: string, names: string[], project?: string): 
   const here = toplevel(cwd);
   const workspace = here && isMatrixWorkspace(realpathSync(here)) ? realpathSync(here) : undefined;
   if (project && names.length > 1) throw new Error("--project names one repository's namespace; select one repository");
-  if (names.length === 0) {
-    if (workspace) {
-      const roots = readdirSync(path.join(workspace, "checkouts"), { withFileTypes: true })
-        .filter(entry => entry.isDirectory() && existsSync(path.join(workspace, "checkouts", entry.name, ".git")))
-        .map(entry => realpathSync(path.join(workspace, "checkouts", entry.name)))
-        .filter(captures)
-        .sort();
-      if (project) throw new Error("--project needs one named repository");
-      return { workspace, targets: roots.map(root => targetFor(root)) };
-    }
-    if (!here) throw new Error(`${cwd} is not inside a git repository; name one`);
-    return { targets: [targetFor(realpathSync(here), project)] };
-  }
-  const roots = names.map(name => {
-    const short = name.includes("/") && !existsSync(path.resolve(cwd, name)) ? name.split("/").pop()! : name;
-    if (workspace && existsSync(path.join(workspace, "checkouts", short, ".git"))) return realpathSync(path.join(workspace, "checkouts", short));
-    const top = existsSync(path.resolve(cwd, name)) ? toplevel(path.resolve(cwd, name)) : undefined;
-    if (!top) throw new Error(`${name} is neither a checkout name nor a path inside a git repository`);
-    return realpathSync(top);
-  });
+  if (names.length === 0) return unnamedTargets(cwd, here, workspace, project);
+  const roots = names.map(name => namedRoot(cwd, workspace, name));
   return { workspace, targets: [...new Set(roots)].map(root => targetFor(root, project)) };
+}
+
+/** With no names: every workspace checkout that captures, else the repository holding cwd. */
+function unnamedTargets(cwd: string, here: string | undefined, workspace: string | undefined, project?: string): { workspace?: string; targets: Target[] } {
+  if (workspace) {
+    const roots = readdirSync(path.join(workspace, "checkouts"), { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && existsSync(path.join(workspace, "checkouts", entry.name, ".git")))
+      .map(entry => realpathSync(path.join(workspace, "checkouts", entry.name)))
+      .filter(captures)
+      .sort();
+    if (project) throw new Error("--project needs one named repository");
+    return { workspace, targets: roots.map(root => targetFor(root)) };
+  }
+  if (!here) throw new Error(`${cwd} is not inside a git repository; name one`);
+  return { targets: [targetFor(realpathSync(here), project)] };
+}
+
+/**
+ * The real root a name selects: the workspace checkout it names (owner/name
+ * counts by its last part unless it is a path), else the repository holding
+ * that path. Kept in sync with space-cleanup/scripts/targets.ts namedRoot.
+ */
+function namedRoot(cwd: string, workspace: string | undefined, name: string): string {
+  const short = name.includes("/") && !existsSync(path.resolve(cwd, name)) ? name.split("/").pop()! : name;
+  if (workspace && existsSync(path.join(workspace, "checkouts", short, ".git"))) return realpathSync(path.join(workspace, "checkouts", short));
+  const top = existsSync(path.resolve(cwd, name)) ? toplevel(path.resolve(cwd, name)) : undefined;
+  if (!top) throw new Error(`${name} is neither a checkout name nor a path inside a git repository`);
+  return realpathSync(top);
 }
