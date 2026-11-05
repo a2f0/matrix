@@ -1,14 +1,12 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { type Gh, runGh } from "./gh";
 import { repoName } from "./manifest";
 import { errorMessage } from "./text";
 
 const KINDS = { secret: "secrets.env", variable: "variables.env" } as const;
 type Kind = keyof typeof KINDS;
 const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
-
-export type Gh = (args: string[]) => string;
 
 export interface CiFile {
   /** Repository settings this file manages; set on apply, never deleted. */
@@ -31,17 +29,6 @@ export interface DeployResult {
 /** The workspace's secrets folder: MATRIX_SECRETS_DIR, or matrix-secrets beside the matrix repository. */
 export function secretsRoot(root: string, env: NodeJS.ProcessEnv = process.env): string {
   return path.resolve(env.MATRIX_SECRETS_DIR || path.join(root, "..", "matrix-secrets"));
-}
-
-export function runGh(args: string[]): string {
-  const result = spawnSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (result.error) throw new Error(`Could not run gh: ${result.error.message}`);
-  if (result.status !== 0) {
-    // gh can quote the file it was setting from, so a failed set reports no output.
-    const detail = args[1] === "set" ? `exit ${result.status}; output withheld because it can contain values` : result.stderr.trim();
-    throw new Error(`gh ${args.slice(0, 2).join(" ")} failed (${detail}).`);
-  }
-  return result.stdout;
 }
 
 /**

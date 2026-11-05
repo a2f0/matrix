@@ -8,7 +8,8 @@ import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DiskSpace, markdownHealth } from "./health";
 import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
-import { deployAll, type Gh, runGh, secretsRoot } from "./secrets";
+import { type Gh, runGh } from "./gh";
+import { deployAll, secretsRoot } from "./secrets";
 import { type AgentToolTeardown, teardownAll } from "./teardown";
 import { knownCauses, listSweeps, markdownReport, parseUpdate, recordEntry, recordResolution, retro, startSweep, sweepReport } from "./sweeps";
 

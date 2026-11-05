@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { deployAll, deploySecrets, dotenvNames, type Gh, runGh, secretsRoot } from "./secrets";
+import { type Gh, runGh } from "./gh";
+import { deployAll, deploySecrets, dotenvNames, secretsRoot } from "./secrets";
 
 let secrets: string, calls: string[][];
 const remote: Record<string, string[]> = { secret: ["DEPLOY_KEY", "LEGACY_TOKEN"], variable: [] };

@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { runGh } from "./gh";
 import type { Manifest } from "./manifest";
 
 const LIMIT = 1000;
@@ -10,10 +10,7 @@ export function byName(left: string, right: string): number { return key(left).l
 export function listOwnerRepos(discover: Manifest["discover"]): string[] {
   const args = ["repo", "list", discover.owner, "--source", "--no-archived", "--limit", String(LIMIT), "--json", "nameWithOwner", "--jq", ".[].nameWithOwner"];
   if (discover.visibility !== "all") args.push("--visibility", discover.visibility);
-  const result = spawnSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (result.error) throw new Error(`Could not run gh: ${result.error.message}`);
-  if (result.status !== 0) throw new Error(`gh repo list failed: ${result.stderr.trim()}`);
-  const repos = result.stdout.split("\n").filter(Boolean);
+  const repos = runGh(args).split("\n").filter(Boolean);
   if (repos.length >= LIMIT) throw new Error(`gh repo list returned ${LIMIT} repositories; discovery may be truncated.`);
   return repos;
 }
