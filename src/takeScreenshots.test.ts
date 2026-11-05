@@ -879,4 +879,20 @@ describe("capture record transitions", () => {
     expect(whileRunning).toEqual(base);
     expect(keys()).toEqual([...base, "finishedAt", "exitCode"]);
   });
+
+  test("capture --json prints a plan, and once applied adds applied then record", async () => {
+    const { app } = workspace();
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const plan = ["name", "project", "store", "command", "commit", "branch", "dirty", "merged"];
+    const json = async (argv: string[]) => {
+      const lines: string[] = [];
+      expect(await main(argv, app, { capture: async () => ({ code: 0 }) }, text => lines.push(text))).toBe(0);
+      return JSON.parse(lines.join("\n"));
+    };
+    expect(Object.keys(await json(["capture", "--json"]))).toEqual(plan);
+    const applied = await json(["capture", "--apply", "--json"]);
+    expect(Object.keys(applied)).toEqual([...plan, "applied", "record"]);
+    expect(applied).toMatchObject({ applied: true, record: { status: "complete", exitCode: 0 } });
+    expect(Object.keys(await json(["capture", "--json"]))).toEqual([...plan, "previous"]);
+  });
 });
