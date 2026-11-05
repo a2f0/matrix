@@ -132,16 +132,11 @@ function tokens(source: string): { code: string; strings: string[] } {
     i = 0;
   const strings: string[] = [];
   while (i < source.length) {
-    const char = source[i]!,
-      next = source[i + 1];
-    if (char === "/" && next === "/") {
-      while (i < source.length && source[i] !== "\n") i += 1;
-      continue;
-    }
-    if (char === "/" && next === "*") {
-      const end = source.indexOf("*/", i + 2);
-      i = end < 0 ? source.length : end + 2;
-      code += " ";
+    const char = source[i]!;
+    const skipped = comment(source, i);
+    if (skipped) {
+      code += skipped.text;
+      i = skipped.end;
       continue;
     }
     if (char === "'" || char === '"' || char === "`") {
@@ -155,6 +150,18 @@ function tokens(source: string): { code: string; strings: string[] } {
     i += 1;
   }
   return { code, strings };
+}
+
+/** The comment starting at `start`, if one does: the index just past it (a line comment's newline stays) and what replaces it in the code. */
+function comment(source: string, start: number): { end: number; text: string } | undefined {
+  if (source[start] !== "/") return undefined;
+  if (source[start + 1] === "/") {
+    const end = source.indexOf("\n", start);
+    return { end: end < 0 ? source.length : end, text: "" };
+  }
+  if (source[start + 1] !== "*") return undefined;
+  const end = source.indexOf("*/", start + 2);
+  return { end: end < 0 ? source.length : end + 2, text: " " };
 }
 
 /** The contents of the string literal whose quote is at `start`, escapes kept, and the index just past its closing quote. */
@@ -294,13 +301,7 @@ export function serve(root: string, port: number, http1 = false) {
       else if (body) response.writeHead(status, headers).end(body);
       else response.writeHead(status, headers).end();
     };
-    let pathname: string;
-    try {
-      pathname = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname);
-    } catch {
-      pathname = "";
-    }
-    if (pathname.endsWith("/")) pathname += "index.html";
+    const pathname = requestPath(request.url);
     const file = pathname ? inside(pathname) : undefined;
     if (!file) {
       send(404);
@@ -325,6 +326,17 @@ export function serve(root: string, port: number, http1 = false) {
   return server.listen(port, "127.0.0.1", () =>
     console.log(`Serving ${base} at ${http1 ? "http" : "https"}://127.0.0.1:${(server.address() as AddressInfo).port}/`),
   );
+}
+
+/** The decoded path a request names, a directory's naming its index.html; empty when it does not decode. */
+function requestPath(url: string | undefined): string {
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(new URL(url ?? "/", "http://localhost").pathname);
+  } catch {
+    pathname = "";
+  }
+  return pathname.endsWith("/") ? `${pathname}index.html` : pathname;
 }
 
 // A deterministic Math.random for screenshots, so randomly placed decoration matches between rounds.
@@ -545,24 +557,27 @@ function decodePng(file: Buffer): { width: number; height: number; data: Uint8Ar
 /** The header fields and concatenated image data of a PNG, rejecting formats `decodePng` cannot read. */
 function readPngChunks(file: Buffer): { width: number; height: number; channels: number; compressed: Buffer } {
   if (file.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("Not a PNG.");
-  let width = 0,
-    height = 0,
-    channels = 0;
+  let header = { width: 0, height: 0, channels: 0 };
   const chunks: Buffer[] = [];
   for (let at = 8; at < file.length; ) {
     const length = file.readUInt32BE(at),
       type = file.toString("latin1", at + 4, at + 8),
       body = file.subarray(at + 8, at + 8 + length);
-    if (type === "IHDR") {
-      width = body.readUInt32BE(0);
-      height = body.readUInt32BE(4);
-      const [depth, colour, , , interlace] = [body[8], body[9], body[10], body[11], body[12]];
-      channels = colour === 6 ? 4 : colour === 2 ? 3 : 0;
-      if (depth !== 8 || !channels || interlace !== 0) throw new Error("Only 8-bit RGB or RGBA, non-interlaced PNGs are supported.");
-    } else if (type === "IDAT") chunks.push(body);
+    if (type === "IHDR") header = pngHeader(body);
+    else if (type === "IDAT") chunks.push(body);
     at += 12 + length;
   }
-  return { width, height, channels, compressed: Buffer.concat(chunks) };
+  return { ...header, compressed: Buffer.concat(chunks) };
+}
+
+/** The size and channel count an IHDR chunk gives, rejecting what `decodePng` cannot read. */
+function pngHeader(body: Buffer): { width: number; height: number; channels: number } {
+  const width = body.readUInt32BE(0);
+  const height = body.readUInt32BE(4);
+  const [depth, colour, , , interlace] = [body[8], body[9], body[10], body[11], body[12]];
+  const channels = colour === 6 ? 4 : colour === 2 ? 3 : 0;
+  if (depth !== 8 || !channels || interlace !== 0) throw new Error("Only 8-bit RGB or RGBA, non-interlaced PNGs are supported.");
+  return { width, height, channels };
 }
 
 /** Reverses each scanline's filter, giving `channels` bytes per pixel. */
