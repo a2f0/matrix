@@ -913,3 +913,42 @@ describe("capture record transitions", () => {
     expect(Object.keys(await json(["capture", "--json"]))).toEqual([...plan, "previous"]);
   });
 });
+
+describe("namespace targets", () => {
+  test("builds a target from origin, GitHub's answer, and --project", () => {
+    const { app } = workspace();
+    gitIn(app, "remote", "set-url", "origin", "git@github.com:a2f0/Old.git");
+    const base = { name: "app", root: app };
+    expect(targetFor(app, undefined, () => undefined)).toEqual({ ...base, project: "Old", repo: "a2f0/Old", verified: false });
+    expect(targetFor(app, undefined, () => "a2f0/new")).toEqual({ ...base, project: "new", repo: "a2f0/new", verified: true, alias: "a2f0/Old" });
+    expect(targetFor(app, undefined, () => ({ repo: "a2f0/Old", id: "R_1" }))).toEqual({
+      ...base,
+      project: "Old",
+      repo: "a2f0/Old",
+      verified: true,
+      id: "R_1",
+    });
+    expect(targetFor(app, "named", (_root, parsed) => (parsed === "a2f0/Old" ? { repo: "a2f0/new" } : undefined))).toEqual({
+      ...base,
+      project: "named",
+      repo: "a2f0/new",
+      verified: true,
+      alias: "a2f0/Old",
+      explicit: true,
+    });
+    expect(Object.keys(targetFor(app, "named", () => ({ repo: "a2f0/new", id: "R_2" })))).toEqual([
+      "name",
+      "root",
+      "project",
+      "repo",
+      "verified",
+      "alias",
+      "explicit",
+      "id",
+    ]);
+    expect(() => targetFor(app, "..", () => undefined)).toThrow("'..' is not a usable project name");
+    expect(() => targetFor(app, "a b", () => undefined)).toThrow("'a b' is not a usable project name");
+    gitIn(app, "remote", "set-url", "origin", "https://gitlab.com/a2f0/app.git");
+    expect(targetFor(app, "local", () => undefined)).toEqual({ ...base, project: "local", verified: false, explicit: true });
+  });
+});
