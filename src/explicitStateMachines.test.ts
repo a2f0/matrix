@@ -157,10 +157,21 @@ describe("explicit-state-machines CLI", () => {
     expect(readInside(root, "linked-dir/worker.py")).toBeUndefined();
     expect(readInside(root, "../secret/worker.py")).toBeUndefined();
     expect(readInside(root, "status.py")).toBe(status);
+    // A tracked directory replaced by a link to an ignored directory inside the repository.
+    write(root, "src/app.py", WORKER);
+    git(root, "add", "src/app.py");
+    git(root, "commit", "-qm", "src");
+    write(root, ".secrets/app.py", "TOKEN = True");
+    rmSync(path.join(root, "src"), { recursive: true });
+    symlinkSync(path.join(root, ".secrets"), path.join(root, "src"));
+    expect(readInside(root, "src/app.py")).toBeUndefined();
+    rmSync(path.join(root, "src"));
+    write(root, "src/app.py", WORKER);
+    expect(readInside(root, "src/app.py")).toBe(WORKER);
     const output: string[] = [];
     expect(main(["--json"], root, text => output.push(text))).toBe(0);
     const [report] = JSON.parse(output.join("\n")).repos;
-    expect(report.files.map((file: { path: string; score: number }) => [file.path, file.score])).toEqual([["status.py", 3]]);
+    expect(report.files.map((file: { path: string; score: number }) => [file.path, file.score])).toEqual([["src/app.py", 7], ["status.py", 3]]);
   });
 
   test("resolves targets exactly as space-cleanup does", () => {

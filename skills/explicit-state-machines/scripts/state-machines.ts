@@ -66,16 +66,18 @@ export function parseOptions(argv: string[]): Options {
 }
 
 /**
- * A tracked file's text, or undefined when it is a symlink or resolves outside
- * the repository: a tracked link must never make the scan read an ignored
+ * A tracked file's text, or undefined when it or any parent directory is a
+ * symlink, or it lies outside the repository: a tracked link must never make the scan read an ignored
  * secret or another tree.
  */
 export function readInside(root: string, file: string): string | undefined {
   const full = path.join(root, file);
   try {
     if (!lstatSync(full).isFile()) return undefined;
+    // The resolved path must be exactly root/file: any symlinked component,
+    // a parent directory included, changes it, even one pointing back inside.
     const real = realpathSync(full);
-    if (!real.startsWith(realpathSync(root) + path.sep)) return undefined;
+    if (real !== path.join(realpathSync(root), path.normalize(file)) || file.split(/[\\/]/).includes("..")) return undefined;
     return readFileSync(real, "utf8");
   } catch {
     return undefined;
