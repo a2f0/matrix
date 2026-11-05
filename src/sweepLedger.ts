@@ -125,8 +125,15 @@ function isSweep(value: unknown): value is Sweep {
   );
 }
 
+/** An optional stored field that, when present, must be one of `values`. */
+function absentOrOneOf(value: unknown, values: readonly string[]): boolean {
+  return value === undefined || (typeof value === "string" && values.includes(value));
+}
+
+/** An update needs its time, and a status or verdict it sets must be one replay and reports classify. */
 function isStoredUpdate(value: unknown): value is StoredUpdate {
-  return typeof object(value)?.at === "string";
+  const update = object(value);
+  return typeof update?.at === "string" && absentOrOneOf(update.status, STATUSES) && absentOrOneOf(update.verdict, VERDICTS);
 }
 
 /** Write JSON to a new private file in `folder`, to publish under its final name. */

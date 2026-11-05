@@ -278,6 +278,14 @@ test("refuses ledger files without the fields that locate and order records", ()
   const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
   writeFileSync(path.join(directory, "repos", "one", "000002.json"), '{"status": "open"}\n');
   expect(() => sweepReport(root, "chore/demo")).toThrow("000002.json: it is not a sweep ledger record.");
+  for (const [field, value] of [
+    ["status", "done"],
+    ["verdict", "OK"],
+    ["status", 1],
+  ] as const) {
+    writeFileSync(path.join(directory, "repos", "one", "000002.json"), `${JSON.stringify({ at: at(1).toISOString(), [field]: value })}\n`);
+    expect(() => sweepReport(root, "chore/demo")).toThrow("000002.json: it is not a sweep ledger record.");
+  }
   writeFileSync(path.join(directory, "sweep.json"), "[]\n");
   expect(() => sweepReport(root, "chore/demo")).toThrow("sweep.json: it is not a sweep ledger record.");
 });
