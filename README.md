@@ -164,6 +164,8 @@ validation and release requirements remain in each checkout's guidance.
 bun run check
 ```
 
-`bun run check` runs the typecheck, tests, and managed-skill checks that CI
-runs. Tests build temporary local Git remotes and make no network calls.
+`bun run check` runs what CI runs: the typecheck, Biome (`bun run lint`;
+`bun run lint:fix` formats and applies safe fixes), the module-graph check,
+knip's unused-code check (`bun run knip`), the tests, and the managed-skill
+checks. Tests build temporary local Git remotes and make no network calls.
 `bunfig.toml` limits `bun test` to `src`, so it never runs the checkouts' suites.

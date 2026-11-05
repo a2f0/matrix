@@ -6,8 +6,16 @@
       "command": ["bun", "run", "typecheck"]
     },
     {
+      "label": "lint",
+      "command": ["bun", "run", "lint"]
+    },
+    {
       "label": "graph",
       "command": ["bun", "run", "agent-tool", "graph", "check"]
+    },
+    {
+      "label": "knip",
+      "command": ["bun", "run", "knip"]
     },
     {
       "label": "tests",
