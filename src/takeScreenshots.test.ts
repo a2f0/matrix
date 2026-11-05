@@ -3,10 +3,15 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, utimesSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  acquireLock, artifactsRoot, claimNamespace, drainGroup, existingCase, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
-  type Runner, storeDir, targetFor, updateOwner,
-} from "../skills/take-screenshots/scripts/artifacts";
+import { main, parseOptions } from "../skills/take-screenshots/scripts/artifacts";
+import { drainGroup, type Runner } from "../skills/take-screenshots/scripts/capture";
+import { link, linkState } from "../skills/take-screenshots/scripts/link";
+import { acquireLock } from "../skills/take-screenshots/scripts/lock";
+import { claimNamespace, existingCase, githubRepo, targetFor, updateOwner } from "../skills/take-screenshots/scripts/namespace";
+import { readRecord, relation, validRecord } from "../skills/take-screenshots/scripts/record";
+import { LINK, LOCK, storeDir } from "../skills/take-screenshots/scripts/store";
+import { artifactsRoot, resolveTargets } from "../skills/take-screenshots/scripts/targets";
+import { resolveTargets as cleanupTargets } from "../skills/space-cleanup/scripts/targets";
 
 // Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
 process.env.MATRIX_ARTIFACTS_NO_GH = "1";
@@ -48,6 +53,13 @@ function repo(root: string, ignore: string, scripts: Record<string, string> = { 
   return root;
 }
 
+/** A process's group id, from ps. */
+function processGroup(pid: number): number {
+  const value = Number(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim());
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`cannot read the process group of ${pid}`);
+  return value;
+}
+
 const output: string[] = [];
 const print = (text: string) => { output.push(text); };
 
@@ -70,6 +82,31 @@ describe("take-screenshots artifacts", () => {
     expect(targetFor(app)).toMatchObject({ project: "app", repo: "a2f0/app" });
     // Only checkouts that capture are selected by default.
     expect(resolveTargets(root, []).targets.map(target => target.name)).toEqual(["app"]);
+  });
+
+  test("resolves named repositories exactly as space-cleanup does", () => {
+    const { home, root, app } = workspace();
+    const lib = path.join(root, "checkouts", "lib");
+    const outside = repo(path.join(home, "outside"), ".screenshots\n");
+    symlinkSync(outside, path.join(home, "outside-link"));
+    const rows: Array<{ cwd: string; names: string[]; roots?: string[]; error?: string }> = [
+      { cwd: root, names: ["app"], roots: [app] },
+      { cwd: root, names: ["a2f0/app"], roots: [app] },
+      { cwd: root, names: ["lib", "app", "lib"], roots: [lib, app] },
+      { cwd: root, names: ["checkouts/app"], roots: [app] },
+      { cwd: root, names: [outside], roots: [outside] },
+      { cwd: home, names: ["outside-link"], roots: [outside] },
+      { cwd: outside, names: [], roots: [outside] },
+      { cwd: outside, names: ["app"], error: "app is neither a checkout name nor a path inside a git repository" },
+      { cwd: root, names: ["missing"], error: "missing is neither a checkout name nor a path inside a git repository" },
+      { cwd: home, names: [], error: "is not inside a git repository; name one" },
+    ];
+    for (const { cwd, names, roots, error } of rows) {
+      for (const resolve of [resolveTargets, cleanupTargets]) {
+        if (error) expect(() => resolve(cwd, names)).toThrow(error);
+        else expect(resolve(cwd, names).targets.map(target => target.root)).toEqual(roots!);
+      }
+    }
   });
 
   test("links a clone with a relative, ignored symlink, and only when a plain pattern ignores it", async () => {
@@ -251,6 +288,25 @@ describe("take-screenshots artifacts", () => {
     expect(readRecord(store)).toMatchObject({ status: "complete", dirty: true, over: { dirty: true } });
   });
 
+  test("ignores inherited variables that bind git to other configuration or repositories", async () => {
+    const { home, app } = workspace();
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    write(app, "src/wip.ts");
+    // A hook's environment could hide the untracked file behind an exclude-everything rule.
+    write(home, "exclude-all", "*\n");
+    const inherited = {
+      GIT_CONFIG_PARAMETERS: `'core.excludesFile'='${path.join(home, "exclude-all")}'`,
+      GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.excludesFile", GIT_CONFIG_VALUE_0: path.join(home, "exclude-all"),
+    };
+    const saved = Object.fromEntries(Object.keys(inherited).map(name => [name, process.env[name]]));
+    Object.assign(process.env, inherited);
+    try {
+      await expect(main(["capture"], app, undefined, print)).rejects.toThrow("local changes");
+    } finally {
+      for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+
   test("a live lock blocks a second capture; a dead holder's lock waits for a person", async () => {
     const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-lock-")));
     temps.push(dir);
@@ -277,7 +333,7 @@ describe("take-screenshots artifacts", () => {
     temps.push(dir);
     const file = path.join(dir, LOCK);
     const script = path.join(dir, "race.ts");
-    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/lock.ts");
     writeFileSync(script, `import { acquireLock } from ${JSON.stringify(module)};
 try {
   acquireLock(${JSON.stringify(file)}, { pid: process.pid, host: "${os.hostname()}", checkout: "x", startedAt: "now" });
@@ -495,7 +551,7 @@ esac
     temps.push(dir);
     const file = path.join(dir, "repository.json");
     writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
-    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/namespace.ts");
     const script = path.join(dir, "alias.ts");
     writeFileSync(script, `import { updateOwner } from ${JSON.stringify(module)};
 const alias = process.argv[2]!;
@@ -512,7 +568,7 @@ updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...
     mkdirSync(path.join(dir, "app"));
     // A legacy owner file, written before ids were recorded.
     writeFileSync(path.join(dir, "app", "repository.json"), JSON.stringify({ repo: "a2f0/app" }));
-    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/namespace.ts");
     const script = path.join(dir, "claim.ts");
     writeFileSync(script, `import { claimNamespace } from ${JSON.stringify(module)};
 const id = process.argv[2]!;
