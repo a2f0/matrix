@@ -48,19 +48,24 @@ export function parseEvent(kind: EventKind, value: string): Omit<SweepEvent, "at
   return detail ? { kind, cause, detail } : { kind, cause };
 }
 
+function commitId(value: string, field: string): string {
+  if (!OID.test(value)) throw new Error(`--${field} must be a full commit ID.`);
+  return value;
+}
+
+function pullRequest(value: string): string {
+  if (!PULL_REQUEST.test(value)) throw new Error("--pr must be a GitHub pull request URL.");
+  return value;
+}
+
 /** Validate `sweep record` options into an update. */
 export function parseUpdate(values: Record<string, string>, lists: Record<string, string[]>): EntryUpdate {
   const update: EntryUpdate = {};
   if (values.status !== undefined) update.status = oneOf(STATUSES, values.status, "status");
   if (values.verdict !== undefined) update.verdict = oneOf(VERDICTS, values.verdict.toUpperCase(), "verdict");
   for (const field of TEXT_FIELDS) if (values[field] !== undefined) update[field] = text(values[field], field);
-  for (const field of OID_FIELDS) {
-    const value = values[field];
-    if (value !== undefined && !OID.test(value)) throw new Error(`--${field} must be a full commit ID.`);
-    if (value !== undefined) update[field] = value;
-  }
-  if (values.pr !== undefined && !PULL_REQUEST.test(values.pr)) throw new Error("--pr must be a GitHub pull request URL.");
-  if (values.pr !== undefined) update.pr = values.pr;
+  for (const field of OID_FIELDS) if (values[field] !== undefined) update[field] = commitId(values[field], field);
+  if (values.pr !== undefined) update.pr = pullRequest(values.pr);
   if (lists.note) update.notes = lists.note.map(note => text(note, "note"));
   const events = EVENT_KINDS.flatMap(kind => (lists[kind] ?? []).map(value => parseEvent(kind, value)));
   if (events.length > 0) update.events = events;
