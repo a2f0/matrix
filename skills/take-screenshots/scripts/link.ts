@@ -1,6 +1,6 @@
 /** Each clone's `.screenshots` link into the shared store. Node built-ins only, like artifacts.ts. */
 import {
-  lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmdirSync, symlinkSync,
+  lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmdirSync, type Stats, symlinkSync,
 } from "node:fs";
 import path from "node:path";
 import { claimNamespace } from "./namespace";
@@ -19,7 +19,7 @@ function sameFile(left: string, right: string): boolean {
 
 export function linkState(target: Target, artifacts: string): LinkState {
   const link = path.join(target.root, LINK);
-  let stats;
+  let stats: Stats;
   try { stats = lstatSync(link); } catch { return { state: "missing" }; }
   if (stats.isSymbolicLink()) {
     const destination = path.resolve(target.root, readlinkSync(link));

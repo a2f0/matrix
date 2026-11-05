@@ -1,6 +1,6 @@
 /** Which ignored paths in a repository are regenerable, and which must be kept. Node built-ins only, like space-cleanup.ts. */
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync } from "node:fs";
+import { existsSync, lstatSync, type Stats } from "node:fs";
 import path from "node:path";
 import { git } from "./git";
 
@@ -104,7 +104,7 @@ export function unsafeReason(root: string, rel: string): string | undefined {
   let current = root;
   for (const part of rel.split("/")) {
     current = path.join(current, part);
-    let stats;
+    let stats: Stats;
     try { stats = lstatSync(current); } catch { return "missing"; }
     if (stats.isSymbolicLink()) return "symlink";
     // A nested clone above the candidate owns it (an ignored node_modules that is a repository).

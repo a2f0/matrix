@@ -70,7 +70,8 @@ export function parseOptions(argv: string[]): Options {
     if (name === "no-seed") { options.seed = false; continue; }
     if (isFlag(name)) { options[name] = true; continue; }
     if (!isNumber(name) && !isString(name)) throw new Error(`Unknown option ${arg}.`);
-    const value = argv[i += 1];
+    i += 1;
+    const value = argv[i];
     if (value === undefined) throw new Error(`${arg} needs a value.`);
     if (isNumber(name)) {
       const number = Number(value);

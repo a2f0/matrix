@@ -350,7 +350,7 @@ export function audit(root: string, repos: string[], rules: Rule[], statusOf: (r
       const outcome = rule.check(checkout, context);
       if (outcome.status === "fail") {
         result.failed.push({ rule: rule.id, detail: outcome.detail });
-        (failures[rule.id] ??= []).push(repo);
+        failures[rule.id] = [...(failures[rule.id] ?? []), repo];
       } else if (outcome.status === "skip") result.skipped.push({ rule: rule.id, detail: outcome.detail });
     }
     return result;

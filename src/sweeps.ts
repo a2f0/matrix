@@ -87,7 +87,7 @@ export function startSweep(root: string, branch: string, selected: string[], sta
     throw error;
   }
   try {
-    repos.forEach((repo, index) => appendUpdate(directory, repo, initial[index]!));
+    for (const [index, repo] of repos.entries()) appendUpdate(directory, repo, initial[index]!);
     // Written last: list and report treat a directory without sweep.json as absent.
     writeJson(path.join(directory, "sweep.json"), sweep);
   } catch (error) {

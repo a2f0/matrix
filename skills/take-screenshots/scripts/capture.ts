@@ -125,7 +125,7 @@ export async function capture(target: Target, artifacts: string, options: { appl
     if (foreign) throw new Error(foreign);
     // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
     const partial = options.args.length > 0;
-    const inheritsDirty = partial && previous !== undefined && previous.dirty;
+    const inheritsDirty = partial && previous?.dirty === true;
     const inheritsIncomplete = partial && (previous === undefined || previous.status !== "complete");
     const base = {
       schemaVersion: 1 as const, project: target.project, ...(target.repo ? { repo: target.repo } : {}),

@@ -32,7 +32,7 @@ export function parseOptions(args: string[], spec: Record<string, FlagKind>, com
     if (value === undefined || (equals === -1 && value.startsWith("--"))) {
       throw new Error(`${command} option '--${name}' needs a value; use --${name}=<value> for one that starts with --.`);
     }
-    if (kind === "list") (parsed.lists[name] ??= []).push(value);
+    if (kind === "list") parsed.lists[name] = [...(parsed.lists[name] ?? []), value];
     else if (name in parsed.values) throw new Error(`${command} option '--${name}' was given twice.`);
     else parsed.values[name] = value;
   }

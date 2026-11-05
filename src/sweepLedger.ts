@@ -201,7 +201,8 @@ export function loadEntries(directory: string, sweep: Sweep): RepoEntry[] {
 export function report(sweep: Sweep, entries: RepoEntry[]): SweepReport {
   const counts: Partial<Record<SweepStatus, number>> = {};
   for (const entry of entries) counts[entry.status] = (counts[entry.status] ?? 0) + 1;
-  const updatedAt = entries.map(entry => entry.updatedAt).reduce((latest, at) => (at > latest ? at : latest), sweep.startedAt);
+  // ISO timestamps sort as text, so the last one is the latest.
+  const updatedAt = [sweep.startedAt, ...entries.map(entry => entry.updatedAt)].sort().at(-1)!;
   return {
     sweep,
     updatedAt,
