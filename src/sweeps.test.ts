@@ -141,6 +141,14 @@ describe("recordEntry", () => {
     expect(recordEntry(root, "chore/demo", "one", { notes: ["second"] }).notes).toEqual(["deploy is manual", "second"]);
   });
 
+  test("keeps the reason when the same status is recorded again without one", () => {
+    start("chore/demo", ["a2f0/one"]);
+    recordEntry(root, "chore/demo", "one", parseUpdate({ status: "blocked", reason: "waits for producer release" }, {}), at(1));
+    const entry = recordEntry(root, "chore/demo", "one", parseUpdate({ status: "blocked" }, { retry: ["enospc"] }), at(2));
+    expect(entry).toMatchObject({ status: "blocked", reason: "waits for producer release" });
+    expect(retro(root).unfinished).toEqual([{ branch: "chore/demo", repo: "a2f0/one", status: "blocked", reason: "waits for producer release" }]);
+  });
+
   test("rejects unknown repositories, sweeps, and malformed values", () => {
     start("chore/demo", ["a2f0/one"]);
     expect(() => recordEntry(root, "chore/demo", "a2f0/two", { status: "merged" })).toThrow("not part of sweep");

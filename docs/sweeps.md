@@ -40,7 +40,7 @@ whose installed agent-tool differs from its pin gets a note to reinstall.
 | Option | Records |
 | --- | --- |
 | `--status` | `pending`, `skipped`, `unchanged`, `in-progress`, `open`, `merged`, `blocked`, or `failed` |
-| `--reason` | Why it was skipped, unchanged, blocked, or failed; a new status without a reason clears the old one |
+| `--reason` | Why it was skipped, unchanged, blocked, or failed; a different status without a reason clears the old one, and the same status keeps it |
 | `--base`, `--head`, `--merge` | Full commit IDs: the pinned base, the reviewed head, and the merge commit |
 | `--pr` | The pull request URL |
 | `--validation`, `--deploy`, `--cleanup` | Short outcomes, such as `check passed: 164 tests` or `merged; deployed` |

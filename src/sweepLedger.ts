@@ -176,7 +176,7 @@ export function appendUpdate(directory: string, repo: string, update: StoredUpda
   }
 }
 
-/** Replay a repository's updates in append order. A new status without a reason clears the old reason. */
+/** Replay a repository's updates in append order. A different status without a reason clears the old reason. */
 export function loadEntry(directory: string, repo: string): RepoEntry {
   const folder = entryDirectory(directory, repo);
   const updates = updateFiles(folder).map(name => readJson(path.join(folder, name), isStoredUpdate));
@@ -189,7 +189,7 @@ export function loadEntry(directory: string, repo: string): RepoEntry {
       events: [...entry.events, ...events.map(event => ({ ...event, at }))],
       updatedAt: at,
     };
-    if (fields.status !== undefined && fields.reason === undefined) delete next.reason;
+    if (fields.status !== undefined && fields.status !== entry.status && fields.reason === undefined) delete next.reason;
     entry = next;
   }
   return entry;
