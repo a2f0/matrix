@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, statfsSync, writeSync } from "node:fs";
 import path from "node:path";
 import { audit, registryReleases, selectRules } from "./audit";
-import { type CheckoutStatus, checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
+import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DiskSpace, markdownHealth } from "./health";
@@ -189,8 +189,7 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
     const repos = selectRepos(manifest, args);
     if (command === "status") {
       const checkouts = repos.map(repo => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol)));
-      const staleInstalls = checkouts.filter(checkout => checkout.agentTool && !checkout.agentTool.current).map(checkout => checkout.repo);
-      output({ ready: checkouts.every(checkout => checkout.ready), checkouts, staleInstalls, unmanaged: unmanagedCheckouts(root, manifest.repos) });
+      output({ ready: checkouts.every(checkout => checkout.ready), checkouts, staleInstalls: staleInstalls(checkouts), unmanaged: unmanagedCheckouts(root, manifest.repos) });
       return 0;
     }
     const results = repos.map(repo => {

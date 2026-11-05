@@ -1,7 +1,7 @@
 import type { Audit } from "./audit";
-import type { CheckoutStatus } from "./checkouts";
+import { type CheckoutStatus, notReady, staleInstalls } from "./checkouts";
 import type { GitTransport } from "./gitTransport";
-import { notReady, type Recurrence, type Retro } from "./sweeps";
+import type { Recurrence, Retro } from "./sweeps";
 import { leftoverRepos, type Teardown } from "./teardown";
 import { plural } from "./text";
 
@@ -75,7 +75,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     const reason = notReady(status);
     return reason === undefined ? [] : [{ repo: status.repo, reason }];
   });
-  const staleInstalls = inputs.statuses.filter(status => status.agentTool && !status.agentTool.current).map(status => status.repo);
+  const stale = staleInstalls(inputs.statuses);
   const suggestions: string[] = [];
   const low = inputs.disk !== undefined && inputs.disk.free < MIN_FREE_DISK_GIB * GIB;
   if (low) suggestions.push(`Free disk space before the next sweep: ${gib(inputs.disk!.free)} free of ${gib(inputs.disk!.total)}; validation needs at least ${MIN_FREE_DISK_GIB} GiB; \`bun run space\` lists what is safe to remove.`);
@@ -83,7 +83,7 @@ export function assessHealth(inputs: HealthInputs): Health {
   if (leftover.length > 0) suggestions.push(`Stop what earlier work left running in ${list(leftover)}: \`bun run teardown\` lists it, \`--apply\` stops recorded processes, and untracked ones need stopping by hand.`);
   for (const problem of inputs.git?.problems ?? []) suggestions.push(`Keep Git on SSH: ${problem}; see docs/health.md#github-over-ssh.`);
   for (const { repo, reason } of notReadyList) suggestions.push(`Inspect ${repo} before the next sweep: ${reason}.`);
-  if (staleInstalls.length > 0) suggestions.push(`Reinstall dependencies in ${list(staleInstalls)}; their node_modules hold a different agent-tool than they pin.`);
+  if (stale.length > 0) suggestions.push(`Reinstall dependencies in ${list(stale)}; their node_modules hold a different agent-tool than they pin.`);
   for (const repo of inputs.discovery?.added ?? []) suggestions.push(`Onboard ${repo}: \`bun run discover --apply\`, then the onboarding steps in AGENTS.md.`);
   for (const repo of inputs.discovery?.notDiscovered ?? []) suggestions.push(`Check ${repo}: it is managed, but discovery no longer finds it (renamed, archived, or no longer public?).`);
   for (const [rule, repos] of Object.entries(inputs.audit.failures)) {
@@ -97,7 +97,7 @@ export function assessHealth(inputs: HealthInputs): Health {
   return {
     ok: suggestions.length === 0,
     remote: inputs.discovery !== undefined,
-    checkouts: { total: inputs.statuses.length, ready: inputs.statuses.filter(status => status.ready).length, notReady: notReadyList, staleInstalls, unmanaged: inputs.unmanaged },
+    checkouts: { total: inputs.statuses.length, ready: inputs.statuses.filter(status => status.ready).length, notReady: notReadyList, staleInstalls: stale, unmanaged: inputs.unmanaged },
     audit: {
       rules: inputs.audit.rules.map(rule => rule.id),
       failures: inputs.audit.failures,

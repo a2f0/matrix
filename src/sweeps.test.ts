@@ -3,8 +3,8 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { CheckoutStatus } from "./checkouts";
-import { listSweeps, markdownReport, notReady, parseEvent, parseUpdate, recordEntry, retro, startSweep, sweepReport, sweepsDirectory } from "./sweeps";
+import { type CheckoutStatus, notReady } from "./checkouts";
+import { listSweeps, markdownReport, parseEvent, parseUpdate, recordEntry, retro, startSweep, sweepReport, sweepsDirectory } from "./sweeps";
 
 const HEAD = "a".repeat(40);
 let root: string;

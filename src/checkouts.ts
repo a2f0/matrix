@@ -3,7 +3,7 @@ import path from "node:path";
 import { git, gitOutput, gitSucceeds } from "./git";
 import { CHECKOUTS, checkoutPath, parseGitHubRepo, repoName } from "./manifest";
 import { AGENT_TOOL, dependency, parseObject } from "./packageJson";
-import { errorMessage } from "./text";
+import { errorMessage, plural } from "./text";
 
 export interface SyncResult {
   readonly repo: string;
@@ -165,12 +165,29 @@ export function checkoutStatus(root: string, repo: string, url: string): Checkou
     const changes = changeCount(directory);
     const counts = gitOutput(directory, ["rev-list", "--left-right", "--count", `HEAD...refs/remotes/origin/${state.defaultBranch}`]);
     const [ahead = 0, behind = 0] = counts.split(/\s+/).map(Number);
-    const ready = state.branch === state.defaultBranch && changes === 0 && ahead === 0 && behind === 0;
     const agentTool = agentToolInstall(directory);
-    return { ...base, present: true, ready, ...state, changes, ahead, behind, ...(agentTool && { agentTool }) };
+    const details = { ...state, changes, ahead, behind, ...(agentTool && { agentTool }) };
+    return { ...base, present: true, ready: notReady({ ...base, present: true, ...details }) === undefined, ...details };
   } catch (error) {
     return { ...base, present: true, ready: false, error: errorMessage(error) };
   }
+}
+
+/** Why a checkout cannot join a sweep yet, or undefined when it is ready. */
+export function notReady(status: Omit<CheckoutStatus, "ready">): string | undefined {
+  if (status.error) return status.error;
+  if (!status.present) return "checkout missing; run sync";
+  if (status.branch === null) return "detached HEAD";
+  if (status.branch !== status.defaultBranch) return `on branch ${status.branch}`;
+  if (status.changes) return plural(status.changes, "local change");
+  if (status.ahead) return plural(status.ahead, "unpushed commit");
+  if (status.behind) return `${plural(status.behind, "commit")} behind origin; run sync`;
+  return undefined;
+}
+
+/** Checkouts whose node_modules hold a different agent-tool than they pin. */
+export function staleInstalls(statuses: CheckoutStatus[]): string[] {
+  return statuses.filter(status => status.agentTool && !status.agentTool.current).map(status => status.repo);
 }
 
 /** Entries under checkouts/ that matrix.json does not manage. They are reported, never removed. */

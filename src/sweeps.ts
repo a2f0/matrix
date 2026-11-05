@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { CheckoutStatus } from "./checkouts";
+import { type CheckoutStatus, notReady } from "./checkouts";
 import { git, gitOutput } from "./git";
 import { findRepo, repoName } from "./manifest";
 import { object } from "./packageJson";
-import { errorMessage, plural } from "./text";
+import { errorMessage } from "./text";
 
 export const STATUSES = ["pending", "skipped", "unchanged", "in-progress", "open", "merged", "blocked", "failed"] as const;
 export type SweepStatus = (typeof STATUSES)[number];
@@ -247,18 +247,6 @@ function loadSweep(root: string, branch: string): { directory: string; sweep: Sw
 
 function loadEntries(directory: string, sweep: Sweep): RepoEntry[] {
   return sweep.repos.map(repo => loadEntry(directory, repo));
-}
-
-/** Why a checkout cannot join a sweep yet, or undefined when it is ready. */
-export function notReady(status: CheckoutStatus): string | undefined {
-  if (status.error) return status.error;
-  if (!status.present) return "checkout missing; run sync";
-  if (status.branch === null) return "detached HEAD";
-  if (status.branch !== status.defaultBranch) return `on branch ${status.branch}`;
-  if (status.changes) return plural(status.changes, "local change");
-  if (status.ahead) return plural(status.ahead, "unpushed commit");
-  if (status.behind) return `${plural(status.behind, "commit")} behind origin; run sync`;
-  return undefined;
 }
 
 function report(sweep: Sweep, entries: RepoEntry[]): SweepReport {
