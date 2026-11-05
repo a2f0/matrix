@@ -17,7 +17,11 @@ export interface Checkout {
 }
 
 function isFile(file: string): boolean {
-  try { return lstatSync(file).isFile(); } catch { return false; }
+  try {
+    return lstatSync(file).isFile();
+  } catch {
+    return false;
+  }
 }
 
 export function openCheckout(repo: string, directory: string): Checkout {

@@ -68,7 +68,7 @@ export function dotenvNames(source: string, file: string): string[] {
     seen.add(name.toUpperCase());
     names.push(name);
     const quote = value[0];
-    if (quote !== "\"" && quote !== "'") continue;
+    if (quote !== '"' && quote !== "'") continue;
     const closing = closingQuote(lines, index, line.length - value.length, quote);
     if (!closing) throw new Error(`${file}:${index + 1}: ${name} has an unterminated quoted value.`);
     // gh keeps parsing after a closing quote, so anything but a comment there could be another setting.

@@ -17,7 +17,14 @@ import { supersededGuidance } from "./superseded";
 const AGENTS_MD_WORD_BUDGET = 2_800;
 
 const read = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
-const DOCS = ["README.md", "AGENTS.md", ...readdirSync(path.join(ROOT, "docs")).filter(file => file.endsWith(".md")).sort().map(file => `docs/${file}`)];
+const DOCS = [
+  "README.md",
+  "AGENTS.md",
+  ...readdirSync(path.join(ROOT, "docs"))
+    .filter(file => file.endsWith(".md"))
+    .sort()
+    .map(file => `docs/${file}`),
+];
 /** Docs about matrix itself; these two describe commands in the managed repositories. */
 const MATRIX_DOCS = DOCS.filter(file => !["docs/tooling.md", "docs/fastlane.md"].includes(file));
 const code = (file: string) => splitCode(read(file)).code;
@@ -37,7 +44,11 @@ function agentToolCommands(): Map<string, Set<string>> {
     const match = /^ {2}([a-z][a-z-]*)(.*)$/.exec(line);
     if (!match) continue;
     // Usage and description are separated by a run of spaces; alternatives by " | ".
-    const [first, ...rest] = match[2]!.trim().split(/\s{2,}/)[0]!.split(" | ").map(segment => segment.trim().split(/\s+/));
+    const [first, ...rest] = match[2]!
+      .trim()
+      .split(/\s{2,}/)[0]!
+      .split(" | ")
+      .map(segment => segment.trim().split(/\s+/));
     add(match[1]!, first![0]);
     for (const [sub, next] of rest) {
       add(match[1]!, sub);
@@ -107,7 +118,11 @@ describe("guidance", () => {
 
   test("matrix meets the standards it audits", () => {
     const checkout = openCheckout("a2f0/matrix", ROOT);
-    const context = { releases: () => { throw new Error("remote rules do not run here"); } };
+    const context = {
+      releases: () => {
+        throw new Error("remote rules do not run here");
+      },
+    };
     const failures = RULES
       // Matrix, like agent-tool, is agent tooling, so its README describes the skills it installs.
       // origin-ssh reads this clone's remote, not committed files; CI's checkout clones over HTTPS.

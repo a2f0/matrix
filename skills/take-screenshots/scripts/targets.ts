@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { toplevel } from "./git";
 import { targetFor } from "./namespace";
-import { lexists, LINK, type Target } from "./store";
+import { LINK, lexists, type Target } from "./store";
 
 // Kept in sync with space-cleanup/scripts/targets.ts isMatrixWorkspace.
 function isMatrixWorkspace(root: string): boolean {
@@ -25,8 +25,10 @@ export function artifactsRoot(root: string, env: NodeJS.ProcessEnv = process.env
 export function packageScripts(root: string): Record<string, unknown> {
   try {
     const scripts = (JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as { scripts?: unknown }).scripts;
-    return typeof scripts === "object" && scripts !== null ? scripts as Record<string, unknown> : {};
-  } catch { return {}; }
+    return typeof scripts === "object" && scripts !== null ? (scripts as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Whether a repository captures screenshots: a `screenshots` script, or a capture left in .screenshots. */

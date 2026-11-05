@@ -3,8 +3,23 @@ import path from "node:path";
 import { type CheckoutStatus, notReady } from "./checkouts";
 import { findRepo } from "./manifest";
 import {
-  appendUpdate, type EntryUpdate, EVENT_KINDS, type EventKind, loadEntries, loadEntry, loadSweep, type RepoEntry, report,
-  STATUSES, type StoredUpdate, type Sweep, type SweepEvent, type SweepReport, sweepDirectory, VERDICTS, writeJson,
+  appendUpdate,
+  type EntryUpdate,
+  EVENT_KINDS,
+  type EventKind,
+  loadEntries,
+  loadEntry,
+  loadSweep,
+  type RepoEntry,
+  report,
+  STATUSES,
+  type StoredUpdate,
+  type Sweep,
+  type SweepEvent,
+  type SweepReport,
+  sweepDirectory,
+  VERDICTS,
+  writeJson,
 } from "./sweepLedger";
 
 const CAUSE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -54,13 +69,23 @@ export function parseUpdate(values: Record<string, string>, lists: Record<string
   return update;
 }
 
-export interface StartOptions { topic?: string; issue?: string }
+export interface StartOptions {
+  topic?: string;
+  issue?: string;
+}
 
 /**
  * Create a ledger for a sweep branch. Ready checkouts start `pending` at their
  * current commit; the rest are `skipped` with the reason, as sweep step 1 requires.
  */
-export function startSweep(root: string, branch: string, selected: string[], statusOf: (repo: string) => CheckoutStatus, options: StartOptions = {}, now = new Date()): SweepReport {
+export function startSweep(
+  root: string,
+  branch: string,
+  selected: string[],
+  statusOf: (repo: string) => CheckoutStatus,
+  options: StartOptions = {},
+  now = new Date(),
+): SweepReport {
   // Naming one repository twice, as owner/name and as a checkout name, must not count it twice.
   const seen = new Set<string>();
   const repos = selected.filter(repo => !seen.has(repo.toLowerCase()) && seen.add(repo.toLowerCase()));
@@ -69,21 +94,32 @@ export function startSweep(root: string, branch: string, selected: string[], sta
   const topic = options.topic === undefined ? undefined : text(options.topic, "topic");
   const directory = sweepDirectory(root, branch);
   const at = now.toISOString();
-  const sweep: Sweep = { schemaVersion: 1, branch, ...(topic !== undefined && { topic }), ...(options.issue !== undefined && { issue: options.issue }), startedAt: at, repos };
+  const sweep: Sweep = {
+    schemaVersion: 1,
+    branch,
+    ...(topic !== undefined && { topic }),
+    ...(options.issue !== undefined && { issue: options.issue }),
+    startedAt: at,
+    repos,
+  };
   const initial = repos.map((repo): StoredUpdate => {
     const status = statusOf(repo);
     const reason = notReady(status);
     const install = status.agentTool;
-    const notes = install && !install.current
-      ? [`node_modules holds agent-tool ${install.installed ?? "none"}, pinned ${install.pinned}; run the checkout's install before its scripts`]
-      : [];
-    return reason === undefined
-      ? { at, status: "pending", ...(status.head && { base: status.head }), notes }
-      : { at, status: "skipped", reason, notes };
+    const notes =
+      install && !install.current
+        ? [`node_modules holds agent-tool ${install.installed ?? "none"}, pinned ${install.pinned}; run the checkout's install before its scripts`]
+        : [];
+    return reason === undefined ? { at, status: "pending", ...(status.head && { base: status.head }), notes } : { at, status: "skipped", reason, notes };
   });
   mkdirSync(path.dirname(directory), { recursive: true, mode: 0o700 });
-  try { mkdirSync(directory, { mode: 0o700 }); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`A sweep ledger already exists at ${directory}; use sweep record or sweep report, or choose a branch name that differs by more than case.`);
+  try {
+    mkdirSync(directory, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST")
+      throw new Error(
+        `A sweep ledger already exists at ${directory}; use sweep record or sweep report, or choose a branch name that differs by more than case.`,
+      );
     throw error;
   }
   try {
@@ -117,8 +153,9 @@ export function sweepReport(root: string, branch: string): SweepReport {
   return report(sweep, loadEntries(directory, sweep));
 }
 
-
-function cell(value: string | undefined): string { return (value ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|").trim(); }
+function cell(value: string | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+}
 
 function pullLink(url: string | undefined): string {
   const match = url && /github\.com\/([^/]+\/[^/]+)\/pull\/([0-9]+)$/.exec(url);
@@ -128,7 +165,9 @@ function pullLink(url: string | undefined): string {
 /** A ledger table for a tracking issue or PR body. It holds only what the ledger holds, never logs. */
 export function markdownReport(result: SweepReport): string {
   const { sweep } = result;
-  const counts = STATUSES.filter(status => result.counts[status]).map(status => `${status} ${result.counts[status]}`).join(", ");
+  const counts = STATUSES.filter(status => result.counts[status])
+    .map(status => `${status} ${result.counts[status]}`)
+    .join(", ");
   const lines = [
     `Sweep \`${sweep.branch}\`${sweep.topic ? `: ${cell(sweep.topic)}` : ""}`,
     "",

@@ -26,7 +26,9 @@ function withEnv<T>(values: Record<string, string>, action: () => T): T {
   try {
     return action();
   } finally {
-    for (const [key, value] of saved) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    for (const [key, value] of saved)
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
   }
 }
 

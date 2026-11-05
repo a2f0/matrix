@@ -23,10 +23,17 @@ export interface Target {
   readonly id?: string;
 }
 
-export function storeDir(target: Target, artifacts: string): string { return path.join(artifacts, target.project, "screenshots"); }
+export function storeDir(target: Target, artifacts: string): string {
+  return path.join(artifacts, target.project, "screenshots");
+}
 
 export function lexists(file: string): boolean {
-  try { lstatSync(file); return true; } catch { return false; }
+  try {
+    lstatSync(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

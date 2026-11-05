@@ -48,7 +48,23 @@ export function typescriptGuarded(checkout: Checkout): boolean {
   const configs = (patterns: string[]) => checkout.tracked(...patterns).map(file => ({ file, text: checkout.read(file) ?? "" }));
   if (configs([":(glob)**/biome.json", ":(glob)**/biome.jsonc"]).some(({ text }) => biomeGuardsCycles(text))) return true;
   // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
-  const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-F", "-e", "no-circular", "--", "*.ts", "*.mts", "*.cts", "*.js", "*.cjs", "*.mjs", "*.json"]);
+  const cruiser = git(checkout.directory, [
+    "grep",
+    "-l",
+    "-z",
+    "-I",
+    "-F",
+    "-e",
+    "no-circular",
+    "--",
+    "*.ts",
+    "*.mts",
+    "*.cts",
+    "*.js",
+    "*.cjs",
+    "*.mjs",
+    "*.json",
+  ]);
   if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
   const candidates = cruiser.stdout.split("\0").filter(file => file && !TEST_PATH.test(file));
   if (candidates.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return true;
@@ -79,7 +95,8 @@ function agentToolGraphChecked(checkout: Checkout): boolean {
   if (workflows(checkout).some(text => text.split("\n").some(line => /^\s*(-\s*)?run:/.test(line) && runsIt(line)))) return true;
   if (checkout.tracked(":(glob)scripts/**/*.json").some(file => commandRunsGraphCheck(parseObject(checkout.read(file))))) return true;
   // A repository's own runner script passing the arguments (skyline's scripts/testing/check.ts).
-  return checkout.tracked(...sourceGlobs("scripts/**/"))
+  return checkout
+    .tracked(...sourceGlobs("scripts/**/"))
     .filter(file => !TEST_FILE.test(file))
     .some(file => /["'`]graph["'`]\s*,\s*["'`]check["'`]/.test(checkout.read(file) ?? ""));
 }

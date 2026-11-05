@@ -9,33 +9,13 @@
     ]
   },
   "branch": {
-    "types": [
-      "feat",
-      "fix",
-      "docs",
-      "style",
-      "refactor",
-      "perf",
-      "test",
-      "build",
-      "ci",
-      "chore",
-      "revert"
-    ],
-    "exempt": [
-      "main"
-    ],
+    "types": ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"],
+    "exempt": ["main"],
     "maxLength": null
   },
   "graph": {
-    "include": [
-      "src/**",
-      "skills/**",
-      "scripts/**"
-    ],
-    "tests": [
-      "**/*.test.ts"
-    ],
+    "include": ["src/**", "skills/**", "scripts/**"],
+    "tests": ["**/*.test.ts"],
     "layers": [
       {
         "name": "primitives",
@@ -54,9 +34,7 @@
       },
       {
         "name": "checkouts",
-        "include": [
-          "src/checkouts.ts"
-        ]
+        "include": ["src/checkouts.ts"]
       },
       {
         "name": "commands",
@@ -75,28 +53,19 @@
       },
       {
         "name": "health",
-        "include": [
-          "src/health.ts"
-        ]
+        "include": ["src/health.ts"]
       },
       {
         "name": "cli",
-        "include": [
-          "src/cli.ts"
-        ]
+        "include": ["src/cli.ts"]
       },
       {
         "name": "entry",
-        "include": [
-          "src/index.ts"
-        ]
+        "include": ["src/index.ts"]
       },
       {
         "name": "scripts",
-        "include": [
-          "skills/**",
-          "scripts/**"
-        ]
+        "include": ["skills/**", "scripts/**"]
       }
     ]
   }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { findCandidates, parseIgnored, protectedName, selected, unsafeReason } from "../skills/space-cleanup/scripts/candidates";
 import { gitEnvironment } from "../skills/space-cleanup/scripts/git";
 import { applyMachine, derivedDataRemovals, type Host, INSTALLING, machineItems } from "../skills/space-cleanup/scripts/machine";
-import { busyRoots, parseProcesses, type Proc } from "../skills/space-cleanup/scripts/processes";
+import { busyRoots, type Proc, parseProcesses } from "../skills/space-cleanup/scripts/processes";
 import { main, parseOptions } from "../skills/space-cleanup/scripts/space-cleanup";
 import { resolveTargets } from "../skills/space-cleanup/scripts/targets";
 import { gitIn, gitInit, tempDir, write } from "./testFixtures";
@@ -63,8 +63,8 @@ describe("space cleanup", () => {
     const found = Object.fromEntries(findCandidates(root).map(candidate => [candidate.path, candidate.tier]));
     expect(found).toEqual({
       ".turbo": "caches",
-      "dist": "builds",
-      "node_modules": "deps",
+      dist: "builds",
+      node_modules: "deps",
       "node_modules/.cache": "caches",
       "packages/app/node_modules": "deps",
       ".wrangler/tmp": "caches",
@@ -90,9 +90,25 @@ describe("space cleanup", () => {
       expect(main([root])).toBe(0);
       expect(existsSync(path.join(root, ".turbo"))).toBe(true);
       expect(main([root, "--apply", "--include-busy"])).toBe(0);
-    } finally { console.log = quiet; }
+    } finally {
+      console.log = quiet;
+    }
     for (const gone of ["packages/app/.turbo", ".turbo", "node_modules/.cache", ".wrangler/tmp"]) expect(existsSync(path.join(root, gone))).toBe(false);
-    for (const kept of ["packages/app/dist/.env", "packages/app/out/data.sqlite", "test-results/vendor/clone/notes.md", "dist", "node_modules/pkg", ".wrangler/state/d1/db.sqlite", ".env", "scratch/notes.md", "coverage/lcov.info", "build/keep.txt", "out/file", ".secrets/prod/key", "src/index.ts"]) {
+    for (const kept of [
+      "packages/app/dist/.env",
+      "packages/app/out/data.sqlite",
+      "test-results/vendor/clone/notes.md",
+      "dist",
+      "node_modules/pkg",
+      ".wrangler/state/d1/db.sqlite",
+      ".env",
+      "scratch/notes.md",
+      "coverage/lcov.info",
+      "build/keep.txt",
+      "out/file",
+      ".secrets/prod/key",
+      "src/index.ts",
+    ]) {
       expect(existsSync(path.join(root, kept))).toBe(true);
     }
   });
@@ -148,7 +164,11 @@ describe("space cleanup", () => {
 
   test("fails closed when processes cannot be listed", () => {
     const root = fixture();
-    expect(() => main([root, "--apply"], root, () => { throw new Error("cannot list processes with lsof"); })).toThrow("cannot list processes");
+    expect(() =>
+      main([root, "--apply"], root, () => {
+        throw new Error("cannot list processes with lsof");
+      }),
+    ).toThrow("cannot list processes");
     expect(existsSync(path.join(root, ".turbo"))).toBe(true);
   });
 
@@ -166,7 +186,9 @@ describe("space cleanup", () => {
       expect(findCandidates(root).map(candidate => candidate.path)).toContain(".turbo");
       expect(unsafeReason(other, ".turbo")).toBe("tracked");
     } finally {
-      for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+      for (const [name, value] of Object.entries(saved))
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
     }
   });
 
@@ -198,7 +220,10 @@ describe("space cleanup", () => {
           if (command === "brew") return "==> This operation would free approximately 1.5GB of disk space.";
           return "";
         },
-        run: (command, args) => { ran.push(`${command} ${args.join(" ")}`); return ""; },
+        run: (command, args) => {
+          ran.push(`${command} ${args.join(" ")}`);
+          return "";
+        },
       };
       return { home, ran, fake };
     }
@@ -206,7 +231,12 @@ describe("space cleanup", () => {
     test("empties DerivedData, runs cache commands, and leaves report-only items alone", () => {
       const { home, ran, fake } = host(["bun", "xcrun", "brew"]);
       const items = machineItems([], fake);
-      expect(items.filter(item => item.reportOnly).map(item => item.id).toSorted()).toEqual(["gradle-caches", "unavailable-simulators"]);
+      expect(
+        items
+          .filter(item => item.reportOnly)
+          .map(item => item.id)
+          .toSorted(),
+      ).toEqual(["gradle-caches", "unavailable-simulators"]);
       expect(applyMachine(items, () => [])).toBe(0);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build"))).toBe(false);
       expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/SourcePackages/checkouts/Lib/.git/HEAD"))).toBe(true);
@@ -253,10 +283,14 @@ describe("space cleanup", () => {
   test("skips repositories that became busy after the scan", () => {
     const root = realpathSync(fixture());
     let calls = 0;
-    const discover = (): Proc[] => calls++ === 0 ? [] : [{ pid: 999999, ppid: 1, name: "node", args: "vite build", cwd: path.join(root, "src") }];
+    const discover = (): Proc[] => (calls++ === 0 ? [] : [{ pid: 999999, ppid: 1, name: "node", args: "vite build", cwd: path.join(root, "src") }]);
     const quiet = console.log;
     console.log = () => {};
-    try { expect(main([root, "--apply"], root, discover)).toBe(0); } finally { console.log = quiet; }
+    try {
+      expect(main([root, "--apply"], root, discover)).toBe(0);
+    } finally {
+      console.log = quiet;
+    }
     expect(calls).toBe(2);
     expect(existsSync(path.join(root, ".turbo"))).toBe(true);
   });
@@ -303,7 +337,8 @@ describe("space cleanup", () => {
       "npx tsc",
       "pnpm dlx create-vite",
       "bun x eslint",
-    ]) expect(INSTALLING.test(args)).toBe(true);
+    ])
+      expect(INSTALLING.test(args)).toBe(true);
     for (const args of ["bun test", "npm run build", "brew list", "node install.js", "bun --cwd /repo test"]) expect(INSTALLING.test(args)).toBe(false);
   });
 
@@ -314,11 +349,19 @@ describe("space cleanup", () => {
       ".npm/_cacache/x": "x",
     });
     const ran: string[] = [];
-    const fake: Host = { home, has: command => command === "npm", output: () => "", run: (command, args) => { ran.push(`${command} ${args.join(" ")}`); return ""; } };
+    const fake: Host = {
+      home,
+      has: command => command === "npm",
+      output: () => "",
+      run: (command, args) => {
+        ran.push(`${command} ${args.join(" ")}`);
+        return "";
+      },
+    };
     const items = machineItems([], fake);
     let calls = 0;
     // An install starts after DerivedData is cleaned and before the npm cache is.
-    applyMachine(items, () => calls++ === 0 ? [] : [{ pid: 8, ppid: 1, name: "node", args: "node /x/npm-cli.js install", cwd: "/x" }]);
+    applyMachine(items, () => (calls++ === 0 ? [] : [{ pid: 8, ppid: 1, name: "node", args: "node /x/npm-cli.js install", cwd: "/x" }]));
     expect(calls).toBe(2);
     expect(ran).toEqual([]);
     expect(items.find(item => item.id === "npm-cache")?.skipped).toBe("an install is running (pid 8)");
@@ -346,7 +389,11 @@ describe("space cleanup", () => {
     const alive = (pid: number) => pid !== 12;
     expect(() => parseProcesses(table, args, "", 501, alive)).toThrow("cannot read the working directory of node 10");
     const procs = parseProcesses(table, args, "p10\nfcwd\nn/repo\n", 501, alive);
-    expect(procs.map(proc => [proc.pid, proc.cwd])).toEqual([[1, undefined], [10, "/repo"], [12, undefined]]);
+    expect(procs.map(proc => [proc.pid, proc.cwd])).toEqual([
+      [1, undefined],
+      [10, "/repo"],
+      [12, undefined],
+    ]);
   });
 
   test("exits nonzero when a repository cannot be scanned", () => {
@@ -355,7 +402,11 @@ describe("space cleanup", () => {
     writeFileSync(path.join(root, ".git", "index"), "not an index");
     const quiet = console.log;
     console.log = () => {};
-    try { expect(main([root], root, () => [])).toBe(1); } finally { console.log = quiet; }
+    try {
+      expect(main([root], root, () => [])).toBe(1);
+    } finally {
+      console.log = quiet;
+    }
   });
 
   test("refuses trees holding credentials or bare repositories", () => {
@@ -372,8 +423,14 @@ describe("space cleanup", () => {
     writeFileSync(path.join(root, "node_modules/.cache/babel/a"), "x".repeat(64 * 1024));
     const quiet = console.log;
     let output = "";
-    console.log = (text: string) => { output += text; };
-    try { main([root, "--json", "--include-busy"], root, () => []); } finally { console.log = quiet; }
+    console.log = (text: string) => {
+      output += text;
+    };
+    try {
+      main([root, "--json", "--include-busy"], root, () => []);
+    } finally {
+      console.log = quiet;
+    }
     const report = JSON.parse(output) as { repos: Array<{ candidates: Array<{ path: string; bytes: number }> }> };
     const cache = report.repos[0]!.candidates.find(candidate => candidate.path === "node_modules/.cache");
     expect(cache!.bytes).toBeGreaterThanOrEqual(64 * 1024);
@@ -383,7 +440,9 @@ describe("space cleanup", () => {
     const home = tempDir("space-cleanup-home");
     write(home, { "Library/Developer/Xcode/DerivedData/App-abc/Build/x": "x" });
     const items = machineItems([], { home, has: () => false, output: () => "", run: () => "" });
-    applyMachine(items, () => { throw new Error("cannot list processes with lsof"); });
+    applyMachine(items, () => {
+      throw new Error("cannot list processes with lsof");
+    });
     expect(items[0]?.skipped).toContain("cannot list processes");
     expect(existsSync(path.join(home, "Library/Developer/Xcode/DerivedData/App-abc/Build/x"))).toBe(true);
   });
@@ -411,10 +470,14 @@ describe("space cleanup", () => {
     const second = realpathSync(fixture());
     let calls = 0;
     // The second repository becomes busy while the first is being cleaned.
-    const discover = (): Proc[] => ++calls <= 2 ? [] : [{ pid: 999998, ppid: 1, name: "node", args: "vite", cwd: second }];
+    const discover = (): Proc[] => (++calls <= 2 ? [] : [{ pid: 999998, ppid: 1, name: "node", args: "vite", cwd: second }]);
     const quiet = console.log;
     console.log = () => {};
-    try { main([first, second, "--apply"], first, discover); } finally { console.log = quiet; }
+    try {
+      main([first, second, "--apply"], first, discover);
+    } finally {
+      console.log = quiet;
+    }
     expect(existsSync(path.join(first, ".turbo"))).toBe(false);
     expect(existsSync(path.join(second, ".turbo"))).toBe(true);
   });

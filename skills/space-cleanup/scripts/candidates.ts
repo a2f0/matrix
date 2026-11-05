@@ -9,9 +9,19 @@ export type Tier = (typeof TIERS)[number];
 
 /** Tool and test caches: rebuilt on the next run at little cost. */
 const CACHE_NAMES = new Set([
-  ".turbo", ".parcel-cache", ".eslintcache", ".stylelintcache", "coverage", ".nyc_output",
-  "test-results", "playwright-report", "blob-report",
-  "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+  ".turbo",
+  ".parcel-cache",
+  ".eslintcache",
+  ".stylelintcache",
+  "coverage",
+  ".nyc_output",
+  "test-results",
+  "playwright-report",
+  "blob-report",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
 ]);
 /** Build outputs: rebuilt by the repository's build, which can take minutes. */
 const BUILD_NAMES = new Set(["dist", "build", "out", ".next", ".nuxt", ".output", ".svelte-kit", ".expo", ".gradle", ".build", "DerivedData"]);
@@ -19,7 +29,10 @@ const BUILD_NAMES = new Set(["dist", "build", "out", ".next", ".nuxt", ".output"
 const DEPS_NAMES = new Set(["node_modules", ".venv"]);
 /** Regenerable children of ignored directories that are themselves kept by a lighter tier. */
 const NESTED: Record<string, Array<[string, Tier]>> = {
-  node_modules: [[".cache", "caches"], [".vite", "caches"]],
+  node_modules: [
+    [".cache", "caches"],
+    [".vite", "caches"],
+  ],
   ".next": [["cache", "caches"]],
   // .wrangler/state holds local D1, KV, and R2 data; only tmp is disposable.
   ".wrangler": [["tmp", "caches"]],
@@ -41,7 +54,10 @@ function classify(rel: string, root: string): Tier | undefined {
 
 /** Ignored paths from `git status --porcelain=v1 -z --ignored`, without trailing slashes. */
 export function parseIgnored(porcelain: string): string[] {
-  return porcelain.split("\0").filter(entry => entry.startsWith("!! ")).map(entry => entry.slice(3).replace(/\/$/, ""));
+  return porcelain
+    .split("\0")
+    .filter(entry => entry.startsWith("!! "))
+    .map(entry => entry.slice(3).replace(/\/$/, ""));
 }
 
 export interface Candidate {
@@ -58,15 +74,17 @@ const TEMPLATE = /\.(example|sample|template)$/;
 /** Whether one path component is protected, by the same patterns `find` applies below. */
 export function protectedName(name: string): boolean {
   if (TEMPLATE.test(name)) return false;
-  return PROTECTED.some(pattern => pattern.startsWith("*.") ? name.endsWith(pattern.slice(1))
-    : pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1))
-    : name === pattern);
+  return PROTECTED.some(pattern =>
+    pattern.startsWith("*.") ? name.endsWith(pattern.slice(1)) : pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern,
+  );
 }
 
 /** A working tree (`.git` inside) or a bare repository (`HEAD`, `objects`, `refs`). */
 export function isRepository(directory: string): boolean {
-  return existsSync(path.join(directory, ".git"))
-    || (existsSync(path.join(directory, "HEAD")) && existsSync(path.join(directory, "objects")) && existsSync(path.join(directory, "refs")));
+  return (
+    existsSync(path.join(directory, ".git")) ||
+    (existsSync(path.join(directory, "HEAD")) && existsSync(path.join(directory, "objects")) && existsSync(path.join(directory, "refs")))
+  );
 }
 
 /** The first repository at or under `directory`, undefined when there is none; throws when it cannot search. */
@@ -87,13 +105,36 @@ function findRepository(directory: string): string | undefined {
  * reason are relative to `base`.
  */
 export function holdsProtected(directory: string, base: string): string | undefined {
-  const protectedFile = spawnSync("find", [directory, "(", ...PROTECTED.flatMap((name, index) => [...(index ? ["-o"] : []), "-name", name]), ")",
-    "!", "-name", "*.example", "!", "-name", "*.sample", "!", "-name", "*.template", "-print", "-quit"], { encoding: "utf8" });
+  const protectedFile = spawnSync(
+    "find",
+    [
+      directory,
+      "(",
+      ...PROTECTED.flatMap((name, index) => [...(index ? ["-o"] : []), "-name", name]),
+      ")",
+      "!",
+      "-name",
+      "*.example",
+      "!",
+      "-name",
+      "*.sample",
+      "!",
+      "-name",
+      "*.template",
+      "-print",
+      "-quit",
+    ],
+    { encoding: "utf8" },
+  );
   if (protectedFile.status !== 0) return "could not search for protected files";
   const found = protectedFile.stdout.trim();
   if (found !== "") return `contains ${path.relative(base, found)}`;
   let repository: string | undefined;
-  try { repository = findRepository(directory); } catch { return "could not search for repositories"; }
+  try {
+    repository = findRepository(directory);
+  } catch {
+    return "could not search for repositories";
+  }
   if (repository) return `contains repository ${path.relative(base, repository) || "."}`;
   return undefined;
 }
@@ -105,7 +146,11 @@ export function unsafeReason(root: string, rel: string): string | undefined {
   for (const part of rel.split("/")) {
     current = path.join(current, part);
     let stats: Stats;
-    try { stats = lstatSync(current); } catch { return "missing"; }
+    try {
+      stats = lstatSync(current);
+    } catch {
+      return "missing";
+    }
     if (stats.isSymbolicLink()) return "symlink";
     // A nested clone above the candidate owns it (an ignored node_modules that is a repository).
     if (isRepository(current)) return `inside repository ${path.relative(root, current)}`;

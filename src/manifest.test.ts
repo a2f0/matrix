@@ -45,7 +45,15 @@ describe("repository helpers", () => {
   });
 
   test("normalizes GitHub remote URLs", () => {
-    for (const url of ["git@github.com:a2f0/nc.git", "git@github.com:a2f0/nc", "ssh://git@github.com/a2f0/nc.git", "ssh://git@github.com:22/a2f0/nc.git", "ssh://git@ssh.github.com:443/a2f0/nc.git", "https://github.com/a2f0/nc", "https://token@github.com/a2f0/nc.git/"]) {
+    for (const url of [
+      "git@github.com:a2f0/nc.git",
+      "git@github.com:a2f0/nc",
+      "ssh://git@github.com/a2f0/nc.git",
+      "ssh://git@github.com:22/a2f0/nc.git",
+      "ssh://git@ssh.github.com:443/a2f0/nc.git",
+      "https://github.com/a2f0/nc",
+      "https://token@github.com/a2f0/nc.git/",
+    ]) {
       expect(parseGitHubRepo(url)).toBe("a2f0/nc");
     }
     expect(parseGitHubRepo("https://gitlab.com/a2f0/nc.git")).toBeUndefined();
@@ -55,8 +63,10 @@ describe("repository helpers", () => {
   });
 
   test("tells SSH remotes from HTTPS ones", () => {
-    for (const url of ["git@github.com:a2f0/nc.git", "ssh://git@github.com/a2f0/nc.git", "SSH://git@SSH.github.com:443/a2f0/nc.git"]) expect(isGitHubSsh(url)).toBe(true);
-    for (const url of ["https://github.com/a2f0/nc.git", "ssh://git@ssh.github.com/a2f0/nc.git", "git@gitlab.com:a2f0/nc.git"]) expect(isGitHubSsh(url)).toBe(false);
+    for (const url of ["git@github.com:a2f0/nc.git", "ssh://git@github.com/a2f0/nc.git", "SSH://git@SSH.github.com:443/a2f0/nc.git"])
+      expect(isGitHubSsh(url)).toBe(true);
+    for (const url of ["https://github.com/a2f0/nc.git", "ssh://git@ssh.github.com/a2f0/nc.git", "git@gitlab.com:a2f0/nc.git"])
+      expect(isGitHubSsh(url)).toBe(false);
   });
 
   test("selects repositories by full or checkout name", () => {

@@ -86,7 +86,7 @@ test("passes SSH through port 443 with no helper and gh on SSH", () => {
   const result = inspectGitTransport(root, fakeRunner("ssh", "hostname ssh.github.com\nport 443\n", calls));
   expect(result).toEqual({ ghProtocol: "ssh", credentialHelpers: [], ssh: { hostname: "ssh.github.com", port: 443 }, problems: [] });
   // A configured command runs through the shell with Git's arguments appended.
-  expect(calls[1]).toEqual(["sh", "-c", "ssh -F ~/.config/git/ssh_config \"$@\"", "ssh -F ~/.config/git/ssh_config", "-G", "git@github.com"]);
+  expect(calls[1]).toEqual(["sh", "-c", 'ssh -F ~/.config/git/ssh_config "$@"', "ssh -F ~/.config/git/ssh_config", "-G", "git@github.com"]);
 });
 
 test("reports each way Git or gh can leave SSH", () => {
@@ -104,7 +104,9 @@ test("reports each way Git or gh can leave SSH", () => {
 });
 
 test("skips gh when it is not installed and reports an SSH command that cannot resolve", () => {
-  const result = inspectGitTransport(root, (command, args) => (command === "gh" ? fakeRunner(null, "")(command, args) : { status: 255, stdout: "", stderr: "ssh: Could not resolve" }));
+  const result = inspectGitTransport(root, (command, args) =>
+    command === "gh" ? fakeRunner(null, "")(command, args) : { status: 255, stdout: "", stderr: "ssh: Could not resolve" },
+  );
   expect(result.ghProtocol).toBeNull();
   expect(result.ssh).toEqual({ error: "`-G` through Git's ssh exited 255" });
   expect(result.problems).toEqual(["Could not resolve Git's SSH endpoint for github.com: `-G` through Git's ssh exited 255"]);
@@ -120,7 +122,11 @@ test("never reports the SSH command or its output, which can carry credentials",
   });
   expect(result.ssh).toEqual({ error: "`-G` through Git's configured core.sshCommand exited 255" });
   expect(JSON.stringify(result)).not.toContain("proxy_secret");
-  const missing = inspectGitTransport(root, command => (command === "gh" ? { status: 0, stdout: "ssh\n", stderr: "" } : { status: null, stdout: "", stderr: "", error: Object.assign(new Error("spawn sh ENOENT with proxy_secret"), { code: "ENOENT" }) }));
+  const missing = inspectGitTransport(root, command =>
+    command === "gh"
+      ? { status: 0, stdout: "ssh\n", stderr: "" }
+      : { status: null, stdout: "", stderr: "", error: Object.assign(new Error("spawn sh ENOENT with proxy_secret"), { code: "ENOENT" }) },
+  );
   expect(missing.ssh).toEqual({ error: "`-G` through Git's configured core.sshCommand could not start (ENOENT)" });
 });
 

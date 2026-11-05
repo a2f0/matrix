@@ -15,7 +15,11 @@ const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: stri
   // A leased deletion is the stronger cleanup some checkouts require, not the hook-running push it replaced.
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
   // Rewriting GitHub SSH URLs to HTTPS reaches the keychain credential helper (a2f0/matrix#61).
-  { id: "https-insteadof", pattern: "url\\.\"?https://github\\.com/?\"?\\.[iI]nstead[oO]f", replacement: "SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh)" },
+  {
+    id: "https-insteadof",
+    pattern: 'url\\."?https://github\\.com/?"?\\.[iI]nstead[oO]f',
+    replacement: "SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh)",
+  },
 ];
 
 /**
@@ -30,7 +34,8 @@ export function supersededGuidance(checkout: Checkout, skip: string[] = []): str
     const result = git(checkout.directory, ["grep", "-z", "-n", "-I", "-E", "-e", entry.pattern, "--", "*.md", ...exclusions]);
     if (result.status === 1) continue;
     if (result.status !== 0) throw new Error(`git grep failed in ${checkout.repo}: ${result.stderr}`);
-    const hits = result.stdout.split("\n")
+    const hits = result.stdout
+      .split("\n")
       .map(line => line.split("\0"))
       .filter(([, , ...text]) => !entry.exempt?.test(text.join("\0")))
       .map(([file, line]) => `${file}:${line}`);

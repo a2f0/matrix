@@ -41,11 +41,13 @@ export interface Teardown {
 /** Whether parsed JSON has the shape of agent-tool's teardown report, checked as far as matrix reads it. */
 export function isAgentToolTeardown(value: unknown): value is AgentToolTeardown {
   const report = object(value);
-  return typeof report?.ok === "boolean"
-    && [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray);
+  return (
+    typeof report?.ok === "boolean" &&
+    [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray)
+  );
 }
 
-const name = (item: { id: string; label: string | null }) => item.label ? `${item.label} (${item.id})` : item.id;
+const name = (item: { id: string; label: string | null }) => (item.label ? `${item.label} (${item.id})` : item.id);
 
 function summarize(repo: string, path: string, report: AgentToolTeardown): RepoTeardown {
   return {
@@ -56,7 +58,7 @@ function summarize(repo: string, path: string, report: AgentToolTeardown): RepoT
     listeners: report.untracked.filter(item => item.ports.length > 0).map(item => `pid ${item.pid} on ${item.ports.join(", ")}: ${item.command.slice(0, 120)}`),
     kept: report.kept.map(name),
     stopped: report.stopped.filter(item => item.stopped).map(item => item.id),
-    worktrees: report.worktrees.map(item => item.branch ? `${item.path} (${item.branch})` : item.path),
+    worktrees: report.worktrees.map(item => (item.branch ? `${item.path} (${item.branch})` : item.path)),
     problems: [
       ...report.stopped.filter(item => !item.stopped).map(item => `could not stop ${item.id}`),
       ...report.unavailable.map(item => `could not inspect ${item}`),
@@ -69,10 +71,15 @@ function summarize(repo: string, path: string, report: AgentToolTeardown): RepoT
  * Tears down each target, in order. A repository whose inspection fails is reported as not ok
  * with the error, and the rest are still inspected.
  */
-export function teardownAll(targets: Array<{ repo: string; path: string }>, inspect: (path: string, apply: boolean) => AgentToolTeardown, apply: boolean): Teardown {
+export function teardownAll(
+  targets: Array<{ repo: string; path: string }>,
+  inspect: (path: string, apply: boolean) => AgentToolTeardown,
+  apply: boolean,
+): Teardown {
   const repos = targets.map(({ repo, path }) => {
-    try { return summarize(repo, path, inspect(path, apply)); }
-    catch (error) {
+    try {
+      return summarize(repo, path, inspect(path, apply));
+    } catch (error) {
       return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [errorMessage(error)] };
     }
   });

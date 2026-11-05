@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { type Checkout, excludeManaged, openCheckout, sourceGlobs, TEST_PATH, workflows } from "./auditCheckout";
 import { type CheckoutStatus, redact } from "./checkouts";
-import { git } from "./git";
 import { typescriptGuarded } from "./cycleGuards";
+import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
@@ -50,7 +50,9 @@ const skip = (detail: string): Outcome => ({ status: "skip", detail });
 const problems = (list: string[]): Outcome => (list.length === 0 ? pass : fail(list.join("; ")));
 
 /** agent-tool publishes itself; its checkout runs the source CLI instead of a pin. */
-function isProducer(checkout: Checkout): boolean { return checkout.packageJson?.name === AGENT_TOOL; }
+function isProducer(checkout: Checkout): boolean {
+  return checkout.packageJson?.name === AGENT_TOOL;
+}
 
 function compareVersions(left: string, right: string): number {
   const a = left.split(".").map(Number);
@@ -80,7 +82,7 @@ export const RULES: readonly Rule[] = [
     source: "docs/tooling.md#agent-guidance",
     check: checkout => {
       const oversized = checkout.tracked(":(glob)**/AGENTS.md").flatMap(file => {
-        const chars = [...checkout.read(file) ?? ""].length;
+        const chars = [...(checkout.read(file) ?? "")].length;
         return chars > AGENTS_MD_MAX_CHARS ? [`${file} has ${chars} characters`] : [];
       });
       return oversized.length === 0 ? pass : fail(`${oversized.join("; ")}; the limit is ${AGENTS_MD_MAX_CHARS}`);
@@ -132,7 +134,9 @@ export const RULES: readonly Rule[] = [
       if (!EXACT_VERSION.test(pin)) return skip(`pin '${pin}' is not exact; see agent-tool-pin`);
       const releases = context.releases(AGENT_TOOL);
       if (!(pin in releases)) return fail(`pins ${pin}, which the registry has not published`);
-      const newer = Object.keys(releases).filter(version => EXACT_VERSION.test(version) && compareVersions(version, pin) > 0).sort(compareVersions);
+      const newer = Object.keys(releases)
+        .filter(version => EXACT_VERSION.test(version) && compareVersions(version, pin) > 0)
+        .sort(compareVersions);
       if (newer.length === 0) return pass;
       const detail = `pins ${pin}; latest is ${newer.at(-1)}`;
       const undated = newer.find(version => Number.isNaN(Date.parse(releases[version]!)));
@@ -228,7 +232,8 @@ export const RULES: readonly Rule[] = [
       const found: string[] = [];
       if (typeof script !== "string") found.push("ignores .screenshots but has no screenshots package script");
       // A trailing slash matches only a directory, so the store link would show as untracked.
-      if (![".screenshots", "/.screenshots", "**/.screenshots"].some(pattern => ignore.includes(pattern))) found.push("the root .gitignore does not list .screenshots without a trailing slash");
+      if (![".screenshots", "/.screenshots", "**/.screenshots"].some(pattern => ignore.includes(pattern)))
+        found.push("the root .gitignore does not list .screenshots without a trailing slash");
       return problems(found);
     },
   },
@@ -244,11 +249,10 @@ export const RULES: readonly Rule[] = [
       const targets = object(object(checkout.agentToolJson?.screenshots)?.targets);
       if (!targets || Object.keys(targets).length === 0) found.push("agent-tool.json declares no screenshots targets");
       // A declared target proves nothing unless some build or dev script runs it.
-      const scripts = checkout.tracked(":(glob)**/package.json")
-        .flatMap(file => Object.values(object(parseObject(checkout.read(file))?.scripts) ?? {}));
-      if (!scripts.some(value => typeof value === "string" && /\bagent-tool\b[^&|;]*\sscreenshots build\b/.test(value))) found.push("no package script runs agent-tool screenshots build");
-      const copies = checkout.tracked(...sourceGlobs("**/"))
-        .filter(file => !TEST_PATH.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
+      const scripts = checkout.tracked(":(glob)**/package.json").flatMap(file => Object.values(object(parseObject(checkout.read(file))?.scripts) ?? {}));
+      if (!scripts.some(value => typeof value === "string" && /\bagent-tool\b[^&|;]*\sscreenshots build\b/.test(value)))
+        found.push("no package script runs agent-tool screenshots build");
+      const copies = checkout.tracked(...sourceGlobs("**/")).filter(file => !TEST_PATH.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
       if (copies.length > 0) found.push(`copies the capture guard: ${copies.join(", ")}`);
       return problems(found);
     },
@@ -276,13 +280,17 @@ export const RULES: readonly Rule[] = [
     source: "docs/tooling.md#import-cycles-and-layering",
     check: checkout => {
       const exclusions = excludeManaged(checkout);
-      const typescript = checkout.tracked(...["ts", "tsx", "mts", "cts"].map(extension => `:(glob)**/*.${extension}`), ...exclusions)
+      const typescript = checkout
+        .tracked(...["ts", "tsx", "mts", "cts"].map(extension => `:(glob)**/*.${extension}`), ...exclusions)
         .some(file => !/\.d\.[cm]?ts$/.test(file));
       const python = checkout.tracked(":(glob)**/__init__.py", ...exclusions).length > 0;
       if (!typescript && !python) return skip("no TypeScript sources or Python package");
       // Each language needs a guard that can read it: Biome and dependency-cruiser cannot check Python.
       const missing: string[] = [];
-      if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test");
+      if (typescript && !typescriptGuarded(checkout))
+        missing.push(
+          "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test",
+        );
       if (python && checkout.tracked(":(glob)**/test_module_graph.py").length === 0) missing.push("the Python package has no test_module_graph.py");
       return problems(missing);
     },
@@ -293,10 +301,16 @@ export const RULES: readonly Rule[] = [
     source: "docs/health.md#github-over-ssh",
     check: checkout => {
       const found: string[] = [];
-      for (const [direction, args] of [["fetch", []], ["push", ["--push"]]] as const) {
+      for (const [direction, args] of [
+        ["fetch", []],
+        ["push", ["--push"]],
+      ] as const) {
         // get-url applies insteadOf rewrites, so these are the URLs Git actually uses; --all lists every push destination.
         const urls = git(checkout.directory, ["remote", "get-url", "--all", ...args, "origin"]);
-        if (urls.status !== 0) { found.push(`no origin ${direction} URL`); continue; }
+        if (urls.status !== 0) {
+          found.push(`no origin ${direction} URL`);
+          continue;
+        }
         for (const url of urls.stdout.split("\n").filter(Boolean)) {
           if (!isGitHubSsh(url)) found.push(`origin ${direction}es over ${redact(url)}; use git@github.com:${checkout.repo}.git`);
         }
@@ -332,7 +346,8 @@ export interface Audit {
 }
 
 export function selectRules(ids: string[], remote: boolean): Rule[] {
-  for (const id of ids) if (!RULES.some(rule => rule.id === id)) throw new Error(`Unknown audit rule '${id}'. Rules: ${RULES.map(rule => rule.id).join(", ")}.`);
+  for (const id of ids)
+    if (!RULES.some(rule => rule.id === id)) throw new Error(`Unknown audit rule '${id}'. Rules: ${RULES.map(rule => rule.id).join(", ")}.`);
   return RULES.filter(rule => (ids.length > 0 ? ids.includes(rule.id) : true) && (remote || !rule.remote || ids.includes(rule.id)));
 }
 
@@ -367,7 +382,9 @@ export function audit(root: string, repos: string[], rules: Rule[], statusOf: (r
 export function registryReleases(name: string): Record<string, string> {
   const result = spawnSync(process.execPath, ["info", name, "time", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const times = result.error || result.status !== 0 ? undefined : parseObject(result.stdout);
-  const releases = Object.fromEntries(Object.entries(times ?? {}).filter((entry): entry is [string, string] => EXACT_VERSION.test(entry[0]) && typeof entry[1] === "string"));
+  const releases = Object.fromEntries(
+    Object.entries(times ?? {}).filter((entry): entry is [string, string] => EXACT_VERSION.test(entry[0]) && typeof entry[1] === "string"),
+  );
   if (Object.keys(releases).length === 0) {
     throw new Error(`Could not read ${name}'s releases from the registry: ${result.error?.message ?? (result.stderr?.trim() || `exit ${result.status}`)}`);
   }

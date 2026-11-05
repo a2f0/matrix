@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, utimesSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resolveTargets as cleanupTargets } from "../skills/space-cleanup/scripts/targets";
 import { main, parseOptions } from "../skills/take-screenshots/scripts/artifacts";
 import { drainGroup, type Runner } from "../skills/take-screenshots/scripts/capture";
 import { link, linkState } from "../skills/take-screenshots/scripts/link";
@@ -11,7 +12,6 @@ import { claimNamespace, existingCase, githubRepo, targetFor, updateOwner } from
 import { readRecord, relation, validRecord } from "../skills/take-screenshots/scripts/record";
 import { LINK, LOCK, storeDir } from "../skills/take-screenshots/scripts/store";
 import { artifactsRoot, resolveTargets } from "../skills/take-screenshots/scripts/targets";
-import { resolveTargets as cleanupTargets } from "../skills/space-cleanup/scripts/targets";
 import { gitIn, gitInit, tempDir, write } from "./testFixtures";
 
 // Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
@@ -49,7 +49,9 @@ function processGroup(pid: number): number {
 }
 
 const output: string[] = [];
-const print = (text: string) => { output.push(text); };
+const print = (text: string) => {
+  output.push(text);
+};
 
 describe("take-screenshots artifacts", () => {
   test("names projects by GitHub repository and stores them beside the workspace", async () => {
@@ -58,7 +60,12 @@ describe("take-screenshots artifacts", () => {
     expect(githubRepo("/srv/git/app.git")).toBeUndefined();
     expect(githubRepo("ssh://git@github.com/a2f0/app.git")).toBe("a2f0/app");
     expect(githubRepo("https://token@github.com/a2f0/app.git")).toBe("a2f0/app");
-    for (const url of ["https://evilgithub.com/a2f0/app.git", "git@github.com.evil.io:a2f0/app.git", "https://github.com.evil.io/a2f0/app", "https://evil.io/github.com/a2f0/app"]) {
+    for (const url of [
+      "https://evilgithub.com/a2f0/app.git",
+      "git@github.com.evil.io:a2f0/app.git",
+      "https://github.com.evil.io/a2f0/app",
+      "https://evil.io/github.com/a2f0/app",
+    ]) {
       expect(githubRepo(url)).toBeUndefined();
     }
     const { home, root, app } = workspace();
@@ -126,7 +133,11 @@ describe("take-screenshots artifacts", () => {
     expect(readFileSync(path.join(second, ".screenshots/web/home.png"), "utf8")).toBe("other");
     // --supersede keeps the clone's capture beside the store, never deleting it.
     const moved = link(targetFor(second), artifacts, true, true, new Date("2026-10-30T12:00:00.000Z"));
-    expect(moved).toMatchObject({ action: "supersede-and-link", applied: true, superseded: path.join(artifacts, "app/superseded/app2-2026-10-30T12-00-00-000Z") });
+    expect(moved).toMatchObject({
+      action: "supersede-and-link",
+      applied: true,
+      superseded: path.join(artifacts, "app/superseded/app2-2026-10-30T12-00-00-000Z"),
+    });
     expect(readFileSync(path.join(moved.superseded!, "web/home.png"), "utf8")).toBe("other");
     expect(readFileSync(path.join(second, ".screenshots/web/home.png"), "utf8")).toBe("old");
 
@@ -162,7 +173,16 @@ describe("take-screenshots artifacts", () => {
     expect(runs).toEqual([[], ["--project=web"]]);
     expect(existsSync(path.join(artifacts, "app", LOCK))).toBe(false);
     const record = readRecord(path.join(artifacts, "app/screenshots"))!;
-    expect(record).toMatchObject({ status: "complete", project: "app", repo: "a2f0/app", commit: gitIn(app, "rev-parse", "HEAD"), branch: "main", dirty: false, args: ["--project=web"], exitCode: 0 });
+    expect(record).toMatchObject({
+      status: "complete",
+      project: "app",
+      repo: "a2f0/app",
+      commit: gitIn(app, "rev-parse", "HEAD"),
+      branch: "main",
+      dirty: false,
+      args: ["--project=web"],
+      exitCode: 0,
+    });
     expect(readFileSync(path.join(clone, ".screenshots/web/light/home.png"), "utf8")).toBe("png");
     write(clone, { "src/next.ts": "x" });
     gitIn(clone, "add", ".");
@@ -193,7 +213,10 @@ describe("take-screenshots artifacts", () => {
     expect(targetFor(fork, "app-local", () => undefined)).toMatchObject({ project: "app-local" });
     // GitHub's current name wins over a pre-rename or differently cased remote.
     gitIn(fork, "remote", "set-url", "origin", "git@github.com:a2f0/Stealth.git");
-    expect(targetFor(fork, undefined, (_root, parsed) => (parsed === "a2f0/Stealth" ? "a2f0/balebase" : undefined))).toMatchObject({ project: "balebase", repo: "a2f0/balebase" });
+    expect(targetFor(fork, undefined, (_root, parsed) => (parsed === "a2f0/Stealth" ? "a2f0/balebase" : undefined))).toMatchObject({
+      project: "balebase",
+      repo: "a2f0/balebase",
+    });
     gitIn(fork, "remote", "set-url", "origin", "git@github.com:A2F0/App.git");
     expect(link(targetFor(fork), artifacts, false).blocked).toBeUndefined();
   });
@@ -248,10 +271,21 @@ describe("take-screenshots artifacts", () => {
     expect(readRecord(store)).toMatchObject({ status: "failed", exitCode: 1 });
 
     // A capture that deletes the link and writes a real directory never reaches the store.
-    const replacing: Runner = { async capture(cwd) { rmSync(path.join(cwd, LINK)); write(cwd, { ".screenshots/web/a.png": "x" }); return { code: 0 }; } };
+    const replacing: Runner = {
+      async capture(cwd) {
+        rmSync(path.join(cwd, LINK));
+        write(cwd, { ".screenshots/web/a.png": "x" });
+        return { code: 0 };
+      },
+    };
     expect(await main(["capture", "--apply"], app, replacing, print)).toBe(1);
     // A branch switch during the capture means the record would name the wrong commit.
-    const switching: Runner = { async capture(cwd) { gitIn(cwd, "commit", "-q", "--allow-empty", "-m", "moved"); return { code: 0 }; } };
+    const switching: Runner = {
+      async capture(cwd) {
+        gitIn(cwd, "commit", "-q", "--allow-empty", "-m", "moved");
+        return { code: 0 };
+      },
+    };
     rmSync(path.join(app, LINK), { recursive: true });
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     expect(await main(["capture", "--apply"], app, switching, print)).toBe(1);
@@ -284,14 +318,18 @@ describe("take-screenshots artifacts", () => {
     write(home, { "exclude-all": "*\n" });
     const inherited = {
       GIT_CONFIG_PARAMETERS: `'core.excludesFile'='${path.join(home, "exclude-all")}'`,
-      GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.excludesFile", GIT_CONFIG_VALUE_0: path.join(home, "exclude-all"),
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.excludesFile",
+      GIT_CONFIG_VALUE_0: path.join(home, "exclude-all"),
     };
     const saved = Object.fromEntries(Object.keys(inherited).map(name => [name, process.env[name]]));
     Object.assign(process.env, inherited);
     try {
       await expect(main(["capture"], app, undefined, print)).rejects.toThrow("local changes");
     } finally {
-      for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+      for (const [name, value] of Object.entries(saved))
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
     }
   });
 
@@ -320,13 +358,16 @@ describe("take-screenshots artifacts", () => {
     const file = path.join(dir, LOCK);
     const script = path.join(dir, "race.ts");
     const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/lock.ts");
-    writeFileSync(script, `import { acquireLock } from ${JSON.stringify(module)};
+    writeFileSync(
+      script,
+      `import { acquireLock } from ${JSON.stringify(module)};
 try {
   acquireLock(${JSON.stringify(file)}, { pid: process.pid, host: "${os.hostname()}", checkout: "x", startedAt: "now" });
   console.log("won");
   await Bun.sleep(1500);
 } catch { console.log("lost"); }
-`);
+`,
+    );
     const children = Array.from({ length: 6 }, () => Bun.spawn([process.execPath, script], { stdout: "pipe" }));
     const results = await Promise.all(children.map(child => new Response(child.stdout).text()));
     expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);
@@ -392,14 +433,16 @@ try {
     const { home, app } = workspace();
     const bin = path.join(home, "bin");
     // A stub gh: names origin's renamed repository, and a fork's parent when asked without a name.
-    write(bin, { "gh": `#!/bin/sh
+    write(bin, {
+      gh: `#!/bin/sh
 case "$*" in
   *"repo view a2f0/app "*) echo a2f0/App R_app ;;
   *"repo view a2f0/down "*) exit 1 ;;
   *"repo view --json"*) echo parent/app R_parent ;;
   *) exit 1 ;;
 esac
-` });
+`,
+    });
     spawnSync("chmod", ["+x", path.join(bin, "gh")]);
     const saved = { path: process.env.PATH, noGh: process.env.MATRIX_ARTIFACTS_NO_GH };
     process.env.PATH = `${bin}:${saved.path}`;
@@ -415,17 +458,23 @@ esac
     }
     // Linked online under GitHub's new name, a clone keeps that namespace offline.
     gitIn(app, "remote", "set-url", "origin", "git@github.com:a2f0/stealth.git");
-    write(bin, { "gh": "#!/bin/sh\necho a2f0/renamed R_renamed\n" });
+    write(bin, { gh: "#!/bin/sh\necho a2f0/renamed R_renamed\n" });
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
-    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+    try {
+      expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    } finally {
       process.env.PATH = saved.path;
       process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
     }
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/renamed/screenshots");
     expect(await main(["status", "--json"], app, undefined, print)).toBe(0);
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "renamed", link: { state: "linked" } });
-    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/renamed/repository.json"), "utf8"))).toEqual({ repo: "a2f0/renamed", aliases: ["a2f0/stealth"], id: "R_renamed" });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/renamed/repository.json"), "utf8"))).toEqual({
+      repo: "a2f0/renamed",
+      aliases: ["a2f0/stealth"],
+      id: "R_renamed",
+    });
     // --project keeps its own namespace, even offline in a linked clone.
     expect(await main(["status", "--json", "--project", "isolated"], app, undefined, print)).toBe(1);
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "isolated" });
@@ -441,7 +490,7 @@ esac
     gitIn(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
-    write(bin, { "gh": "#!/bin/sh\necho a2f0/newname R_old\n" });
+    write(bin, { gh: "#!/bin/sh\necho a2f0/newname R_old\n" });
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
     try {
@@ -452,7 +501,11 @@ esac
       process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
     }
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "oldname", link: { state: "linked" } });
-    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/newname", aliases: ["a2f0/oldname"], id: "R_old" });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({
+      repo: "a2f0/newname",
+      aliases: ["a2f0/oldname"],
+      id: "R_old",
+    });
     rmSync(path.join(app, LINK));
     // Clones whose remote already uses the new name share the same store.
     gitIn(app, "remote", "set-url", "origin", "git@github.com:a2f0/newname.git");
@@ -462,26 +515,34 @@ esac
 
     // A second rename (oldname -> newname -> third): a clone still on the first name keeps the store.
     gitIn(app, "remote", "set-url", "origin", "git@github.com:a2f0/oldname.git");
-    write(bin, { "gh": "#!/bin/sh\necho a2f0/third R_old\n" });
+    write(bin, { gh: "#!/bin/sh\necho a2f0/third R_old\n" });
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
-    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+    try {
+      expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    } finally {
       process.env.PATH = saved.path;
       process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
     }
     expect(readlinkSync(path.join(app, LINK))).toContain("matrix-artifacts/oldname/screenshots");
-    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({ repo: "a2f0/third", aliases: ["a2f0/oldname", "a2f0/newname"], id: "R_old" });
+    expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toEqual({
+      repo: "a2f0/third",
+      aliases: ["a2f0/oldname", "a2f0/newname"],
+      id: "R_old",
+    });
     // Renamed back to an earlier name, the same repository (same id) keeps its store.
-    write(bin, { "gh": "#!/bin/sh\necho a2f0/oldname R_old\n" });
+    write(bin, { gh: "#!/bin/sh\necho a2f0/oldname R_old\n" });
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
-    try { expect(await main(["link", "--apply"], app, undefined, print)).toBe(0); } finally {
+    try {
+      expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    } finally {
       process.env.PATH = saved.path;
       process.env.MATRIX_ARTIFACTS_NO_GH = saved.noGh;
     }
     expect(JSON.parse(readFileSync(path.join(home, "matrix-artifacts/oldname/repository.json"), "utf8"))).toMatchObject({ repo: "a2f0/oldname", id: "R_old" });
     // A different repository that reused the old name (new id) cannot claim the store through the alias.
-    write(bin, { "gh": "#!/bin/sh\necho a2f0/fourth R_other\n" });
+    write(bin, { gh: "#!/bin/sh\necho a2f0/fourth R_other\n" });
     process.env.PATH = `${bin}:${saved.path}`;
     delete process.env.MATRIX_ARTIFACTS_NO_GH;
     try {
@@ -508,7 +569,10 @@ esac
     expect(await main(["status", "--json"], lone, undefined, print)).toBe(1);
     expect(JSON.parse(output.at(-1)!).entries[0]).toMatchObject({ project: "lone" });
     // Offline, --project accepts a confirmed old name of that namespace's owner.
-    writeFileSync(path.join(home, "matrix-artifacts/isolated/repository.json"), JSON.stringify({ repo: "a2f0/lone-renamed", aliases: ["a2f0/lone"], explicit: true }));
+    writeFileSync(
+      path.join(home, "matrix-artifacts/isolated/repository.json"),
+      JSON.stringify({ repo: "a2f0/lone-renamed", aliases: ["a2f0/lone"], explicit: true }),
+    );
     expect(await main(["link", "--project", "isolated", "--apply"], lone, undefined, print)).toBe(0);
     expect(readlinkSync(path.join(lone, LINK))).toContain("matrix-artifacts/isolated/screenshots");
 
@@ -538,10 +602,13 @@ esac
     writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
     const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/namespace.ts");
     const script = path.join(dir, "alias.ts");
-    writeFileSync(script, `import { updateOwner } from ${JSON.stringify(module)};
+    writeFileSync(
+      script,
+      `import { updateOwner } from ${JSON.stringify(module)};
 const alias = process.argv[2]!;
 updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...owner.aliases, alias] });
-`);
+`,
+    );
     const children = Array.from({ length: 8 }, (_, index) => Bun.spawn([process.execPath, script, `a2f0/old${index}`]));
     await Promise.all(children.map(child => child.exited));
     expect(JSON.parse(readFileSync(file, "utf8")).aliases.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `a2f0/old${index}`));
@@ -554,11 +621,14 @@ updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...
     writeFileSync(path.join(dir, "app", "repository.json"), JSON.stringify({ repo: "a2f0/app" }));
     const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/namespace.ts");
     const script = path.join(dir, "claim.ts");
-    writeFileSync(script, `import { claimNamespace } from ${JSON.stringify(module)};
+    writeFileSync(
+      script,
+      `import { claimNamespace } from ${JSON.stringify(module)};
 const id = process.argv[2]!;
 const error = claimNamespace({ name: "app", root: "/nowhere", project: "app", repo: "a2f0/app", verified: true, id }, ${JSON.stringify(dir)}, true);
 console.log(error ? "lost" : "won");
-`);
+`,
+    );
     const children = Array.from({ length: 6 }, (_, index) => Bun.spawn([process.execPath, script, `R_${index}`], { stdout: "pipe" }));
     const results = await Promise.all(children.map(child => new Response(child.stdout).text()));
     expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);

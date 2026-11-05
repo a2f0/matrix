@@ -16,19 +16,28 @@ function backup(...args: string[]): { status: number | null; stderr: string } {
 
 function archives(directory = output): string[] {
   if (!existsSync(directory)) return [];
-  return readdirSync(directory).filter(name => name.startsWith("matrix-secrets-backup-")).map(name => path.join(directory, name));
+  return readdirSync(directory)
+    .filter(name => name.startsWith("matrix-secrets-backup-"))
+    .map(name => path.join(directory, name));
 }
 
-function mode(file: string): number { return statSync(file).mode & 0o777; }
+function mode(file: string): number {
+  return statSync(file).mode & 0o777;
+}
 
 function decrypt(archive: string, passphrase: string): string {
   const zip = path.join(temporary, "decrypted.zip");
-  execFileSync("gpg", ["--batch", "--yes", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--output", zip, "--decrypt", archive],
-    { env: { ...process.env, GNUPGHOME: gnupg }, input: passphrase, stdio: ["pipe", "ignore", "ignore"] });
+  execFileSync("gpg", ["--batch", "--yes", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--output", zip, "--decrypt", archive], {
+    env: { ...process.env, GNUPGHOME: gnupg },
+    input: passphrase,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
   return zip;
 }
 
-function entry(zip: string, name: string): string { return execFileSync("unzip", ["-p", zip, name], { encoding: "utf8" }); }
+function entry(zip: string, name: string): string {
+  return execFileSync("unzip", ["-p", zip, name], { encoding: "utf8" });
+}
 
 beforeEach(() => {
   temporary = tempDir("matrix-backup");
@@ -109,7 +118,10 @@ test("finds the default secrets directory beside the relocated workspace", () =>
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: temporary };
   delete env.MATRIX_SECRETS_DIR;
   const result = spawnSync("bash", [copiedScript, output, "--no-password"], {
-    cwd: temporary, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    cwd: temporary,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
   });
   expect(result.status).toBe(0);
   expect(result.stdout).toContain(`Backed up: ${realpathSync(secrets)}`);

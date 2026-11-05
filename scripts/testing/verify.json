@@ -3,36 +3,19 @@
   "steps": [
     {
       "label": "typecheck",
-      "command": [
-        "bun",
-        "run",
-        "typecheck"
-      ]
+      "command": ["bun", "run", "typecheck"]
     },
     {
       "label": "graph",
-      "command": [
-        "bun",
-        "run",
-        "agent-tool",
-        "graph",
-        "check"
-      ]
+      "command": ["bun", "run", "agent-tool", "graph", "check"]
     },
     {
       "label": "tests",
-      "command": [
-        "bun",
-        "test"
-      ]
+      "command": ["bun", "test"]
     },
     {
       "label": "skills",
-      "command": [
-        "bun",
-        "run",
-        "agents:check"
-      ]
+      "command": ["bun", "run", "agents:check"]
     }
   ]
 }
