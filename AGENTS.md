@@ -73,10 +73,12 @@ say in the PR why files cannot show it. When agent-tool replaces a documented
 command, add the old spelling to the audit's superseded patterns.
 `bun run health [--remote]` combines status, the audit, discovery, and sweep
 retro into suggested next steps ([docs/health.md](docs/health.md)); start there
-when a session has no specific task. Its suggestions are proposals: acting on
-one still needs a request that authorizes it. To free disk space, here or in any
-repository, follow the [space-cleanup skill](skills/space-cleanup/SKILL.md);
-to speed up page loads, the [performance-pass skill](skills/performance-pass/SKILL.md).
+when a session has no specific task. Acting on a suggestion still needs a
+request that authorizes it. Shared skills work here or in any repository:
+[space-cleanup](skills/space-cleanup/SKILL.md) frees disk space,
+[performance-pass](skills/performance-pass/SKILL.md) speeds up page loads, and
+[explicit-state-machines](skills/explicit-state-machines/SKILL.md) makes
+implicit state machines explicit.
 Before reporting work done, `bun run teardown` must pass.
 
 ## Onboarding a repository
