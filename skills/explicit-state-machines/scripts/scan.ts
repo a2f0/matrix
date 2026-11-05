@@ -56,7 +56,7 @@ const INTERPRETER = /^(?:sh|bash|zsh|dash|ksh|python[\d.]*|ruby|expect|tclsh[\d.
  * token by token (no backtracking regex) and bounded, since the line is
  * untrusted input of any length.
  */
-export function readsShebang(firstLine: string): boolean {
+function readsShebang(firstLine: string): boolean {
   if (!firstLine.startsWith("#!")) return false;
   const tokens = firstLine.slice(2, 512).trim().split(/\s+/);
   const base = (token: string | undefined) => token?.slice(token.lastIndexOf("/") + 1) ?? "";
