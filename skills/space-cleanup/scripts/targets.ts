@@ -40,15 +40,21 @@ export function resolveTargets(cwd: string, names: string[]): { workspace?: stri
     return { targets: [{ name: path.basename(here), root: here }] };
   }
   const targets = names.map(name => {
-    const short = name.includes("/") && !existsSync(path.resolve(cwd, name)) ? name.split("/").pop()! : name;
-    if (workspace && existsSync(path.join(workspace, "checkouts", short, ".git"))) {
-      const root = realpathSync(path.join(workspace, "checkouts", short));
-      return { name: path.basename(root), root };
-    }
-    const top = existsSync(path.resolve(cwd, name)) ? toplevel(path.resolve(cwd, name)) : undefined;
-    if (!top) throw new Error(`${name} is neither a checkout name nor a path inside a git repository`);
-    const root = realpathSync(top);
+    const root = namedRoot(cwd, workspace, name);
     return { name: path.basename(root), root };
   });
   return { workspace, targets: targets.filter((target, index) => targets.findIndex(other => other.root === target.root) === index) };
+}
+
+/**
+ * The real root a name selects: the workspace checkout it names (owner/name
+ * counts by its last part unless it is a path), else the repository holding
+ * that path. Kept in sync with take-screenshots/scripts/targets.ts namedRoot.
+ */
+function namedRoot(cwd: string, workspace: string | undefined, name: string): string {
+  const short = name.includes("/") && !existsSync(path.resolve(cwd, name)) ? name.split("/").pop()! : name;
+  if (workspace && existsSync(path.join(workspace, "checkouts", short, ".git"))) return realpathSync(path.join(workspace, "checkouts", short));
+  const top = existsSync(path.resolve(cwd, name)) ? toplevel(path.resolve(cwd, name)) : undefined;
+  if (!top) throw new Error(`${name} is neither a checkout name nor a path inside a git repository`);
+  return realpathSync(top);
 }

@@ -56,9 +56,7 @@ function identity(root: string, resolve: (root: string, parsed?: string) => Reso
 export function targetFor(root: string, project?: string, resolve: (root: string, parsed?: string) => Resolved | string | undefined = canonicalRepo): Target {
   const { parsed, canonical, id } = identity(root, resolve);
   const repo = canonical ?? parsed;
-  if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
-  const name = project ?? repo!.split("/")[1]!;
-  if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") throw new Error(`'${name}' is not a usable project name`);
+  const name = namespaceName(root, repo, project);
   return {
     name: path.basename(root),
     root,
@@ -69,6 +67,14 @@ export function targetFor(root: string, project?: string, resolve: (root: string
     ...(project ? { explicit: true } : {}),
     ...(id ? { id } : {}),
   };
+}
+
+/** --project, else the repository's name; refuses a repository with neither, and names that are not one plain directory. */
+function namespaceName(root: string, repo: string | undefined, project: string | undefined): string {
+  if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
+  const name = project ?? repo!.split("/")[1]!;
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") throw new Error(`'${name}' is not a usable project name`);
+  return name;
 }
 
 /** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
@@ -114,18 +120,7 @@ export function updateOwner(file: string, change: (owner: Owner | undefined) => 
   const mine = `${lock}.${process.pid}.${process.hrtime.bigint()}`;
   writeFileSync(mine, `${process.pid}\n`, { flag: "wx" });
   try {
-    for (const deadline = Date.now() + waitMs; ; ) {
-      try {
-        linkSync(mine, lock);
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        // Never broken automatically: two recovering processes could each remove the other's fresh lock.
-        if (Date.now() > deadline)
-          throw new Error(`${lock} is held; an update takes milliseconds, so if no link or capture is running it was left by a killed process: remove it`);
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-      }
-    }
+    linkWhenFree(mine, lock, waitMs);
     try {
       const next = change(readOwner(file));
       if (next) writeOwner(file, next);
@@ -134,6 +129,22 @@ export function updateOwner(file: string, change: (owner: Owner | undefined) => 
     }
   } finally {
     unlinkSync(mine);
+  }
+}
+
+/** Hard-links `mine` to `lock` once no other process holds it, polling for up to `waitMs`. */
+function linkWhenFree(mine: string, lock: string, waitMs: number): void {
+  for (const deadline = Date.now() + waitMs; ; ) {
+    try {
+      linkSync(mine, lock);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      // Never broken automatically: two recovering processes could each remove the other's fresh lock.
+      if (Date.now() > deadline)
+        throw new Error(`${lock} is held; an update takes milliseconds, so if no link or capture is running it was left by a killed process: remove it`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
   }
 }
 
@@ -201,6 +212,15 @@ function ownedClaim(target: Target, owner: Owner, identity: string): Claim {
   const sameId = target.verified === true && target.id !== undefined && owner.id === target.id;
   if (!sameName && !(target.verified && (priorName || sameId))) return foreignClaim(owner.repo, identity);
   if (!target.verified) return {};
+  return confirmedOwner(target, owner, identity);
+}
+
+/**
+ * The owner record once GitHub confirmed this repository as `identity`: that
+ * name, every other name it was known by as an alias, and its id; nothing to
+ * write when the record already says so.
+ */
+function confirmedOwner(target: Target, owner: Owner, identity: string): Claim {
   const aliases = [...owner.aliases, owner.repo, ...(target.alias ? [target.alias] : [])].filter(
     (name, index, all) => lower(name) !== lower(identity) && all.findIndex(other => lower(other) === lower(name)) === index,
   );
@@ -262,13 +282,7 @@ export function knownNamespace(target: Target, artifacts: string): Target {
     });
   // Prefer the namespace this clone already links to, then the one its current name owns (its own
   // directory first), then this project's directory, so an extra --project namespace never takes over.
-  let linked: string | undefined;
-  try {
-    const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
-    if (relative.length === 2 && relative[1] === "screenshots") linked = relative[0];
-  } catch {
-    /* not linked */
-  }
+  const linked = linkedNamespace(target, artifacts);
   // Namespaces made with --project are extras: used implicitly only by a clone already linked to one.
   const primary = matches.filter(match => !match.owner.explicit);
   const chosen =
@@ -279,4 +293,15 @@ export function knownNamespace(target: Target, artifacts: string): Target {
     primary[0];
   if (!chosen) return target;
   return { ...target, project: chosen.entry, repo: target.verified ? target.repo : chosen.owner.repo };
+}
+
+/** The namespace this clone's link points into, when it links to a namespace's screenshots in this store. */
+function linkedNamespace(target: Target, artifacts: string): string | undefined {
+  try {
+    const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
+    if (relative.length === 2 && relative[1] === "screenshots") return relative[0];
+  } catch {
+    /* not linked */
+  }
+  return undefined;
 }

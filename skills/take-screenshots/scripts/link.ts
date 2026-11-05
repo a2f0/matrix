@@ -97,15 +97,21 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   const action = linkAction(state, store, supersede);
   if (!action)
     return blocked(`${LINK} holds a capture and the store already holds another; compare them, then rerun with --supersede to move this clone's aside`);
-  // Kept, never deleted: a person removes superseded captures once nothing needs them.
-  const superseded =
-    action === "supersede-and-link"
-      ? path.join(artifacts, target.project, "superseded", `${target.name}-${now.toISOString().replace(/[:.]/g, "-")}`)
-      : undefined;
+  const superseded = supersededPath(target, artifacts, action, now);
   if (!apply) return { ...base, before: state.state, action, ...(superseded ? { superseded } : {}) };
   const failure = applyLink(target, artifacts, store, state, action, superseded);
   if (failure) return blocked(failure);
   return { ...base, before: state.state, action, applied: true, ...(superseded ? { superseded } : {}) };
+}
+
+/**
+ * Where supersede-and-link moves the clone's own capture; undefined for other
+ * actions. Kept, never deleted: a person removes superseded captures once
+ * nothing needs them.
+ */
+function supersededPath(target: Target, artifacts: string, action: Action, now: Date): string | undefined {
+  if (action !== "supersede-and-link") return undefined;
+  return path.join(artifacts, target.project, "superseded", `${target.name}-${now.toISOString().replace(/[:.]/g, "-")}`);
 }
 
 /** Why an unlinked clone cannot be linked automatically, checked in this order. */
@@ -154,22 +160,26 @@ function applyLink(target: Target, artifacts: string, store: string, state: Link
 
 /** Moves the clone's `.screenshots` out of the way of the link, as the action says; returns why it could not. */
 function vacateLink(action: Action, linkPath: string, store: string, superseded: string | undefined): string | undefined {
-  if (action === "move-and-link") {
-    if (lexists(store)) rmdirSync(store); // empty, checked above; rename cannot replace it across all platforms
-    try {
-      renameSync(linkPath, store);
-    } catch (error) {
-      return `could not move ${LINK} into the store (${(error as NodeJS.ErrnoException).code ?? String(error)}); move it by hand`;
-    }
-  } else if (action === "supersede-and-link") {
-    mkdirSync(path.dirname(superseded!), { recursive: true });
-    if (lexists(superseded!)) return `${superseded} already exists; run link again`;
-    renameSync(linkPath, superseded!);
-  } else if (action === "replace-empty-directory") {
-    rmdirSync(linkPath); // fails, safely, if something was written meanwhile
-    mkdirSync(store, { recursive: true });
-  } else {
-    mkdirSync(store, { recursive: true });
+  switch (action) {
+    case "move-and-link":
+      if (lexists(store)) rmdirSync(store); // empty, checked above; rename cannot replace it across all platforms
+      try {
+        renameSync(linkPath, store);
+      } catch (error) {
+        return `could not move ${LINK} into the store (${(error as NodeJS.ErrnoException).code ?? String(error)}); move it by hand`;
+      }
+      break;
+    case "supersede-and-link":
+      mkdirSync(path.dirname(superseded!), { recursive: true });
+      if (lexists(superseded!)) return `${superseded} already exists; run link again`;
+      renameSync(linkPath, superseded!);
+      break;
+    case "replace-empty-directory":
+      rmdirSync(linkPath); // fails, safely, if something was written meanwhile
+      mkdirSync(store, { recursive: true });
+      break;
+    default:
+      mkdirSync(store, { recursive: true });
   }
   return undefined;
 }
