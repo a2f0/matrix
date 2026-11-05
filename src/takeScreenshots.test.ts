@@ -144,6 +144,31 @@ describe("take-screenshots artifacts", () => {
     const stray = repo(path.join(home, "app3"), ".screenshots\n");
     symlinkSync("/tmp", path.join(stray, LINK));
     expect(link(targetFor(stray), artifacts, true).blocked).toContain("already links to");
+
+    // An empty directory is replaced; a file is refused; a superseded path that exists already is never overwritten.
+    const empty = repo(path.join(home, "app4"), ".screenshots\n");
+    mkdirSync(path.join(empty, LINK));
+    expect(link(targetFor(empty), artifacts, false)).toMatchObject({ before: "directory", action: "replace-empty-directory" });
+    expect(link(targetFor(empty), artifacts, true)).toMatchObject({ action: "replace-empty-directory", applied: true });
+    expect(linkState(targetFor(empty), artifacts)).toEqual({ state: "linked" });
+    const plain = repo(path.join(home, "app5"), ".screenshots\n");
+    writeFileSync(path.join(plain, LINK), "x");
+    expect(link(targetFor(plain), artifacts, true)).toEqual({
+      name: "app5",
+      project: "app",
+      store: path.join(artifacts, "app/screenshots"),
+      before: "other",
+      blocked: ".screenshots is neither a directory nor a link",
+    });
+    const again = repo(path.join(home, "app6"), ".screenshots\n");
+    write(again, { ".screenshots/web/home.png": "again" });
+    const when = new Date("2026-10-30T12:00:00.000Z");
+    mkdirSync(path.join(artifacts, "app/superseded/app6-2026-10-30T12-00-00-000Z"), { recursive: true });
+    expect(link(targetFor(again), artifacts, true, true, when).blocked).toBe(
+      `${path.join(artifacts, "app/superseded/app6-2026-10-30T12-00-00-000Z")} already exists; run link again`,
+    );
+    expect(readFileSync(path.join(again, ".screenshots/web/home.png"), "utf8")).toBe("again");
+    expect(link(targetFor(again), path.join(again, "store"), false).blocked).toBe(`the store ${path.join(again, "store")} is inside the repository`);
   });
 
   test("captures under a lock, records provenance, and every linked clone sees it", async () => {
