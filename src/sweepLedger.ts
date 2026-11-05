@@ -1,7 +1,7 @@
 // Sweep ledgers on disk: where they live, how updates are appended and replayed, and how a
 // ledger reads back as a report. Parsing options and summarizing friction build on this.
 import { randomUUID } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { git, gitOutput } from "./git";
 import { repoName } from "./manifest";
@@ -202,10 +202,73 @@ export function loadEntry(directory: string, repo: string): RepoEntry {
   return entry;
 }
 
+/**
+ * Where a branch's ledger stands. `startSweep` builds a ledger in a staging directory and renames it
+ * into place complete, so `incomplete` (a directory without sweep.json) is left only by a start that
+ * an older matrix, which built the ledger in place, did not finish.
+ */
+type LedgerState = "absent" | "incomplete" | "open";
+
+function ledgerState(directory: string): LedgerState {
+  if (existsSync(path.join(directory, "sweep.json"))) return "open";
+  return existsSync(directory) ? "incomplete" : "absent";
+}
+
+function interruptedStart(directory: string): Error {
+  return new Error(
+    `The sweep ledger at ${directory} has no sweep.json because an earlier sweep start was interrupted; remove that directory and run sweep start again.`,
+  );
+}
+
+/** Staging directories sit beside ledgers; branch names never start with a dot, so neither do ledger directories. */
+const STAGING_PREFIX = ".start-";
+
+/**
+ * Publish a new ledger with its first update per repository. It is built in a private staging
+ * directory and renamed into place, which fails while the target holds a ledger: concurrent starts
+ * stay exclusive, and an interrupted start leaves only staging that nothing reads.
+ */
+export function createLedger(directory: string, sweep: Sweep, initial: ReadonlyMap<string, StoredUpdate>): void {
+  const parent = path.dirname(directory);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const staging = mkdtempSync(path.join(parent, STAGING_PREFIX));
+  try {
+    for (const [repo, update] of initial) appendUpdate(staging, repo, update);
+    writeJson(path.join(staging, "sweep.json"), sweep);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
+  try {
+    renameSync(staging, directory);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    throw ledgerTaken(directory, error);
+  }
+}
+
+/** Explain a rename that found the target taken; any other failure is rethrown as it was. */
+function ledgerTaken(directory: string, error: unknown): unknown {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code !== "EEXIST" && code !== "ENOTEMPTY") return error;
+  if (ledgerState(directory) === "incomplete") return interruptedStart(directory);
+  return new Error(`A sweep ledger already exists at ${directory}; use sweep record or sweep report, or choose a branch name that differs by more than case.`);
+}
+
 export function loadSweep(root: string, branch: string): { directory: string; sweep: Sweep } {
   const directory = sweepDirectory(root, branch);
   const file = path.join(directory, "sweep.json");
-  if (!existsSync(file)) throw new Error(`No sweep ledger for '${branch}'; run sweep start.`);
+  const state = ledgerState(directory);
+  switch (state) {
+    case "absent":
+      throw new Error(`No sweep ledger for '${branch}'; run sweep start.`);
+    case "incomplete":
+      throw interruptedStart(directory);
+    case "open":
+      break;
+    default:
+      throw new Error(`Unknown ledger state ${state satisfies never}.`);
+  }
   const sweep = readJson(file, isSweep);
   if (sweep.schemaVersion !== 1) throw new Error(`${file} has unsupported schemaVersion ${String(sweep.schemaVersion)}.`);
   // Case-insensitive filesystems, such as macOS's default, map chore/Fix and chore/fix to one directory.
@@ -237,6 +300,7 @@ export function listSweeps(root: string): SweepReport[] {
   const directory = sweepsDirectory(root);
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
+    .filter(name => !name.startsWith(STAGING_PREFIX))
     .map(name => path.join(directory, name))
     .filter(folder => existsSync(path.join(folder, "sweep.json")))
     .map(folder => {

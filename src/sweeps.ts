@@ -1,9 +1,8 @@
-import { mkdirSync, rmSync } from "node:fs";
-import path from "node:path";
 import { type CheckoutStatus, notReady } from "./checkouts";
 import { findRepo } from "./manifest";
 import {
   appendUpdate,
+  createLedger,
   type EntryUpdate,
   EVENT_KINDS,
   type EventKind,
@@ -19,7 +18,6 @@ import {
   type SweepReport,
   sweepDirectory,
   VERDICTS,
-  writeJson,
 } from "./sweepLedger";
 
 const CAUSE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -102,35 +100,22 @@ export function startSweep(
     startedAt: at,
     repos,
   };
-  const initial = repos.map((repo): StoredUpdate => {
-    const status = statusOf(repo);
-    const reason = notReady(status);
-    const install = status.agentTool;
-    const notes =
-      install && !install.current
-        ? [`node_modules holds agent-tool ${install.installed ?? "none"}, pinned ${install.pinned}; run the checkout's install before its scripts`]
-        : [];
-    return reason === undefined ? { at, status: "pending", ...(status.head && { base: status.head }), notes } : { at, status: "skipped", reason, notes };
-  });
-  mkdirSync(path.dirname(directory), { recursive: true, mode: 0o700 });
-  try {
-    mkdirSync(directory, { mode: 0o700 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST")
-      throw new Error(
-        `A sweep ledger already exists at ${directory}; use sweep record or sweep report, or choose a branch name that differs by more than case.`,
-      );
-    throw error;
-  }
-  try {
-    for (const [index, repo] of repos.entries()) appendUpdate(directory, repo, initial[index]!);
-    // Written last: list and report treat a directory without sweep.json as absent.
-    writeJson(path.join(directory, "sweep.json"), sweep);
-  } catch (error) {
-    // This call created the directory, so a failed start leaves nothing behind to block a retry.
-    rmSync(directory, { recursive: true, force: true });
-    throw error;
-  }
+  const initial = new Map(
+    repos.map((repo): [string, StoredUpdate] => {
+      const status = statusOf(repo);
+      const reason = notReady(status);
+      const install = status.agentTool;
+      const notes =
+        install && !install.current
+          ? [`node_modules holds agent-tool ${install.installed ?? "none"}, pinned ${install.pinned}; run the checkout's install before its scripts`]
+          : [];
+      return [
+        repo,
+        reason === undefined ? { at, status: "pending", ...(status.head && { base: status.head }), notes } : { at, status: "skipped", reason, notes },
+      ];
+    }),
+  );
+  createLedger(directory, sweep, initial);
   return report(sweep, loadEntries(directory, sweep));
 }
 

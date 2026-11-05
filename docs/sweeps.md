@@ -29,7 +29,12 @@ parallel delegates can record at once without losing each other's changes; an
 entry is its updates replayed in the order they were recorded.
 
 `sweep start` refuses a branch that already has a ledger, and a start that
-fails leaves nothing behind, so a corrected retry succeeds. It records every
+fails leaves nothing behind, so a corrected retry succeeds. It builds the
+ledger in a `.start-*` staging directory beside the others and renames it into
+place complete, so a start killed midway leaves only staging that no command
+reads and that is safe to delete. A ledger directory without `sweep.json`,
+which an older matrix could leave, is reported by `start`, `record`, and
+`report` with the instruction to remove it. It records every
 selected repository, all of them by default: a ready checkout starts `pending`
 at its current commit, and any other is `skipped` with the reason `status`
 gives, such as `on branch feat/x` or `checkout missing; run sync`. A checkout

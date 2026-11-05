@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type CheckoutStatus, notReady } from "./checkouts";
 import { listSweeps, sweepsDirectory } from "./sweepLedger";
@@ -85,6 +85,66 @@ describe("startSweep", () => {
     expect(existsSync(path.join(sweepsDirectory(root), encodeURIComponent("chore/demo")))).toBe(false);
     expect(start("chore/demo", ["a2f0/one"]).counts).toEqual({ pending: 1 });
   });
+
+  test("names a ledger directory that an interrupted start left without sweep.json", () => {
+    const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
+    mkdirSync(path.join(directory, "repos", "one"), { recursive: true });
+    writeFileSync(path.join(directory, "repos", "one", "000001.json"), `${JSON.stringify({ at: at(0).toISOString(), status: "pending" })}\n`);
+    const interrupted = `The sweep ledger at ${directory} has no sweep.json because an earlier sweep start was interrupted; remove that directory and run sweep start again.`;
+    expect(() => start("chore/demo", ["a2f0/one"])).toThrow(interrupted);
+    expect(() => recordEntry(root, "chore/demo", "one", { status: "merged" })).toThrow(interrupted);
+    expect(() => sweepReport(root, "chore/demo")).toThrow(interrupted);
+    expect(readdirSync(sweepsDirectory(root))).toEqual([encodeURIComponent("chore/demo")]);
+    rmSync(directory, { recursive: true });
+    expect(start("chore/demo", ["a2f0/one"]).counts).toEqual({ pending: 1 });
+  });
+
+  test("builds the ledger aside, so a start killed midway neither blocks nor lists a sweep", () => {
+    const staging = path.join(sweepsDirectory(root), ".start-killed");
+    mkdirSync(path.join(staging, "repos"), { recursive: true });
+    writeFileSync(
+      path.join(staging, "sweep.json"),
+      `${JSON.stringify({ schemaVersion: 1, branch: "chore/demo", startedAt: at(0).toISOString(), repos: [] })}\n`,
+    );
+    expect(listSweeps(root)).toEqual([]);
+    expect(start("chore/demo", ["a2f0/one"], 1).counts).toEqual({ pending: 1 });
+    expect(listSweeps(root).map(result => result.sweep.branch)).toEqual(["chore/demo"]);
+  });
+
+  test("lets exactly one of several concurrent starts create the ledger", async () => {
+    const module = path.join(import.meta.dir, "sweeps.ts");
+    const starters = Array.from(
+      { length: 4 },
+      (_, index) =>
+        new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
+          const status = {
+            repo: "a2f0/one",
+            path: "checkouts/one",
+            present: true,
+            ready: true,
+            branch: "main",
+            defaultBranch: "main",
+            head: HEAD,
+            changes: 0,
+            ahead: 0,
+            behind: 0,
+          };
+          const script = `import { startSweep } from ${JSON.stringify(module)}; startSweep(${JSON.stringify(root)}, "chore/demo", ["a2f0/one"], () => (${JSON.stringify(status)}), { topic: "starter ${index}" });`;
+          const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "pipe"] });
+          let stderr = "";
+          child.stderr.on("data", chunk => {
+            stderr += chunk;
+          });
+          child.on("error", reject);
+          child.on("exit", code => resolve({ code, stderr }));
+        }),
+    );
+    const results = await Promise.all(starters);
+    expect(results.filter(result => result.code === 0)).toHaveLength(1);
+    for (const result of results.filter(result => result.code !== 0)) expect(result.stderr).toContain("A sweep ledger already exists");
+    expect(readdirSync(sweepsDirectory(root))).toEqual([encodeURIComponent("chore/demo")]);
+    expect(sweepReport(root, "chore/demo").counts).toEqual({ pending: 1 });
+  }, 30_000);
 
   test("records a repository named twice once", () => {
     expect(start("chore/demo", ["a2f0/one", "a2f0/two", "A2F0/one"]).sweep.repos).toEqual(["a2f0/one", "a2f0/two"]);
