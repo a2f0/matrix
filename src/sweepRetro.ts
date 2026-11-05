@@ -2,7 +2,19 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { object } from "./packageJson";
-import { EVENT_KINDS, type EventKind, listSweeps, REMAINING, readJson, type SweepStatus, sweepsDirectory, type Verdict, writeJson } from "./sweepLedger";
+import {
+  EVENT_KINDS,
+  type EventKind,
+  listSweeps,
+  REMAINING,
+  type RepoEntry,
+  readJson,
+  type SweepEvent,
+  type SweepStatus,
+  sweepsDirectory,
+  type Verdict,
+  writeJson,
+} from "./sweepLedger";
 import { oneOf, PULL_REQUEST, parseEvent, sweepReport, text } from "./sweeps";
 
 /** Resolutions sit beside the ledgers, since one can close a cause seen across many sweeps. */
@@ -99,65 +111,88 @@ export interface Retro {
   readonly unfinished: Array<{ branch: string; repo: string; status: SweepStatus; reason?: string; pr?: string }>;
 }
 
+/** One cause's occurrences while retro reads the ledgers. */
+interface CauseGroup {
+  readonly kind: EventKind;
+  readonly cause: string;
+  occurrences: number;
+  readonly repos: Set<string>;
+  readonly sweeps: Set<string>;
+  readonly details: string[];
+  lastSeen: string;
+}
+
+/** Count one friction event under its kind and cause. */
+function addEvent(groups: Map<string, CauseGroup>, branch: string, repo: string, event: SweepEvent): void {
+  const key = `${event.kind}:${event.cause}`;
+  const group = groups.get(key) ?? {
+    kind: event.kind,
+    cause: event.cause,
+    occurrences: 0,
+    repos: new Set(),
+    sweeps: new Set(),
+    details: [],
+    lastSeen: event.at,
+  };
+  group.occurrences++;
+  if (event.at > group.lastSeen) group.lastSeen = event.at;
+  group.repos.add(repo);
+  group.sweeps.add(branch);
+  if (event.detail) group.details.push(`${branch} ${repo}: ${event.detail}`);
+  groups.set(key, group);
+}
+
+/** Count an entry's review verdict and reviewer. */
+function tallyReview(reviews: Retro["reviews"], entry: RepoEntry): void {
+  if (entry.verdict) reviews.verdicts[entry.verdict] = (reviews.verdicts[entry.verdict] ?? 0) + 1;
+  if (entry.reviewer) reviews.reviewers[entry.reviewer] = (reviews.reviewers[entry.reviewer] ?? 0) + 1;
+}
+
+/** An entry left pending, in progress, blocked, or with an open PR; undefined once it is done. */
+function unfinishedEntry(branch: string, entry: RepoEntry): Retro["unfinished"][number] | undefined {
+  if (!REMAINING.includes(entry.status) && entry.status !== "open") return undefined;
+  return {
+    branch,
+    repo: entry.repo,
+    status: entry.status,
+    ...(entry.reason && { reason: entry.reason }),
+    ...(entry.pr && { pr: entry.pr }),
+  };
+}
+
+/** A group as reported, with the newest resolution recorded after it last happened. */
+function recurrence(group: CauseGroup, resolutions: Resolution[]): Recurrence {
+  const resolution = resolutions.filter(entry => entry.kind === group.kind && entry.cause === group.cause && entry.at > group.lastSeen).at(-1);
+  return {
+    kind: group.kind,
+    cause: group.cause,
+    occurrences: group.occurrences,
+    repos: [...group.repos].sort(),
+    sweeps: [...group.sweeps].sort(),
+    details: group.details,
+    lastSeen: group.lastSeen,
+    ...(resolution && { resolution }),
+  };
+}
+
 /** Group friction across sweeps so recurring causes surface as lesson candidates. */
 export function retro(root: string, options: RetroOptions = {}): Retro {
   const { branches = [], last = 5, minRepos = 2, minSweeps = 2 } = options;
   const reports = branches.length > 0 ? branches.map(branch => sweepReport(root, branch)) : listSweeps(root).slice(0, last);
-  const groups = new Map<
-    string,
-    { kind: EventKind; cause: string; occurrences: number; repos: Set<string>; sweeps: Set<string>; details: string[]; lastSeen: string }
-  >();
-  const verdicts: Partial<Record<Verdict, number>> = {};
-  const reviewers: Record<string, number> = {};
+  const groups = new Map<string, CauseGroup>();
+  const reviews: Retro["reviews"] = { verdicts: {}, reviewers: {} };
   const unfinished: Retro["unfinished"] = [];
   for (const { sweep, repos } of reports) {
     for (const entry of repos) {
-      for (const event of entry.events) {
-        const key = `${event.kind}:${event.cause}`;
-        const group = groups.get(key) ?? {
-          kind: event.kind,
-          cause: event.cause,
-          occurrences: 0,
-          repos: new Set(),
-          sweeps: new Set(),
-          details: [],
-          lastSeen: event.at,
-        };
-        group.occurrences++;
-        if (event.at > group.lastSeen) group.lastSeen = event.at;
-        group.repos.add(entry.repo);
-        group.sweeps.add(sweep.branch);
-        if (event.detail) group.details.push(`${sweep.branch} ${entry.repo}: ${event.detail}`);
-        groups.set(key, group);
-      }
-      if (entry.verdict) verdicts[entry.verdict] = (verdicts[entry.verdict] ?? 0) + 1;
-      if (entry.reviewer) reviewers[entry.reviewer] = (reviewers[entry.reviewer] ?? 0) + 1;
-      if (REMAINING.includes(entry.status) || entry.status === "open") {
-        unfinished.push({
-          branch: sweep.branch,
-          repo: entry.repo,
-          status: entry.status,
-          ...(entry.reason && { reason: entry.reason }),
-          ...(entry.pr && { pr: entry.pr }),
-        });
-      }
+      for (const event of entry.events) addEvent(groups, sweep.branch, entry.repo, event);
+      tallyReview(reviews, entry);
+      const remaining = unfinishedEntry(sweep.branch, entry);
+      if (remaining) unfinished.push(remaining);
     }
   }
   const resolutions = listResolutions(root);
-  const recurrences: Recurrence[] = [...groups.values()]
-    .map(group => {
-      const resolution = resolutions.filter(entry => entry.kind === group.kind && entry.cause === group.cause && entry.at > group.lastSeen).at(-1);
-      return {
-        kind: group.kind,
-        cause: group.cause,
-        occurrences: group.occurrences,
-        repos: [...group.repos].sort(),
-        sweeps: [...group.sweeps].sort(),
-        details: group.details,
-        lastSeen: group.lastSeen,
-        ...(resolution && { resolution }),
-      };
-    })
+  const recurrences = [...groups.values()]
+    .map(group => recurrence(group, resolutions))
     .sort((left, right) => right.occurrences - left.occurrences || `${left.kind}:${left.cause}`.localeCompare(`${right.kind}:${right.cause}`));
   const recurs = (group: Recurrence) => group.repos.length >= minRepos || group.sweeps.length >= minSweeps;
   return {
@@ -165,7 +200,7 @@ export function retro(root: string, options: RetroOptions = {}): Retro {
     recurring: recurrences.filter(group => recurs(group) && !group.resolution),
     resolved: recurrences.filter(group => recurs(group) && group.resolution),
     isolated: recurrences.filter(group => !recurs(group)),
-    reviews: { verdicts, reviewers },
+    reviews,
     unfinished,
   };
 }
