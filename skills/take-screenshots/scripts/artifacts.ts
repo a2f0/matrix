@@ -96,6 +96,14 @@ export function parseOptions(argv: string[]): Options {
   const own = split === -1 ? rest : rest.slice(0, split);
   const captureArgs = split === -1 ? [] : rest.slice(split + 1);
   if (captureArgs.length > 0 && command !== "capture") throw new Error("only capture forwards arguments after --");
+  const { names, switches, project } = parseOwn(own);
+  checkApplies(command, switches);
+  const { apply, json, allowDirty, supersede } = switches;
+  return { command, names, apply, json, allowDirty, supersede, captureArgs, ...(project ? { project } : {}) };
+}
+
+/** The repositories, switches and project named before `--`. */
+function parseOwn(own: string[]): { names: string[]; switches: Switches; project: string | undefined } {
   const names: string[] = [];
   const switches: Switches = { apply: false, json: false, allowDirty: false, supersede: false };
   let project: string | undefined;
@@ -112,9 +120,7 @@ export function parseOptions(argv: string[]): Options {
     else if (arg.startsWith("-")) throw new Error(`unknown option ${arg}\n\n${USAGE}`);
     else names.push(arg);
   }
-  checkApplies(command, switches);
-  const { apply, json, allowDirty, supersede } = switches;
-  return { command, names, apply, json, allowDirty, supersede, captureArgs, ...(project ? { project } : {}) };
+  return { names, switches, project };
 }
 
 /** Rejects options the command does not use. */
@@ -213,8 +219,8 @@ async function captureCommand(
     );
     if (plan.previous) print(`Replaces the ${plan.previous.status} capture of ${plan.previous.commit.slice(0, 10)} from ${plan.previous.checkout}.`);
     print("Dry run; rerun with --apply.");
-  } else print(`Capture ${plan.record!.status} (exit ${plan.record!.exitCode}); recorded in ${path.join(plan.store, RECORD)}.`);
-  return plan.applied && plan.record!.status !== "complete" ? 1 : 0;
+  } else print(`Capture ${plan.record.status} (exit ${plan.record.exitCode}); recorded in ${path.join(plan.store, RECORD)}.`);
+  return plan.applied && plan.record.status !== "complete" ? 1 : 0;
 }
 
 if (import.meta.main) {

@@ -25,6 +25,19 @@ function tree(files: Record<string, string>): string {
   return root;
 }
 
+/** The PNG filter predictor, written independently of perf.ts's so the decoder test can encode with it. */
+function predict(filter: number, left: number, up: number, corner: number): number {
+  if (filter === 1) return left;
+  if (filter === 2) return up;
+  if (filter === 3) return (left + up) >> 1;
+  if (filter !== 4) return 0;
+  const estimate = left + up - corner,
+    a = Math.abs(estimate - left),
+    b = Math.abs(estimate - up),
+    c = Math.abs(estimate - corner);
+  return a <= b && a <= c ? left : b <= c ? up : corner;
+}
+
 describe("performance-pass perf.ts", () => {
   test("parses commands, numbers, flags and rejects unknown or invalid options", () => {
     const options = parseOptions([
@@ -77,17 +90,6 @@ describe("performance-pass perf.ts", () => {
     const width = 5,
       height = 6;
     const rgba = (x: number, y: number) => [(x * 53 + y * 17) & 255, (x * 7 + y * 91) & 255, (x * y * 29 + 3) & 255, 255];
-    const predict = (filter: number, left: number, up: number, corner: number) => {
-      if (filter === 1) return left;
-      if (filter === 2) return up;
-      if (filter === 3) return (left + up) >> 1;
-      if (filter !== 4) return 0;
-      const estimate = left + up - corner,
-        a = Math.abs(estimate - left),
-        b = Math.abs(estimate - up),
-        c = Math.abs(estimate - corner);
-      return a <= b && a <= c ? left : b <= c ? up : corner;
-    };
     const chunk = (type: string, body: Buffer) => {
       const length = Buffer.alloc(4);
       length.writeUInt32BE(body.length);

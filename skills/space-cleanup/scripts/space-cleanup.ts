@@ -51,24 +51,35 @@ named checkouts; elsewhere, the repository holding the working directory.
   --apply          remove what the report lists; without it nothing changes
   --json           JSON output for agents`;
 
+type Switches = Record<"apply" | "json" | "machine" | "includeBusy", boolean>;
+
+/** The boolean options, by the field each sets. */
+const SWITCHES = new Map<string, keyof Switches>([
+  ["--apply", "apply"],
+  ["--json", "json"],
+  ["--machine", "machine"],
+  ["--include-busy", "includeBusy"],
+]);
+
+/** The options that add a tier to the default caches. */
+const TIER_OPTIONS = new Map<string, Tier>([
+  ["--builds", "builds"],
+  ["--deps", "deps"],
+]);
+
 export function parseOptions(argv: string[]): Options {
   const names: string[] = [];
   const tiers = new Set<Tier>(["caches"]);
-  let apply = false,
-    json = false,
-    machine = false,
-    includeBusy = false;
+  const switches: Switches = { apply: false, json: false, machine: false, includeBusy: false };
   for (const arg of argv) {
-    if (arg === "--apply") apply = true;
-    else if (arg === "--json") json = true;
-    else if (arg === "--machine") machine = true;
-    else if (arg === "--include-busy") includeBusy = true;
-    else if (arg === "--builds") tiers.add("builds");
-    else if (arg === "--deps") tiers.add("deps");
+    const field = SWITCHES.get(arg);
+    const tier = TIER_OPTIONS.get(arg);
+    if (field) switches[field] = true;
+    else if (tier) tiers.add(tier);
     else if (arg.startsWith("-")) throw new Error(`unknown option ${arg}\n\n${USAGE}`);
     else names.push(arg);
   }
-  return { names, tiers, apply, json, machine, includeBusy };
+  return { names, tiers, ...switches };
 }
 
 function size(bytes: number | undefined): string {

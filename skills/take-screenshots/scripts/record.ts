@@ -7,12 +7,15 @@ import { writeAtomic } from "./store";
 /** Provenance of the newest capture, inside the shared directory. */
 export const RECORD = "capture.json";
 
-export interface CaptureRecord {
+/** How a capture that ran to the end was judged. */
+export type FinishedStatus = "complete" | "failed" | "incomplete";
+
+/** The fields a capture records when it starts; they do not change when it finishes. */
+export interface RecordFields {
   readonly schemaVersion: 1;
   readonly project: string;
   /** owner/name from origin, when it is a GitHub remote. */
   readonly repo?: string;
-  readonly status: "running" | "complete" | "failed" | "incomplete";
   readonly commit: string;
   readonly branch: string | null;
   /** The working tree had changes the commit does not hold. */
@@ -30,8 +33,58 @@ export interface CaptureRecord {
   readonly checkout: string;
   readonly host: string;
   readonly startedAt: string;
-  readonly finishedAt?: string;
-  readonly exitCode?: number | null;
+}
+
+/** A capture still running, or one whose process was killed before it could finish. */
+export interface RunningRecord extends RecordFields {
+  readonly status: "running";
+  readonly finishedAt?: never;
+  readonly exitCode?: never;
+}
+
+interface FinishedRecord extends RecordFields {
+  readonly status: FinishedStatus;
+  readonly finishedAt: string;
+  readonly exitCode: number | null;
+}
+
+/**
+ * The record moves `start` -> running -> `finish` -> complete, failed or incomplete.
+ * Records written by older versions are read without checking that shape, so
+ * readers still allow a finished record without `finishedAt`.
+ */
+export type CaptureRecord = RunningRecord | FinishedRecord;
+
+type StartEvent = { readonly type: "start"; readonly fields: RecordFields };
+
+export type RecordEvent =
+  | StartEvent
+  | { readonly type: "finish"; readonly status: FinishedStatus; readonly finishedAt: string; readonly exitCode: number | null };
+
+/**
+ * The record's only transition. `start` replaces any record, since the lock
+ * settled the one before; `finish` settles only a running record and is
+ * ignored otherwise.
+ */
+export function transition(record: CaptureRecord | undefined, event: StartEvent): RunningRecord;
+export function transition(record: CaptureRecord, event: RecordEvent): CaptureRecord;
+export function transition(record: CaptureRecord | undefined, event: RecordEvent): CaptureRecord | undefined;
+export function transition(record: CaptureRecord | undefined, event: RecordEvent): CaptureRecord | undefined {
+  switch (event.type) {
+    case "start":
+      return { ...event.fields, status: "running" };
+    case "finish": {
+      if (record?.status !== "running") return record;
+      const { status, finishedAt, exitCode } = event;
+      return { ...record, status, finishedAt, exitCode };
+    }
+    default:
+      return assertNever(event);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled record event: ${JSON.stringify(value)}`);
 }
 
 const STATUSES = new Set(["running", "complete", "failed", "incomplete"]);
