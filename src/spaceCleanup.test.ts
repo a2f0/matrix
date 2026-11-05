@@ -501,6 +501,125 @@ describe("space cleanup", () => {
     expect(item.bytes!).toBeLessThan(512 * 1024);
   });
 
+  describe("report", () => {
+    const CACHES = [
+      ".turbo",
+      ".parcel-cache",
+      "coverage",
+      ".nyc_output",
+      "test-results",
+      "playwright-report",
+      "blob-report",
+      "__pycache__",
+      ".pytest_cache",
+      ".mypy_cache",
+    ];
+
+    /** A repository whose ten caches sort by size in list order: `.turbo` largest. */
+    function cachesFixture(): string {
+      const root = realpathSync(tempDir("space-cleanup-report"));
+      gitInit(root);
+      write(root, { ".gitignore": `${CACHES.join("\n")}\n`, "src/index.ts": "x" });
+      for (const [index, name] of CACHES.entries()) write(root, { [`${name}/data`]: "x".repeat((CACHES.length - index) * 16 * 1024) });
+      gitIn(root, "add", ".gitignore", "src/index.ts");
+      gitIn(root, "commit", "-qm", "init");
+      return root;
+    }
+
+    /** What `main` prints and returns, with sizes and the fixture root replaced by placeholders. */
+    function run(argv: string[], cwd: string, discover: () => Proc[]): { code: number; output: string } {
+      const quiet = console.log;
+      let output = "";
+      console.log = (text: string) => {
+        output += `${text}\n`;
+      };
+      let code: number;
+      try {
+        code = main(argv, cwd, discover);
+      } finally {
+        console.log = quiet;
+      }
+      return { code, output: output.replaceAll(cwd, "<root>").replace(/ +\d+(?:\.\d)? (?:B|KiB|MiB|GiB|TiB)/g, " <size>") };
+    }
+
+    test("prints a dry run with its busy repositories, longest lists cut short", () => {
+      const root = cachesFixture();
+      const procs = [900001, 900002, 900003, 900004].map(pid => ({ pid, ppid: 0, name: "node", args: "vite", cwd: root }));
+      const { code, output } = run([root], root, () => procs);
+      expect(code).toBe(0);
+      expect(output).toBe(
+        [
+          "Space cleanup (dry run): <size> free",
+          "",
+          `${path.basename(root)} skipped, busy: node 900001, node 900002, node 900003, ...`,
+          "  caches <size>, builds <size>, deps <size>",
+          ...CACHES.slice(0, 8).map(name => `  caches <size>  ${name}`),
+          "  ... and 2 more",
+          "",
+          "Totals: caches <size>, builds <size> (--builds), deps <size> (--deps)",
+          "Nothing changed; rerun with --apply to remove the listed tiers.",
+          "",
+        ].join("\n"),
+      );
+    });
+
+    test("prints what --apply removed and what it refused, and fails on a refusal", () => {
+      const root = cachesFixture();
+      let calls = 0;
+      // The tree changes between the scan and the removal: `.turbo` now holds credentials.
+      const discover = (): Proc[] => {
+        if (calls++ === 1) write(root, { ".turbo/.env": "SECRET=1" });
+        return [];
+      };
+      const { code, output } = run([root, "--apply", "--builds"], root, discover);
+      expect(code).toBe(1);
+      expect(calls).toBe(2);
+      expect(output).toBe(
+        [
+          "Space cleanup (applied): <size> free",
+          "",
+          path.basename(root),
+          "  caches <size>, builds <size>, deps <size>",
+          "  caches <size>  .turbo",
+          ...CACHES.slice(1, 8).map(name => `  removed <size>  ${name}`),
+          "  ... and 2 more",
+          "  FAILED .turbo: contains .turbo/.env",
+          "",
+          "Totals: caches <size>, builds <size>, deps <size> (--deps)",
+          "Free: <size> -> <size>",
+          "",
+        ].join("\n"),
+      );
+      expect(existsSync(path.join(root, ".turbo/data"))).toBe(true);
+      for (const name of CACHES.slice(1)) expect(existsSync(path.join(root, name))).toBe(false);
+    });
+
+    test("prints a repository that cannot be scanned, and JSON with every field", () => {
+      const root = cachesFixture();
+      writeFileSync(path.join(root, ".git", "index"), "not an index");
+      const text = run([root], root, () => []);
+      expect(text.code).toBe(1);
+      expect(text.output).toMatch(
+        new RegExp(`^Space cleanup \\(dry run\\): <size> free\n\n${path.basename(root)} error: .+\n  caches <size>, builds <size>, deps <size>\n\nTotals: `),
+      );
+      const busy = cachesFixture();
+      const json = run([busy, "--json", "--deps"], busy, () => [{ pid: 900007, ppid: 0, name: "bun", args: "bun test", cwd: busy }]);
+      expect(json.code).toBe(0);
+      const report = JSON.parse(json.output);
+      expect(Object.keys(report)).toEqual(["applied", "workspace", "tiers", "free", "totals", "repos"]);
+      expect(report).toMatchObject({ applied: false, workspace: null, tiers: ["caches", "deps"], totals: { builds: 0, deps: 0 } });
+      expect(Object.keys(report.free)).toEqual(["before"]);
+      expect(report.repos).toHaveLength(1);
+      expect(report.repos[0]).toMatchObject({
+        name: path.basename(busy),
+        root: "<root>",
+        busy: [{ pid: 900007, name: "bun", cwd: "<root>" }],
+        skipped: "busy",
+      });
+      expect(report.repos[0].candidates.map((candidate: { path: string }) => candidate.path).sort()).toEqual([...CACHES].sort());
+    });
+  });
+
   test("rejects unknown options", () => {
     expect(() => parseOptions(["--force"])).toThrow("unknown option --force");
     expect(parseOptions(["--builds", "--deps", "tearleads"]).tiers).toEqual(new Set(["caches", "builds", "deps"]));
