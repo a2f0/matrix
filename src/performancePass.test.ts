@@ -285,6 +285,35 @@ describe("performance-pass perf.ts", () => {
   );
 
   test(
+    "prints a measured load's summary, waterfall and CPU tables",
+    async () => {
+      const root = tree({ "index.html": '<script src="app.js"></script>', "app.js": "window.ready = true;" });
+      const server = serve(root, 0, true);
+      await new Promise(resolve => server.once("listening", resolve));
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+      try {
+        const script = path.join(import.meta.dir, "../skills/performance-pass/scripts/perf.ts");
+        const args = ["measure", url, "--runs", "1", "--latency", "0", "--mbps", "0", "--ready", "window.ready === true", "--waterfall", "--profile"];
+        const child = Bun.spawn([process.execPath, script, ...args], { cwd: path.join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
+        const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+        expect(code, stderr).toBe(0);
+        const lines = stdout.trimEnd().split("\n");
+        expect(lines[0]).toMatch(new RegExp(`^${url.replace(/[.]/g, "\\.")}  ready median [\\d.]+ ms \\(min [\\d.]+, max [\\d.]+, 1 runs\\)$`));
+        expect(lines[1]).toMatch(/^ {2}\d+ requests, \d+ bytes, network done at \d+ ms; \{"latencyMs":0,/);
+        expect(lines).toContainEqual(expect.stringMatching(/^ +\d+ +\d+ +\d+ \/app\.js$/));
+        const self = lines.indexOf("  CPU self (ms):");
+        const inclusive = lines.indexOf("  CPU inclusive (ms):");
+        expect(self).toBeGreaterThan(1);
+        expect(inclusive).toBeGreaterThan(self);
+        for (const row of [...lines.slice(self + 1, inclusive), ...lines.slice(inclusive + 1)]) expect(row).toMatch(/^ +\d+\.\d \S/);
+      } finally {
+        server.close();
+      }
+    },
+    { timeout: 60_000 },
+  );
+
+  test(
     "screenshots a seeded page identically, and counts what an interaction changes",
     async () => {
       const root = tree({
