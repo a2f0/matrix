@@ -140,6 +140,22 @@ describe("explicit-state-machines scan", () => {
       "const u = 'a//b'; hasError = false; ",
       'const e = "\\"/*";',
     ]);
+    // Escapes, an escape or string left open at the line's end, and a block that closes and reopens.
+    expect(codeLines("a = 'x\\\\' // c\nb = \"open // c\nc = \"end\\\\\nd /* x */ e /* y\nz */ f // g", "c")).toEqual([
+      "a = 'x\\\\' ",
+      'b = "open // c',
+      'c = "end\\\\',
+      "d  e ",
+      " f ",
+    ]);
+    // Status setters, Python booleans, and a field written from too few lines.
+    const setters = 'setStatus("idle");\nsetStatus("loading"); setStatus("failed");\nthis.mode = "a";\nthis.mode = "b"; this.mode = "c";\nsetStatus(\'done\');';
+    expect(scanText(setters, "c")).toEqual([{ kind: "status", names: ["status"], values: ["done", "failed", "idle", "loading"], lines: [1, 2, 5] }]);
+    const python = "self.is_busy = True\nself.is_busy = False\nis_open = False\nis_open = True\nmode = 'a'\nmode = 'b'\nmode = 'c'";
+    expect(scanText(python, "hash")).toEqual([
+      { kind: "flags", names: ["is_busy", "is_open"], lines: [1, 2, 3, 4] },
+      { kind: "status", names: ["mode"], values: ["a", "b", "c"], lines: [5, 6, 7] },
+    ]);
     const glob = 'const glob = "src/*.ts";\nsetIsLoading(true);\nsetIsLoading(false);\nsetHasError(true);\nsetHasError(false);';
     expect(scanText(glob, "c").map(signal => signal.names)).toEqual([["hasError", "isLoading"]]);
   });
