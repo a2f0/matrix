@@ -87,6 +87,14 @@ module is about to be deleted. Also leave alone:
 - Static records checked by one validator, and before/after comparisons that
   validate rather than track progress.
 - Effect and promise guards (`cancelled`, `mounted`) on their own.
+- One request in flight plus one "run again" flag, both written from one
+  function (`pending` with `started`): three reachable phases, one writer.
+- A ref mirroring a state to block a double click before re-render
+  (`isSubmitting` with `isSubmittingRef`), written together. The missing
+  mirror is the bug: a `busy` guard read from a click handler's render lets
+  two clicks start the work twice.
+- Flags in different components (a parent's `editing`, and `busy` in a child
+  that only exists while editing): the mount already excludes the bad pair.
 
 Record each one you leave and why, so the next pass does not reread it.
 
@@ -135,12 +143,18 @@ Follow `references/patterns.md` for the language at hand. In every language:
    saved as JSON, assert key order too.
 10. Check every new guard against existing listeners: a guard that only acts
     in `ready` breaks a listener reacting to an event fired mid-render.
+11. Treat "initial" props (`initialEditing`) as one-time requests, on mount or
+    when they turn true, not as levels that re-apply whenever another input
+    changes. Fold a mirrored prop the machine depends on (`canWrite`) into the
+    state, synced by one effect declared before the request effect.
 
 ## Ship
 
 - Work on a `refactor/<topic>` branch (`fix/<topic>` when the change fixes a
   bug) and ship with the repository's `ship-pr` skill: its validation, its
   independent review, its merge policy.
+- Check file-count or naming budgets (ls-lint) before adding a machine module
+  and its test; a full directory may need the tests in an existing file.
 - One PR per repository per pass, unless the diff passes about 600 lines or
   spans unrelated areas; then one PR per area, each independently valid. In
   large repositories plan one PR per machine: formatted transition tables
