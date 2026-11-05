@@ -44,7 +44,8 @@
           "src/manifest.ts",
           "src/markdown.ts",
           "src/options.ts",
-          "src/teardown.ts"
+          "src/teardown.ts",
+          "src/testSetup.ts"
         ]
       },
       {

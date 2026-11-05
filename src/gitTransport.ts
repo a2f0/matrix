@@ -53,12 +53,14 @@ function patternScope(pattern: string): { applies: boolean; exact: boolean } {
 
 /**
  * A helper's program name without its arguments, which can carry tokens:
- * `store --file ~/x` is `store`, `!/opt/homebrew/bin/gh auth git-credential` is `!gh`.
+ * `store --file ~/x` is `store`, `/usr/local/bin/helper get` is `helper`.
+ * An inline `!` helper is shell code that can start with an assignment
+ * (`!GH_TOKEN=... gh auth git-credential`), so none of it is shown.
  */
 export function helperName(helper: string): string {
-  const inline = helper.startsWith("!");
-  const program = (inline ? helper.slice(1) : helper).trim().split(/\s+/)[0] ?? "";
-  return `${inline ? "!" : ""}${program.split("/").at(-1) ?? program}`;
+  if (helper.startsWith("!")) return "an inline shell helper";
+  const program = helper.trim().split(/\s+/)[0]!.split("/").at(-1)!;
+  return /^[A-Za-z0-9._-]+$/.test(program) ? program : "a helper with an unusual name";
 }
 
 /**
@@ -116,7 +118,7 @@ export function inspectGitTransport(root: string, run: Runner = runner): GitTran
   if (config.status !== 0 && config.status !== 1) throw new Error(`git config failed: ${config.stderr.trim()}`);
   const credentialHelpers = config.status === 0 ? effectiveHelpers(config.stdout).map(helperName) : [];
   if (credentialHelpers.length > 0) {
-    problems.push(`Git would ask ${credentialHelpers.map(helper => `\`${helper}\``).join(", ")} for https://${GITHUB} credentials, which can wait on a keychain prompt; set an empty \`credential.https://${GITHUB}.helper\`, as dotfiles' gitconfig does`);
+    problems.push(`Git would ask ${credentialHelpers.map(helper => (/^[A-Za-z0-9._-]+$/.test(helper) ? `\`${helper}\`` : helper)).join(", ")} for https://${GITHUB} credentials, which can wait on a keychain prompt; set an empty \`credential.https://${GITHUB}.helper\`, as dotfiles' gitconfig does`);
   }
 
   const { command, shell } = sshCommand(root);

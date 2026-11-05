@@ -1,3 +1,5 @@
 [test]
 # Only matrix tests; a bare `bun test` must never discover the checkouts' suites.
 root = "src"
+# Run Git with its defaults, not the developer's global or system config.
+preload = ["./src/testSetup.ts"]

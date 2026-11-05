@@ -52,14 +52,16 @@ test("folds credential helpers the way Git does, for https://github.com only", (
 test("names helpers without their arguments, which can carry tokens", () => {
   expect(helperName("osxkeychain")).toBe("osxkeychain");
   expect(helperName("store --file /secret/path")).toBe("store");
-  expect(helperName("!/opt/homebrew/bin/gh auth git-credential")).toBe("!gh");
-  expect(helperName("!f() { echo password=ghp_secret; }; f")).toBe("!f()");
+  expect(helperName("/usr/local/bin/git-credential-manager get")).toBe("git-credential-manager");
+  expect(helperName("!/opt/homebrew/bin/gh auth git-credential")).toBe("an inline shell helper");
+  expect(helperName("!GH_TOKEN=ghp_secret gh auth git-credential")).toBe("an inline shell helper");
+  expect(helperName("GH_TOKEN=ghp_secret")).toBe("a helper with an unusual name");
 });
 
 test("reports helpers by name only", () => {
   config(["credential.helper", "!f() { echo password=ghp_secret; }; f"]);
   const result = inspectGitTransport(root, fakeRunner("ssh", "hostname ssh.github.com\nport 443\n"));
-  expect(result.credentialHelpers).toEqual(["!f()"]);
+  expect(result.credentialHelpers).toEqual(["an inline shell helper"]);
   expect(JSON.stringify(result)).not.toContain("ghp_secret");
 });
 
