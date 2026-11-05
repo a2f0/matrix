@@ -25,3 +25,12 @@ findings in that repository's guidance.
   runner failed to start, a gallery acting on a detached render, a bootstrap
   gate blocked forever when prerequisites vanished mid-run, two menus closing
   on one press, duplicate stop logs on a second focus loss.
+- Second and third rounds in balebase and tearleads, driven by the widened
+  scanner, found one more real bug (a checkout link minting two Stripe
+  sessions on a double click) and several false positives now named in the
+  skill's leave-alone list: in-flight-plus-rerun flags, ref mirrors, and flag
+  pairs split across a parent and a conditionally mounted child.
+- Bug fixes the sweep surfaced outside state machines shipped as their own
+  `fix/` PRs: a swallowed settings-write error, a partial download cached
+  forever, an audio session never released, a verify step failing during
+  registry propagation, and a CI runner image that broke browser tests.
