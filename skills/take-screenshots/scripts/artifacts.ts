@@ -213,8 +213,8 @@ async function captureCommand(
     );
     if (plan.previous) print(`Replaces the ${plan.previous.status} capture of ${plan.previous.commit.slice(0, 10)} from ${plan.previous.checkout}.`);
     print("Dry run; rerun with --apply.");
-  } else print(`Capture ${plan.record!.status} (exit ${plan.record!.exitCode}); recorded in ${path.join(plan.store, RECORD)}.`);
-  return plan.applied && plan.record!.status !== "complete" ? 1 : 0;
+  } else print(`Capture ${plan.record.status} (exit ${plan.record.exitCode}); recorded in ${path.join(plan.store, RECORD)}.`);
+  return plan.applied && plan.record.status !== "complete" ? 1 : 0;
 }
 
 if (import.meta.main) {

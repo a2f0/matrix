@@ -60,7 +60,8 @@ export async function drainGroup(pgid: number, graceMs = 30_000, killMs = 10_000
   return (await wait(killMs)) ? "stopped" : "stuck";
 }
 
-export interface CapturePlan {
+/** A capture as planned: what it would run and record. */
+export interface PlannedCapture {
   readonly name: string;
   readonly project: string;
   readonly store: string;
@@ -70,9 +71,17 @@ export interface CapturePlan {
   readonly dirty: boolean;
   readonly merged: boolean | null;
   readonly previous?: CaptureRecord;
-  readonly applied?: boolean;
-  readonly record?: CaptureRecord;
+  readonly applied?: never;
+  readonly record?: never;
 }
+
+/** A planned capture that ran, with the record it left; `--json` prints `applied` before `record`. */
+export interface AppliedCapture extends Omit<PlannedCapture, "applied" | "record"> {
+  readonly applied: true;
+  readonly record: CaptureRecord;
+}
+
+export type CapturePlan = PlannedCapture | AppliedCapture;
 
 /** Local changes, including edits behind assume-unchanged or skip-worktree flags that git status cannot see. */
 function isDirty(root: string): boolean {
@@ -112,7 +121,7 @@ export async function capture(
 }
 
 /** Checks the repository can be captured and describes the capture, changing nothing. */
-function planCapture(target: Target, artifacts: string, options: { allowDirty: boolean; args: string[] }): CapturePlan {
+function planCapture(target: Target, artifacts: string, options: { allowDirty: boolean; args: string[] }): PlannedCapture {
   if (typeof packageScripts(target.root).screenshots !== "string") {
     throw new Error(`${target.name} has no \`screenshots\` package script; see the take-screenshots skill's repository contract`);
   }
@@ -143,7 +152,7 @@ function planCapture(target: Target, artifacts: string, options: { allowDirty: b
 }
 
 /** Runs a planned capture under the project's lock and records how it finished. */
-async function runCapture(target: Target, artifacts: string, plan: CapturePlan, args: string[], runner: Runner, timing: Timing): Promise<CapturePlan> {
+async function runCapture(target: Target, artifacts: string, plan: PlannedCapture, args: string[], runner: Runner, timing: Timing): Promise<AppliedCapture> {
   const { store } = plan;
   const startedAt = new Date().toISOString();
   const lockFile = path.join(artifacts, target.project, LOCK);
@@ -175,6 +184,7 @@ async function runCapture(target: Target, artifacts: string, plan: CapturePlan, 
     // Runners that honor SCREENSHOT_OUTPUT_DIR must write through the link, whatever the caller's shell exports.
     const env = { ...process.env, SCREENSHOT_OUTPUT_DIR: path.join(target.root, LINK) };
     let drained: Awaited<ReturnType<typeof drainGroup>> = "exited";
+    let finished: CaptureRecord;
     try {
       const result = await runner.capture(target.root, args, env, pgid => {
         group = pgid;
@@ -184,14 +194,13 @@ async function runCapture(target: Target, artifacts: string, plan: CapturePlan, 
       exitCode = result.code;
       if (result.pgid !== undefined) drained = await drainGroup(result.pgid, timing.graceMs, timing.killMs);
     } finally {
-      const finished = finishedRecord(target, artifacts, plan, running, { exitCode, signal, drained, inheritsIncomplete });
+      finished = finishedRecord(target, artifacts, plan, running, { exitCode, signal, drained, inheritsIncomplete });
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
-      Object.assign(plan, { applied: true, record: finished });
     }
     if (drained === "stuck") throw new Error(`capture processes in group ${group} would not stop; the lock ${lockFile} stays until they are gone`);
     release();
-    return plan;
+    return { ...plan, applied: true, record: finished };
   } catch (error) {
     // Release only when no capture process can still be writing.
     if (group === undefined || !alive(-group)) release();
@@ -205,7 +214,7 @@ async function runCapture(target: Target, artifacts: string, plan: CapturePlan, 
 /** The record's fields while the capture runs, and whether a complete one still counts as incomplete. */
 function runningRecord(
   target: Target,
-  plan: CapturePlan,
+  plan: PlannedCapture,
   args: string[],
   previous: CaptureRecord | undefined,
   startedAt: string,
@@ -242,7 +251,7 @@ interface RunOutcome {
 }
 
 /** The record of a finished capture, after checking that the clone still shows the planned commit through the link. */
-function finishedRecord(target: Target, artifacts: string, plan: CapturePlan, running: RunningRecord, outcome: RunOutcome): CaptureRecord {
+function finishedRecord(target: Target, artifacts: string, plan: PlannedCapture, running: RunningRecord, outcome: RunOutcome): CaptureRecord {
   const { exitCode, signal, drained, inheritsIncomplete } = outcome;
   const shows = showsPlannedCommit(target, artifacts, plan);
   const finalStatus = (): FinishedStatus => {
@@ -256,7 +265,7 @@ function finishedRecord(target: Target, artifacts: string, plan: CapturePlan, ru
  * Whether the clone still shows the planned commit through the link, saying why when it does not.
  * A check that fails proves nothing, so it counts as not showing it: the record must still be written.
  */
-function showsPlannedCommit(target: Target, artifacts: string, plan: CapturePlan): boolean {
+function showsPlannedCommit(target: Target, artifacts: string, plan: PlannedCapture): boolean {
   const { commit, dirty } = plan;
   let kept: boolean;
   let moved: boolean;
