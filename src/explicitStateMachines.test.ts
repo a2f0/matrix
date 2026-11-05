@@ -85,6 +85,14 @@ describe("explicit-state-machines scan", () => {
     expect(language("LICENSE", "MIT License")).toBeUndefined();
     expect(language("qemu.exp")).toBe("hash");
     expect(language("bin/boot", "#!/usr/bin/expect -f")).toBe("hash");
+    expect(language("bin/run", "#!/usr/bin/env PYTHONPATH=. python3.13")).toBe("hash");
+    expect(language("bin/node", "#!/usr/bin/env node")).toBeUndefined();
+    expect(language("bin/shout", "#!/opt/shellac")).toBeUndefined();
+    // A long, unrecognized first line returns at once instead of backtracking.
+    const started = performance.now();
+    expect(language("blob", `#!${"/x".repeat(200_000)}`)).toBeUndefined();
+    expect(language("blob", `#!${"a".repeat(400_000)} b`)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(200);
     // A real Expect script: flags and a status set with Tcl's `set`.
     const expect_ = [
       "#!/usr/bin/expect -f",
@@ -93,7 +101,7 @@ describe("explicit-state-machines scan", () => {
       "set phase fetch",
       "proc install {} {",
       "    set is_installing true",
-      "    set phase \"install\"",
+      '    set phase "install"',
       "}",
       "set is_booted 1",
       "set is_installing false",

@@ -48,7 +48,25 @@ const LANGUAGES: Record<string, "c" | "hash"> = {
 };
 
 /** Interpreters whose extensionless scripts the scan reads, by their shebang. */
-const SHEBANG = /^#!\S*(?:\/env\s+(?:-\S+\s+)*)?\/?\S*?\b(?:sh|bash|zsh|dash|ksh|python3?|ruby|expect|tclsh)\b/;
+const INTERPRETER = /^(?:sh|bash|zsh|dash|ksh|python[\d.]*|ruby|expect|tclsh[\d.]*)$/;
+
+/**
+ * Whether a first line is a shebang for an interpreter the scan reads:
+ * `#!/bin/sh`, `#!/usr/bin/env -S python3 -u`, `#!/usr/bin/expect -f`. Parsed
+ * token by token (no backtracking regex) and bounded, since the line is
+ * untrusted input of any length.
+ */
+export function readsShebang(firstLine: string): boolean {
+  if (!firstLine.startsWith("#!")) return false;
+  const tokens = firstLine.slice(2, 512).trim().split(/\s+/);
+  const base = (token: string | undefined) => token?.slice(token.lastIndexOf("/") + 1) ?? "";
+  let index = 0;
+  if (base(tokens[0]) === "env") {
+    index = 1;
+    while (index < tokens.length && (tokens[index]!.startsWith("-") || tokens[index]!.includes("="))) index++;
+  }
+  return INTERPRETER.test(base(tokens[index]));
+}
 
 /** Largest file the scan reads; bigger tracked files are data or generated. */
 export const MAX_BYTES = 512 * 1024;
@@ -78,7 +96,7 @@ export function language(file: string, firstLine?: string): "c" | "hash" | "mayb
   const dot = base.lastIndexOf(".");
   if (dot > 0) return LANGUAGES[base.slice(dot).toLowerCase()];
   if (firstLine === undefined) return "maybe";
-  return SHEBANG.test(firstLine) ? "hash" : undefined;
+  return readsShebang(firstLine) ? "hash" : undefined;
 }
 
 /**
