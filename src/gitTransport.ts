@@ -80,18 +80,24 @@ export function helperName(helper: string): string {
 export function effectiveHelpers(config: string): string[] {
   let helpers: string[] = [];
   for (const record of config.split("\0").filter(Boolean)) {
-    const newline = record.indexOf("\n");
-    const key = newline === -1 ? record : record.slice(0, newline);
-    const value = newline === -1 ? "" : record.slice(newline + 1);
-    const lower = key.toLowerCase();
-    if (!lower.startsWith("credential.") || !lower.endsWith(".helper")) continue;
-    const pattern = key.slice("credential.".length, -".helper".length);
-    const scope = pattern === "" ? { applies: true, exact: true } : patternScope(pattern);
-    if (!scope.applies) continue;
-    if (value !== "") helpers.push(value);
-    else if (scope.exact) helpers = [];
+    const helper = applicableHelper(record);
+    if (helper === undefined) continue;
+    if (helper.value !== "") helpers.push(helper.value);
+    else if (helper.exact) helpers = [];
   }
   return helpers;
+}
+
+/** A `credential.<pattern>.helper` record's value and scope, when it applies to https://github.com. */
+function applicableHelper(record: string): { value: string; exact: boolean } | undefined {
+  const newline = record.indexOf("\n");
+  const key = newline === -1 ? record : record.slice(0, newline);
+  const value = newline === -1 ? "" : record.slice(newline + 1);
+  const lower = key.toLowerCase();
+  if (!lower.startsWith("credential.") || !lower.endsWith(".helper")) return undefined;
+  const pattern = key.slice("credential.".length, -".helper".length);
+  const scope = pattern === "" ? { applies: true, exact: true } : patternScope(pattern);
+  return scope.applies ? { value, exact: scope.exact } : undefined;
 }
 
 /**
