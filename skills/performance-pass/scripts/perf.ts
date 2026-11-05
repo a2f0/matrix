@@ -1,23 +1,29 @@
 #!/usr/bin/env bun
-// Measures how fast a page becomes usable, so a performance pass compares
-// rounds by numbers rather than impressions. Run it from the repository being
-// measured: Chrome is driven through that repository's own `playwright`
-// dependency, and nothing else outside Node's built-ins is needed.
-//
-//   serve <dir> [--port 8765]           serve a production build, compressed, revalidating
-//   measure <url> --ready <js> [...]    cold loads: median time to ready, requests, bytes
-//   shot <url> --ready <js> --out <png> a seeded screenshot of the ready state; --eval <js>, --hide <css>
-//   diff <a.png> <b.png>                count differing pixels between two screenshots
-//   graph <dir> <entry...>              an ES module's relative static and dynamic imports
+// Measures how fast a page becomes usable; USAGE below lists the commands.
+// Playwright is imported for its types only, which Bun erases, so the script
+// still runs by path with Node's built-ins and the measured repository's own
+// `playwright`.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, type Stats, statSync, writeFileSync } from "node:fs";
+import { createServer, type IncomingMessage, ServerResponse } from "node:http";
 import { createSecureServer, type Http2ServerRequest, type Http2ServerResponse } from "node:http2";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync, inflateSync } from "node:zlib";
+import type { Browser, BrowserContext, BrowserType, Page } from "playwright";
+
+const USAGE = `Measures how fast a page becomes usable, so a performance pass compares
+rounds by numbers rather than impressions. Run it from the repository being
+measured: Chrome is driven through that repository's own \`playwright\`
+dependency, and nothing else outside Node's built-ins is needed.
+
+  serve <dir> [--port 8765]           serve a production build, compressed, revalidating
+  measure <url> --ready <js> [...]    cold loads: median time to ready, requests, bytes
+  shot <url> --ready <js> --out <png> a seeded screenshot of the ready state; --eval <js>, --hide <css>
+  diff <a.png> <b.png>                count differing pixels between two screenshots
+  graph <dir> <entry...>              an ES module's relative static and dynamic imports`;
 
 export interface Options {
   command: string;
@@ -41,9 +47,15 @@ export interface Options {
   http1: boolean;
 }
 
-const NUMBERS = new Set(["runs", "latency", "mbps", "cpu", "width", "height", "port"]);
-const STRINGS = new Set(["ready", "out", "hide", "eval", "from"]);
-const FLAGS = new Set(["waterfall", "profile", "json", "seed", "http1"]);
+type NumberOption = "runs" | "latency" | "mbps" | "cpu" | "width" | "height" | "port";
+type StringOption = "ready" | "out" | "hide" | "eval" | "from";
+type FlagOption = "waterfall" | "profile" | "json" | "seed" | "http1";
+const NUMBERS = new Set<string>(["runs", "latency", "mbps", "cpu", "width", "height", "port"] satisfies NumberOption[]);
+const STRINGS = new Set<string>(["ready", "out", "hide", "eval", "from"] satisfies StringOption[]);
+const FLAGS = new Set<string>(["waterfall", "profile", "json", "seed", "http1"] satisfies FlagOption[]);
+const isNumber = (name: string): name is NumberOption => NUMBERS.has(name);
+const isString = (name: string): name is StringOption => STRINGS.has(name);
+const isFlag = (name: string): name is FlagOption => FLAGS.has(name);
 
 export function parseOptions(argv: string[]): Options {
   const options: Options = {
@@ -51,21 +63,20 @@ export function parseOptions(argv: string[]): Options {
     runs: 5, latency: 40, mbps: 20, cpu: 1, width: 1600, height: 900, port: 8765,
     out: undefined, hide: undefined, eval: undefined, from: undefined, waterfall: false, profile: false, json: false, seed: true, http1: false,
   };
-  const record = options as unknown as Record<string, unknown>;
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i]!;
     if (!arg.startsWith("--")) { options.args.push(arg); continue; }
     const name = arg.slice(2);
     if (name === "no-seed") { options.seed = false; continue; }
-    if (FLAGS.has(name)) { record[name] = true; continue; }
-    if (!NUMBERS.has(name) && !STRINGS.has(name)) throw new Error(`Unknown option ${arg}.`);
+    if (isFlag(name)) { options[name] = true; continue; }
+    if (!isNumber(name) && !isString(name)) throw new Error(`Unknown option ${arg}.`);
     const value = argv[i += 1];
     if (value === undefined) throw new Error(`${arg} needs a value.`);
-    if (NUMBERS.has(name)) {
+    if (isNumber(name)) {
       const number = Number(value);
       if (!Number.isFinite(number) || number < 0) throw new Error(`${arg} needs a non-negative number.`);
-      record[name] = number;
-    } else record[name] = value;
+      options[name] = number;
+    } else options[name] = value;
   }
   if (options.runs < 1) throw new Error("--runs needs at least 1.");
   return options;
@@ -145,6 +156,9 @@ const TYPES: Record<string, string> = {
 };
 const COMPRESSED = new Set([".html", ".js", ".mjs", ".css", ".json", ".svg", ".txt"]);
 
+/** A file version's validator: its size and modification time. */
+const etagOf = (stats: Stats) => `"${stats.size}-${stats.mtimeMs}"`;
+
 /** A throwaway self-signed certificate for localhost, so the server can speak HTTP/2 as CDNs do. */
 function certificate(): { key: Buffer; cert: Buffer } {
   const directory = mkdtempSync(path.join(tmpdir(), "perf-cert-"));
@@ -186,29 +200,31 @@ export function serve(root: string, port: number, http1 = false) {
       if (entry.isDirectory()) { warm(full); continue; }
       const file = inside(`/${path.relative(base, full).split(path.sep).join("/")}`);
       if (!file || !COMPRESSED.has(path.extname(file).toLowerCase())) continue;
-      const stats = statSync(file);
-      compressed(file, `"${stats.size}-${stats.mtimeMs}"`, readFileSync(file));
+      compressed(file, etagOf(statSync(file)), readFileSync(file));
     }
   };
   warm(base);
-  const handler = (request: IncomingMessage | Http2ServerRequest, raw: ServerResponse | Http2ServerResponse) => {
-    const response = raw as unknown as { writeHead(status: number, headers?: Record<string, string>): { end(body?: Buffer): unknown } };
+  const handler = (request: IncomingMessage | Http2ServerRequest, response: ServerResponse | Http2ServerResponse) => {
+    const send = (status: number, headers?: Record<string, string>, body?: Buffer) => {
+      if (response instanceof ServerResponse) response.writeHead(status, headers).end(body);
+      else if (body) response.writeHead(status, headers).end(body);
+      else response.writeHead(status, headers).end();
+    };
     let pathname: string;
     try { pathname = decodeURIComponent(new URL(request.url ?? "/", "http://localhost").pathname); } catch { pathname = ""; }
     if (pathname.endsWith("/")) pathname += "index.html";
     const file = pathname ? inside(pathname) : undefined;
-    if (!file) { response.writeHead(404).end(); return; }
-    const stats = statSync(file);
+    if (!file) { send(404); return; }
     const extension = path.extname(file).toLowerCase();
-    const etag = `"${stats.size}-${stats.mtimeMs}"`;
+    const etag = etagOf(statSync(file));
     const headers: Record<string, string> = { "content-type": TYPES[extension] ?? "application/octet-stream", "cache-control": "no-cache", etag };
-    if (request.headers["if-none-match"] === etag) { response.writeHead(304, headers).end(); return; }
+    if (request.headers["if-none-match"] === etag) { send(304, headers); return; }
     let body: Buffer = readFileSync(file);
     if (COMPRESSED.has(extension) && /\bgzip\b/.test(String(request.headers["accept-encoding"] ?? ""))) {
       body = compressed(file, etag, body);
       headers["content-encoding"] = "gzip";
     }
-    response.writeHead(200, headers).end(body);
+    send(200, headers, body);
   };
   const server = http1 ? createServer(handler) : createSecureServer({ ...certificate(), allowHTTP1: true }, handler);
   // Loopback only: the build is for this machine's browser, not the network.
@@ -218,17 +234,21 @@ export function serve(root: string, port: number, http1 = false) {
 // A deterministic Math.random for screenshots, so randomly placed decoration matches between rounds.
 const SEED_SCRIPT = "{ let s = 0x2545f491; Math.random = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; }";
 
-async function chromium(from = process.cwd()) {
+async function chromium(from = process.cwd()): Promise<Browser> {
   const require = createRequire(path.join(path.resolve(from), "package.json"));
   let resolved: string;
   try { resolved = require.resolve("playwright"); } catch {
     throw new Error(`perf.ts drives Chrome through the measured repository's \`playwright\`, which ${path.resolve(from)} does not install; run it there or pass --from <repository>.`);
   }
-  const playwright = await import(resolved);
+  const playwright: { chromium?: BrowserType; default: { chromium: BrowserType } } = await import(resolved);
   return (playwright.chromium ?? playwright.default.chromium).launch({ channel: "chrome", args: ["--ignore-gpu-blocklist", "--enable-gpu"] });
 }
 
 interface Request { url: string; start: number; end?: number; bytes?: number }
+
+/** The parts of a CDP CPU profile node that profileTable reads. */
+interface ProfileNode { id: number; callFrame: { functionName: string; url: string; lineNumber: number }; children?: number[] }
+interface CpuProfile { nodes: ProfileNode[]; samples?: number[]; timeDeltas?: number[] }
 
 /**
  * Opens the page and returns once its navigation commits, so a ready signal that comes before
@@ -238,7 +258,7 @@ export function navigate(page: { goto(url: string, options: { waitUntil: "commit
   return page.goto(url, { waitUntil: "commit" });
 }
 
-async function load(browser: any, url: string, options: Options, capture: { profile?: boolean; seed?: boolean } = {}) {
+async function load(browser: Browser, url: string, options: Options, capture: { profile?: boolean; seed?: boolean } = {}): Promise<{ page: Page; context: BrowserContext; ready: number; requests: Request[]; profile?: CpuProfile }> {
   // The local server's certificate is self-signed.
   const context = await browser.newContext({ viewport: { width: options.width, height: options.height }, ignoreHTTPSErrors: true });
   try {
@@ -255,8 +275,8 @@ async function load(browser: any, url: string, options: Options, capture: { prof
     }
     if (options.cpu > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: options.cpu });
     const requests = new Map<string, Request>();
-    cdp.on("Network.requestWillBeSent", (event: any) => requests.set(event.requestId, { url: event.request.url, start: event.timestamp }));
-    cdp.on("Network.loadingFinished", (event: any) => {
+    cdp.on("Network.requestWillBeSent", (event) => requests.set(event.requestId, { url: event.request.url, start: event.timestamp }));
+    cdp.on("Network.loadingFinished", (event) => {
       const request = requests.get(event.requestId);
       if (request) Object.assign(request, { end: event.timestamp, bytes: event.encodedDataLength });
     });
@@ -278,18 +298,18 @@ async function load(browser: any, url: string, options: Options, capture: { prof
 }
 
 /** Self and inclusive milliseconds per function from a CPU profile, heaviest first. */
-export function profileTable(profile: { nodes: any[]; samples: number[]; timeDeltas: number[] }, limit = 25) {
+export function profileTable(profile: CpuProfile, limit = 25) {
   const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
   const parent = new Map<number, number>();
   for (const node of profile.nodes) for (const child of node.children ?? []) parent.set(child, node.id);
-  const name = (node: any) => `${node.callFrame.functionName || "(anonymous)"} ${node.callFrame.url.split("/").slice(-2).join("/")}${node.callFrame.url ? `:${node.callFrame.lineNumber + 1}` : ""}`;
+  const name = (node: ProfileNode) => `${node.callFrame.functionName || "(anonymous)"} ${node.callFrame.url.split("/").slice(-2).join("/")}${node.callFrame.url ? `:${node.callFrame.lineNumber + 1}` : ""}`;
   const self = new Map<string, number>(), total = new Map<string, number>();
-  profile.samples.forEach((id, index) => {
-    const time = profile.timeDeltas[index]! / 1000;
-    self.set(name(nodes.get(id)), (self.get(name(nodes.get(id))) ?? 0) + time);
+  (profile.samples ?? []).forEach((id, index) => {
+    const time = profile.timeDeltas![index]! / 1000;
+    self.set(name(nodes.get(id)!), (self.get(name(nodes.get(id)!)) ?? 0) + time);
     const counted = new Set<string>();
     for (let current: number | undefined = id; current !== undefined; current = parent.get(current)) {
-      const label = name(nodes.get(current));
+      const label = name(nodes.get(current)!);
       if (counted.has(label)) continue;
       counted.add(label);
       total.set(label, (total.get(label) ?? 0) + time);
@@ -306,7 +326,7 @@ export async function measureLoad(options: Options) {
   const browser = await chromium(options.from);
   try {
     const samples: number[] = [];
-    let first: { requests: Request[]; profile: unknown } | undefined;
+    let first: { requests: Request[]; profile: CpuProfile | undefined } | undefined;
     for (let run = 0; run < options.runs; run += 1) {
       const result = await load(browser, url, options, { profile: run === 0 && options.profile, seed: options.seed });
       samples.push(result.ready);
@@ -326,7 +346,7 @@ export async function measureLoad(options: Options) {
         start: Math.round((request.start - origin) * 1000), end: request.end === undefined ? null : Math.round((request.end - origin) * 1000),
         bytes: request.bytes ?? null, path: request.url.replace(/^https?:\/\/[^/]+/, ""),
       })) : undefined,
-      cpu: first!.profile ? profileTable(first!.profile as any) : undefined,
+      cpu: first!.profile ? profileTable(first!.profile) : undefined,
     };
     return report;
   } finally {
@@ -335,18 +355,18 @@ export async function measureLoad(options: Options) {
 }
 
 async function measure(options: Options) {
-    const report = await measureLoad(options);
-    if (options.json) { console.log(JSON.stringify(report, null, 2)); return; }
-    const { url, readyMs } = report;
-    console.log(`${url}  ready median ${readyMs.median} ms (min ${readyMs.min}, max ${readyMs.max}, ${readyMs.runs} runs)`);
-    console.log(`  ${report.requests} requests, ${report.transferredBytes} bytes, network done at ${report.networkDoneMs} ms${report.pendingRequests ? ` (${report.pendingRequests} still pending)` : ""}; ${JSON.stringify(report.conditions)}`);
-    for (const row of report.waterfall ?? []) console.log(`  ${String(row.start).padStart(6)} ${String(row.end ?? "-").padStart(6)} ${String(row.bytes ?? "").padStart(8)} ${row.path}`);
-    if (report.cpu) {
-      console.log("  CPU self (ms):");
-      for (const row of report.cpu.self) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
-      console.log("  CPU inclusive (ms):");
-      for (const row of report.cpu.inclusive) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
-    }
+  const report = await measureLoad(options);
+  if (options.json) { console.log(JSON.stringify(report, null, 2)); return; }
+  const { url, readyMs } = report;
+  console.log(`${url}  ready median ${readyMs.median} ms (min ${readyMs.min}, max ${readyMs.max}, ${readyMs.runs} runs)`);
+  console.log(`  ${report.requests} requests, ${report.transferredBytes} bytes, network done at ${report.networkDoneMs} ms${report.pendingRequests ? ` (${report.pendingRequests} still pending)` : ""}; ${JSON.stringify(report.conditions)}`);
+  for (const row of report.waterfall ?? []) console.log(`  ${String(row.start).padStart(6)} ${String(row.end ?? "-").padStart(6)} ${String(row.bytes ?? "").padStart(8)} ${row.path}`);
+  if (report.cpu) {
+    console.log("  CPU self (ms):");
+    for (const row of report.cpu.self) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
+    console.log("  CPU inclusive (ms):");
+    for (const row of report.cpu.inclusive) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
+  }
 }
 
 export async function shot(options: Options): Promise<void> {
@@ -370,7 +390,7 @@ export async function shot(options: Options): Promise<void> {
 }
 
 /** An 8-bit RGB or RGBA, non-interlaced PNG, as Chrome writes screenshots, decoded to RGBA. */
-export function decodePng(file: Buffer): { width: number; height: number; data: Uint8Array } {
+function decodePng(file: Buffer): { width: number; height: number; data: Uint8Array } {
   if (file.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("Not a PNG.");
   let width = 0, height = 0, channels = 0;
   const chunks: Buffer[] = [];
@@ -440,7 +460,7 @@ function diff(options: Options) {
   if (result.differing !== 0) process.exitCode = 1;
 }
 
-export async function main(argv = process.argv.slice(2)): Promise<void> {
+async function main(argv = process.argv.slice(2)): Promise<void> {
   const options = parseOptions(argv);
   switch (options.command) {
     case "serve": {
@@ -460,7 +480,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       return;
     }
     default:
-      console.log(readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1, 11).map((line) => line.replace(/^\/\/ ?/, "")).join("\n"));
+      console.log(USAGE);
   }
 }
 

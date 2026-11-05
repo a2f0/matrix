@@ -18,7 +18,13 @@ app's routes, seed data, and devices.
   `.screenshots` itself, and leaves `capture.json` alone.
 - Builds never capture. A `build:*` or deploy script reads `.screenshots`
   only. A build that publishes screenshots checks `.screenshots/capture.json`
-  (see [deploy guard and gallery](#deploy-guard-and-gallery)).
+  before and after copying and prints the capture's commit (see
+  [deploy guard and gallery](#deploy-guard-and-gallery)).
+- Browser phone layouts are captured at the full 390x844 screen, so framed
+  phones keep a real phone's proportions; native store captures keep each
+  device's required size.
+- Build caches stay honest: a cached task that copies screenshots hashes them
+  through the link, or runs uncached (see [build caches](#build-caches)).
 - Document the prerequisites and output layout in the repository's own docs,
   and point agents at this skill from `AGENTS.md` in one sentence.
 

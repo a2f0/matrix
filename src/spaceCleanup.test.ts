@@ -3,7 +3,12 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { busyRoots, findCandidates, main, parseIgnored, parseOptions, resolveTargets, selected, unsafeReason, derivedDataRemovals, INSTALLING, parseProcesses, protectedName, applyMachine, gitEnvironment, machineItems, type Host, type Proc } from "../skills/space-cleanup/scripts/space-cleanup";
+import { findCandidates, parseIgnored, protectedName, selected, unsafeReason } from "../skills/space-cleanup/scripts/candidates";
+import { gitEnvironment } from "../skills/space-cleanup/scripts/git";
+import { applyMachine, derivedDataRemovals, type Host, INSTALLING, machineItems } from "../skills/space-cleanup/scripts/machine";
+import { busyRoots, parseProcesses, type Proc } from "../skills/space-cleanup/scripts/processes";
+import { main, parseOptions } from "../skills/space-cleanup/scripts/space-cleanup";
+import { resolveTargets } from "../skills/space-cleanup/scripts/targets";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });

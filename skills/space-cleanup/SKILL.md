@@ -11,8 +11,9 @@ was freed from the volume's real free space, not from the estimate.
 
 ## Run it
 
-The script lives beside this file and needs only Bun (or the pinned Bun of
-the repository you are in). It is a dry run until `--apply`.
+The script, `scripts/space-cleanup.ts` with its sibling modules, lives
+beside this file and needs only Bun (or the pinned Bun of the repository you
+are in). It is a dry run until `--apply`.
 
 - From a matrix workspace: `bun run space [checkout...] [flags]`. With no
   names it covers the workspace and every checkout in `checkouts/`; names are
