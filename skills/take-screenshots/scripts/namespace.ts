@@ -39,17 +39,22 @@ export interface Resolved {
   readonly id?: string;
 }
 
+/** origin's GitHub name, GitHub's current name for it, and its node id, each when known. */
+function identity(root: string, resolve: (root: string, parsed?: string) => Resolved | string | undefined) {
+  const remote = gitValue(root, "remote", "get-url", "origin");
+  const parsed = remote ? githubRepo(remote) : undefined;
+  const resolved = resolve(root, parsed);
+  if (typeof resolved === "string") return { parsed, canonical: resolved, id: undefined };
+  return { parsed, canonical: resolved?.repo, id: resolved?.id };
+}
+
 /**
  * A repository's store namespace: its GitHub name, like matrix-secrets'. GitHub
  * names it when reachable (a clone's remote can carry a pre-rename name or other
  * casing); otherwise origin's URL does. A repository with neither needs --project.
  */
 export function targetFor(root: string, project?: string, resolve: (root: string, parsed?: string) => Resolved | string | undefined = canonicalRepo): Target {
-  const remote = gitValue(root, "remote", "get-url", "origin");
-  const parsed = remote ? githubRepo(remote) : undefined;
-  const resolved = resolve(root, parsed);
-  const canonical = typeof resolved === "string" ? resolved : resolved?.repo;
-  const id = typeof resolved === "string" ? undefined : resolved?.id;
+  const { parsed, canonical, id } = identity(root, resolve);
   const repo = canonical ?? parsed;
   if (!repo && !project) throw new Error(`${root} has no GitHub origin; pass --project to name its namespace`);
   const name = project ?? repo!.split("/")[1]!;
