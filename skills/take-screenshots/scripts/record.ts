@@ -48,12 +48,19 @@ interface FinishedRecord extends RecordFields {
   readonly exitCode: number | null;
 }
 
-/**
- * The record moves `start` -> running -> `finish` -> complete, failed or incomplete.
- * Records written by older versions are read without checking that shape, so
- * readers still allow a finished record without `finishedAt`.
- */
+/** The record moves `start` -> running -> `finish` -> complete, failed or incomplete. */
 export type CaptureRecord = RunningRecord | FinishedRecord;
+
+/**
+ * A record as read back from `capture.json`. Older versions wrote finished
+ * records without `finishedAt` or `exitCode`, and readers still accept them,
+ * so nothing read from disk may assume the finished fields exist.
+ */
+export interface StoredRecord extends RecordFields {
+  readonly status: CaptureRecord["status"];
+  readonly finishedAt?: string;
+  readonly exitCode?: number | null;
+}
 
 type StartEvent = { readonly type: "start"; readonly fields: RecordFields };
 
@@ -66,10 +73,10 @@ export type RecordEvent =
  * settled the one before; `finish` settles only a running record and is
  * ignored otherwise.
  */
-export function transition(record: CaptureRecord | undefined, event: StartEvent): RunningRecord;
+export function transition(record: StoredRecord | undefined, event: StartEvent): RunningRecord;
 export function transition(record: CaptureRecord, event: RecordEvent): CaptureRecord;
 export function transition(record: CaptureRecord | undefined, event: RecordEvent): CaptureRecord | undefined;
-export function transition(record: CaptureRecord | undefined, event: RecordEvent): CaptureRecord | undefined {
+export function transition(record: StoredRecord | undefined, event: RecordEvent): StoredRecord | undefined {
   switch (event.type) {
     case "start":
       return { ...event.fields, status: "running" };
@@ -90,7 +97,7 @@ function assertNever(value: never): never {
 const STATUSES = new Set(["running", "complete", "failed", "incomplete"]);
 
 /** Whether a parsed record has every field a decision reads, with the right type. */
-export function validRecord(value: unknown): value is CaptureRecord {
+export function validRecord(value: unknown): value is StoredRecord {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   const over = record.over as Record<string, unknown> | undefined;
@@ -117,7 +124,7 @@ export function validRecord(value: unknown): value is CaptureRecord {
 }
 
 /** The newest capture's record; a missing or malformed one reads as no record, which is never complete. */
-export function readRecord(store: string): CaptureRecord | undefined {
+export function readRecord(store: string): StoredRecord | undefined {
   try {
     const value: unknown = JSON.parse(readFileSync(path.join(store, RECORD), "utf8"));
     return validRecord(value) ? value : undefined;

@@ -6,7 +6,16 @@ import { git, gitValue } from "./git";
 import { linkState } from "./link";
 import { acquireLock, alive, type LockInfo, replaceLock } from "./lock";
 import { claimNamespace } from "./namespace";
-import { type CaptureRecord, type FinishedStatus, type RecordFields, type RunningRecord, readRecord, transition, writeRecord } from "./record";
+import {
+  type CaptureRecord,
+  type FinishedStatus,
+  type RecordFields,
+  type RunningRecord,
+  readRecord,
+  type StoredRecord,
+  transition,
+  writeRecord,
+} from "./record";
 import { LINK, LOCK, storeDir, type Target } from "./store";
 import { packageScripts } from "./targets";
 
@@ -70,7 +79,7 @@ interface PlannedCapture {
   readonly branch: string | null;
   readonly dirty: boolean;
   readonly merged: boolean | null;
-  readonly previous?: CaptureRecord;
+  readonly previous?: StoredRecord;
   readonly applied?: never;
   readonly record?: never;
 }
@@ -216,7 +225,7 @@ function runningRecord(
   target: Target,
   plan: PlannedCapture,
   args: string[],
-  previous: CaptureRecord | undefined,
+  previous: StoredRecord | undefined,
   startedAt: string,
 ): { base: RecordFields; inheritsIncomplete: boolean } {
   const { commit, branch, dirty, merged } = plan;

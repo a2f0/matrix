@@ -19,7 +19,7 @@ import { capture, RUNNER, type Runner, type Timing } from "./capture";
 import { type LinkResult, type LinkState, link, linkState } from "./link";
 import { type LockInfo, readLock } from "./lock";
 import { claimNamespace, existingCase, knownNamespace } from "./namespace";
-import { type CaptureRecord, RECORD, readRecord, relation } from "./record";
+import { RECORD, readRecord, relation, type StoredRecord } from "./record";
 import { LOCK, storeDir, type Target } from "./store";
 import { artifactsRoot, resolveTargets } from "./targets";
 
@@ -47,7 +47,7 @@ interface StatusEntry {
   readonly project: string;
   readonly store: string;
   readonly link: LinkState;
-  readonly capture?: CaptureRecord;
+  readonly capture?: StoredRecord;
   readonly sinceCapture?: ReturnType<typeof relation>;
   readonly lock?: LockInfo;
 }
