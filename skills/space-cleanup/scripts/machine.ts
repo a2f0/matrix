@@ -266,6 +266,15 @@ function dockerItem(host: Host): MachineItem[] {
   ];
 }
 
+/** Why a guard holds its item back, given a fresh process list; a failure to list processes holds it back too. */
+function guardReason(guard: NonNullable<MachineItem["guard"]>, discover: () => Proc[]): string | undefined {
+  try {
+    return guard(discover());
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 /**
  * Runs every machine item that is neither report-only nor waiting on a running
  * process, listing processes afresh just before each guarded item.
@@ -275,13 +284,7 @@ export function applyMachine(items: MachineItem[], discover: () => Proc[]): numb
   let failures = 0;
   for (const item of items) {
     if (item.reportOnly || !item.apply) continue;
-    if (item.guard) {
-      try {
-        item.skipped = item.guard(discover());
-      } catch (error) {
-        item.skipped = (error as Error).message;
-      }
-    }
+    if (item.guard) item.skipped = guardReason(item.guard, discover);
     if (item.skipped) continue;
     try {
       item.result = item.apply();

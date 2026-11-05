@@ -139,23 +139,30 @@ export function holdsProtected(directory: string, base: string): string | undefi
   return undefined;
 }
 
+/** Why one directory on the way to a candidate, or the candidate itself, rules it out; checked in this order. */
+function componentReason(root: string, current: string, part: string): string | undefined {
+  let stats: Stats;
+  try {
+    stats = lstatSync(current);
+  } catch {
+    return "missing";
+  }
+  if (stats.isSymbolicLink()) return "symlink";
+  // A nested clone above the candidate owns it (an ignored node_modules that is a repository).
+  if (isRepository(current)) return `inside repository ${path.relative(root, current)}`;
+  // An ignored `.secrets/build` is still inside credentials.
+  if (protectedName(part)) return `inside ${path.relative(root, current)}`;
+  return undefined;
+}
+
 /** Why a path must not be removed, or undefined when it is safe to. */
 export function unsafeReason(root: string, rel: string): string | undefined {
   if (rel === "" || path.isAbsolute(rel) || rel.split("/").some(part => part === ".." || part === "." || part === ".git")) return "outside the repository";
   let current = root;
   for (const part of rel.split("/")) {
     current = path.join(current, part);
-    let stats: Stats;
-    try {
-      stats = lstatSync(current);
-    } catch {
-      return "missing";
-    }
-    if (stats.isSymbolicLink()) return "symlink";
-    // A nested clone above the candidate owns it (an ignored node_modules that is a repository).
-    if (isRepository(current)) return `inside repository ${path.relative(root, current)}`;
-    // An ignored `.secrets/build` is still inside credentials.
-    if (protectedName(part)) return `inside ${path.relative(root, current)}`;
+    const reason = componentReason(root, current, part);
+    if (reason) return reason;
   }
   const held = holdsProtected(current, root);
   if (held) return held;

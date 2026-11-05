@@ -50,7 +50,34 @@ const UNLISTED = "without every process's working directory busy repositories ca
  * Other users' processes (root daemons) are listed when lsof can read them.
  */
 export function parseProcesses(table: string, argsOutput: string, lsofOutput: string, uid: number, alive: (pid: number) => boolean): Proc[] {
-  const rows: Array<{ pid: number; ppid: number; pgid: number; uid: number; zombie: boolean; name: string }> = [];
+  const rows = parseTable(table);
+  const args = parseArgs(argsOutput);
+  const cwds = parseCwds(lsofOutput);
+  // A process that exited between ps and lsof has nothing left to protect.
+  const unseen = rows.filter(row => row.uid === uid && !row.zombie && !cwds.has(row.pid) && alive(row.pid));
+  if (unseen.length > 0) {
+    throw new Error(
+      `cannot read the working directory of ${unseen
+        .slice(0, 3)
+        .map(row => `${row.name} ${row.pid}`)
+        .join(", ")}${unseen.length > 3 ? ", ..." : ""}; ${UNLISTED}`,
+    );
+  }
+  return rows.filter(row => !row.zombie).map(({ pid, ppid, pgid, name }) => ({ pid, ppid, pgid, name, args: args.get(pid) ?? "", cwd: cwds.get(pid) }));
+}
+
+interface Row {
+  pid: number;
+  ppid: number;
+  pgid: number;
+  uid: number;
+  zombie: boolean;
+  name: string;
+}
+
+/** Rows of `ps -axo pid=,ppid=,pgid=,uid=,stat=,comm=`. */
+function parseTable(table: string): Row[] {
+  const rows: Row[] = [];
   for (const line of table.split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
     if (match)
@@ -63,28 +90,28 @@ export function parseProcesses(table: string, argsOutput: string, lsofOutput: st
         name: path.basename(match[6]!.trim()),
       });
   }
+  return rows;
+}
+
+/** Command lines by pid from `ps -axo pid=,args=`. */
+function parseArgs(argsOutput: string): Map<number, string> {
   const args = new Map<number, string>();
   for (const line of argsOutput.split("\n")) {
     const match = /^\s*(\d+)\s+(.*)$/.exec(line);
     if (match) args.set(Number(match[1]), match[2]!);
   }
+  return args;
+}
+
+/** Working directories by pid from `lsof -d cwd -Fpn`. */
+function parseCwds(lsofOutput: string): Map<number, string> {
   const cwds = new Map<number, string>();
   let current = 0;
   for (const line of lsofOutput.split("\n")) {
     if (line.startsWith("p")) current = Number(line.slice(1));
     else if (line.startsWith("n") && current) cwds.set(current, line.slice(1));
   }
-  // A process that exited between ps and lsof has nothing left to protect.
-  const unseen = rows.filter(row => row.uid === uid && !row.zombie && !cwds.has(row.pid) && alive(row.pid));
-  if (unseen.length > 0) {
-    throw new Error(
-      `cannot read the working directory of ${unseen
-        .slice(0, 3)
-        .map(row => `${row.name} ${row.pid}`)
-        .join(", ")}${unseen.length > 3 ? ", ..." : ""}; ${UNLISTED}`,
-    );
-  }
-  return rows.filter(row => !row.zombie).map(({ pid, ppid, pgid, name }) => ({ pid, ppid, pgid, name, args: args.get(pid) ?? "", cwd: cwds.get(pid) }));
+  return cwds;
 }
 
 /** Absolute paths that a command line's path-like arguments (`a/b`, `--flag=./x`, `-C dir`) resolve to. */
