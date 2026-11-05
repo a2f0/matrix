@@ -71,10 +71,16 @@ export function cloneUrl(repo: string, protocol: Manifest["protocol"]): string {
   return protocol === "ssh" ? `git@github.com:${repo}.git` : `https://github.com/${repo}.git`;
 }
 
+/** GitHub over SSH: port 22, or ssh.github.com on 443 where port 22 is blocked. */
+const GITHUB_SSH = String.raw`git@github\.com:|ssh:\/\/git@github\.com(?::22)?\/|ssh:\/\/git@ssh\.github\.com:443\/`;
+const GITHUB_REMOTE = new RegExp(`^(?:${GITHUB_SSH}|https:\\/\\/(?:[^@/]+@)?github\\.com\\/)([A-Za-z0-9-]+\\/[A-Za-z0-9._-]+?)(?:\\.git)?\\/?$`, "i");
+
+/** Whether a remote URL reaches GitHub over SSH. */
+export function isGitHubSsh(url: string): boolean { return new RegExp(`^(?:${GITHUB_SSH})`, "i").test(url); }
+
 /** Normalize the GitHub remote URL forms Git accepts to owner/name. */
 export function parseGitHubRepo(url: string): string | undefined {
-  const match = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/(?:[^@/]+@)?github\.com\/)([A-Za-z0-9-]+\/[A-Za-z0-9._-]+?)(?:\.git)?\/?$/i.exec(url);
-  return match?.[1];
+  return GITHUB_REMOTE.exec(url)?.[1];
 }
 
 /** Select managed repos by owner/name or checkout name; no names selects all. */

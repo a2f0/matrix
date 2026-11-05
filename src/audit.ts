@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { type CheckoutStatus, redact } from "./checkouts";
 import { git } from "./git";
-import { checkoutPath } from "./manifest";
+import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 
 const AGENT_TOOL = "@a2f0/agent-tool";
@@ -189,9 +189,6 @@ function managedSkills(checkout: Checkout): string[] {
 }
 
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
-
-/** GitHub over SSH, on port 22 or through ssh.github.com on 443. */
-const SSH_REMOTE = /^(git@github\.com:|ssh:\/\/git@github\.com(:22)?\/|ssh:\/\/git@ssh\.github\.com:443\/)/i;
 
 /** Hermes truncates a context file past this many characters (Unicode code points), dropping its middle. */
 export const AGENTS_MD_MAX_CHARS = 20_000;
@@ -428,10 +425,12 @@ export const RULES: readonly Rule[] = [
     check: checkout => {
       const found: string[] = [];
       for (const [direction, args] of [["fetch", []], ["push", ["--push"]]] as const) {
-        // get-url applies insteadOf rewrites, so this is the URL Git actually uses.
-        const url = git(checkout.directory, ["remote", "get-url", ...args, "origin"]);
-        if (url.status !== 0) found.push(`no origin ${direction} URL`);
-        else if (!SSH_REMOTE.test(url.stdout)) found.push(`origin ${direction}es over ${redact(url.stdout)}; use git@github.com:${checkout.repo}.git`);
+        // get-url applies insteadOf rewrites, so these are the URLs Git actually uses; --all lists every push destination.
+        const urls = git(checkout.directory, ["remote", "get-url", "--all", ...args, "origin"]);
+        if (urls.status !== 0) { found.push(`no origin ${direction} URL`); continue; }
+        for (const url of urls.stdout.split("\n").filter(Boolean)) {
+          if (!isGitHubSsh(url)) found.push(`origin ${direction}es over ${redact(url)}; use git@github.com:${checkout.repo}.git`);
+        }
       }
       return problems(found);
     },

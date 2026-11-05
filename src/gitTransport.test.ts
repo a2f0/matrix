@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { effectiveHelpers, inspectGitTransport, type Runner, sshEndpoint } from "./gitTransport";
+import { effectiveHelpers, helperName, inspectGitTransport, type Runner, sshEndpoint } from "./gitTransport";
 
 let root: string;
 const saved: Record<string, string | undefined> = {};
@@ -47,6 +47,20 @@ test("folds credential helpers the way Git does, for https://github.com only", (
   expect(effectiveHelpers(record("credential.https://github.com/a2f0.helper", "store"))).toEqual(["store"]);
   expect(effectiveHelpers(record("credential.https://*.com.helper", "store"))).toEqual(["store"]);
   expect(effectiveHelpers(record("Credential.Helper", "osxkeychain"))).toEqual(["osxkeychain"]);
+});
+
+test("names helpers without their arguments, which can carry tokens", () => {
+  expect(helperName("osxkeychain")).toBe("osxkeychain");
+  expect(helperName("store --file /secret/path")).toBe("store");
+  expect(helperName("!/opt/homebrew/bin/gh auth git-credential")).toBe("!gh");
+  expect(helperName("!f() { echo password=ghp_secret; }; f")).toBe("!f()");
+});
+
+test("reports helpers by name only", () => {
+  config(["credential.helper", "!f() { echo password=ghp_secret; }; f"]);
+  const result = inspectGitTransport(root, fakeRunner("ssh", "hostname ssh.github.com\nport 443\n"));
+  expect(result.credentialHelpers).toEqual(["!f()"]);
+  expect(JSON.stringify(result)).not.toContain("ghp_secret");
 });
 
 test("reads the host and port from ssh -G output", () => {

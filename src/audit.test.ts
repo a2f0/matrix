@@ -310,6 +310,9 @@ describe("audit", () => {
     expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin pushes over https://github.com/a2f0/https.git; use git@github.com:a2f0/https.git" });
     execFileSync("git", ["remote", "set-url", "--push", "origin", "ssh://git@ssh.github.com:443/a2f0/https.git"], { cwd: directory });
     expect(failures(repo, ["origin-ssh"])).toEqual({});
+    // Git pushes to every push URL, so a second HTTPS one fails too.
+    execFileSync("git", ["remote", "set-url", "--add", "--push", "origin", "https://github.com/a2f0/mirror.git"], { cwd: directory });
+    expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin pushes over https://github.com/a2f0/mirror.git; use git@github.com:a2f0/https.git" });
     execFileSync("git", ["remote", "remove", "origin"], { cwd: directory });
     expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "no origin fetch URL; no origin push URL" });
   });

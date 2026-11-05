@@ -9,7 +9,7 @@ import { git } from "./git";
 export interface GitTransport {
   /** gh's `git_protocol` for github.com, or null when gh is not installed. */
   readonly ghProtocol: string | null;
-  /** Credential helpers Git would ask for https://github.com, in order. */
+  /** Credential helpers Git would ask for https://github.com, in order, by program name only (see `helperName`). */
   readonly credentialHelpers: string[];
   /** Where Git's SSH command connects for github.com, or why that is unknown. */
   readonly ssh: { readonly hostname: string; readonly port: number } | { readonly error: string };
@@ -49,6 +49,16 @@ function patternScope(pattern: string): { applies: boolean; exact: boolean } {
   if (!hostMatches || (url.port !== "" && url.port !== "443")) return { applies: false, exact: false };
   const exact = withScheme && url.username === "" && (url.pathname === "" || url.pathname === "/");
   return { applies: true, exact };
+}
+
+/**
+ * A helper's program name without its arguments, which can carry tokens:
+ * `store --file ~/x` is `store`, `!/opt/homebrew/bin/gh auth git-credential` is `!gh`.
+ */
+export function helperName(helper: string): string {
+  const inline = helper.startsWith("!");
+  const program = (inline ? helper.slice(1) : helper).trim().split(/\s+/)[0] ?? "";
+  return `${inline ? "!" : ""}${program.split("/").at(-1) ?? program}`;
 }
 
 /**
@@ -104,7 +114,7 @@ export function inspectGitTransport(root: string, run: Runner = runner): GitTran
 
   const config = git(root, ["config", "--null", "--get-regexp", "^credential\\..*helper$"]);
   if (config.status !== 0 && config.status !== 1) throw new Error(`git config failed: ${config.stderr.trim()}`);
-  const credentialHelpers = config.status === 0 ? effectiveHelpers(config.stdout) : [];
+  const credentialHelpers = config.status === 0 ? effectiveHelpers(config.stdout).map(helperName) : [];
   if (credentialHelpers.length > 0) {
     problems.push(`Git would ask ${credentialHelpers.map(helper => `\`${helper}\``).join(", ")} for https://${GITHUB} credentials, which can wait on a keychain prompt; set an empty \`credential.https://${GITHUB}.helper\`, as dotfiles' gitconfig does`);
   }
