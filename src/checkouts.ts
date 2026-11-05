@@ -42,7 +42,7 @@ export interface AgentToolInstall {
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 /** Drop URL userinfo, query, and fragment so a credential-bearing remote never reaches output. */
-function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, ""); }
+export function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, ""); }
 
 function isSymlink(file: string): boolean {
   try { return lstatSync(file).isSymbolicLink(); } catch { return false; }

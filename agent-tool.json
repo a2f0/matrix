@@ -58,6 +58,7 @@
         "include": [
           "src/audit.ts",
           "src/discover.ts",
+          "src/gitTransport.ts",
           "src/secrets.ts",
           "src/sweeps.ts"
         ]

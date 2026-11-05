@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { CheckoutStatus } from "./checkouts";
+import { type CheckoutStatus, redact } from "./checkouts";
 import { git } from "./git";
 import { checkoutPath } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
@@ -97,6 +97,8 @@ export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacemen
   { id: "push-head-upstream", pattern: "git push (-u|--set-upstream) origin HEAD", replacement: "agent-tool branch push <reviewed-head> --remote origin" },
   // A leased deletion is the stronger cleanup some checkouts require, not the hook-running push it replaced.
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
+  // Rewriting GitHub SSH URLs to HTTPS reaches the keychain credential helper (a2f0/matrix#61).
+  { id: "https-insteadof", pattern: "url\\.\"?https://github\\.com/?\"?\\.[iI]nstead[oO]f", replacement: "SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh)" },
 ];
 
 /** Biome's noImportCycles as an error that counts type-only imports, which the rule's default skips. */
@@ -187,6 +189,9 @@ function managedSkills(checkout: Checkout): string[] {
 }
 
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
+
+/** GitHub over SSH, on port 22 or through ssh.github.com on 443. */
+const SSH_REMOTE = /^(git@github\.com:|ssh:\/\/git@github\.com(:22)?\/|ssh:\/\/git@ssh\.github\.com:443\/)/i;
 
 /** Hermes truncates a context file past this many characters (Unicode code points), dropping its middle. */
 export const AGENTS_MD_MAX_CHARS = 20_000;
@@ -414,6 +419,21 @@ export const RULES: readonly Rule[] = [
       if (typescript && !typescriptGuarded(checkout)) missing.push("TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test");
       if (python && checkout.tracked(":(glob)**/test_module_graph.py").length === 0) missing.push("the Python package has no test_module_graph.py");
       return problems(missing);
+    },
+  },
+  {
+    id: "origin-ssh",
+    summary: "origin fetches and pushes over SSH",
+    source: "docs/health.md#github-over-ssh",
+    check: checkout => {
+      const found: string[] = [];
+      for (const [direction, args] of [["fetch", []], ["push", ["--push"]]] as const) {
+        // get-url applies insteadOf rewrites, so this is the URL Git actually uses.
+        const url = git(checkout.directory, ["remote", "get-url", ...args, "origin"]);
+        if (url.status !== 0) found.push(`no origin ${direction} URL`);
+        else if (!SSH_REMOTE.test(url.stdout)) found.push(`origin ${direction}es over ${redact(url.stdout)}; use git@github.com:${checkout.repo}.git`);
+      }
+      return problems(found);
     },
   },
   {

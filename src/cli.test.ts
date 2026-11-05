@@ -68,6 +68,8 @@ test("audit exits zero only when every selected checkout passes", () => {
 const GIB = 1024 ** 3;
 const CLEAN_TEARDOWN = { ok: true, leftover: [], kept: [], stopped: [], untracked: [], worktrees: [], unavailable: [], skipped: [] };
 
+const SSH_ONLY = { ghProtocol: "ssh", credentialHelpers: [], ssh: { hostname: "ssh.github.com", port: 443 }, problems: [] };
+
 function fakeServices(overrides: Partial<Services> = {}) {
   const writes: string[] = [];
   const warnings: string[] = [];
@@ -80,6 +82,7 @@ function fakeServices(overrides: Partial<Services> = {}) {
     registryReleases: () => { calls.registry++; return { "0.1.21": "2026-01-01T00:00:00.000Z", "0.1.23": "2026-02-01T00:00:00.000Z" }; },
     diskSpace: () => ({ free: 200 * GIB, total: 500 * GIB }),
     teardown: () => CLEAN_TEARDOWN,
+    gitTransport: () => SSH_ONLY,
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -107,9 +110,18 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(online.calls).toEqual({ discover: 1, registry: 1 });
   expect(markdown).toContain("- Disk: 31 GiB free of 926 GiB, under the 50 GiB a sweep needs.");
   expect(markdown).toContain("1. Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB; `bun run space` lists what is safe to remove.");
-  expect(markdown).toContain("- Audit (16 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain("- Audit (17 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
+  expect(markdown).toContain("- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.");
+});
+
+test("health suggests keeping Git on SSH right after disk and leftover processes", () => {
+  const { services, writes } = fakeServices({ gitTransport: () => ({ ...SSH_ONLY, ghProtocol: "https", problems: ["gh uses https for github.com"] }) });
+  expect(main(["health"], root, undefined, services)).toBe(0);
+  const report = JSON.parse(writes.join("")) as { git: { ghProtocol: string }; suggestions: string[] };
+  expect(report.git.ghProtocol).toBe("https");
+  expect(report.suggestions[0]).toBe("Keep Git on SSH: gh uses https for github.com; see docs/health.md#github-over-ssh.");
 });
 
 test("teardown inspects the workspace and each present checkout, and exits 1 while anything remains", () => {
