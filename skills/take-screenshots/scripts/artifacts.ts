@@ -166,27 +166,31 @@ export async function main(
     print(options.json ? "[]" : "No repository here captures screenshots.");
     return 0;
   }
-  const artifacts = artifactsRoot(found[0]!.root);
-  if (found.some(target => artifactsRoot(target.root) !== artifacts))
-    throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
-  const targets = found.map(target => existingCase(knownNamespace(target, artifacts), artifacts));
+  const { artifacts, targets } = inSharedStore(found);
   if (options.command === "status") return statusCommand(targets, artifacts, options, print);
   if (options.command === "link") return linkCommand(targets, artifacts, options, print);
   if (targets.length !== 1) throw new Error("capture runs one repository at a time; name it");
   return captureCommand(targets[0]!, artifacts, options, runner, print, timing);
 }
 
+/** The store every selected repository resolves, and each one's namespace in it. */
+function inSharedStore(found: Target[]): { artifacts: string; targets: Target[] } {
+  const artifacts = artifactsRoot(found[0]!.root);
+  if (found.some(target => artifactsRoot(target.root) !== artifacts))
+    throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
+  return { artifacts, targets: found.map(target => existingCase(knownNamespace(target, artifacts), artifacts)) };
+}
+
 function statusCommand(targets: Target[], artifacts: string, options: Options, print: (text: string) => void): number {
   const entries = targets.map(target => status(target, artifacts));
   if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));
-  else
-    for (const entry of entries) {
-      const lock = entry.lock ? `; capture running in ${entry.lock.checkout} (pid ${entry.lock.pid})` : "";
-      print(
-        `${entry.name} [${entry.project}] ${entry.link.state}: ${entry.foreign ? `NOT THIS REPOSITORY'S: ${entry.foreign}` : describeCapture(entry)}${lock}`,
-      );
-    }
+  else for (const entry of entries) print(statusLine(entry));
   return entries.every(entry => entry.link.state === "linked" && !entry.foreign) ? 0 : 1;
+}
+
+function statusLine(entry: StatusEntry): string {
+  const lock = entry.lock ? `; capture running in ${entry.lock.checkout} (pid ${entry.lock.pid})` : "";
+  return `${entry.name} [${entry.project}] ${entry.link.state}: ${entry.foreign ? `NOT THIS REPOSITORY'S: ${entry.foreign}` : describeCapture(entry)}${lock}`;
 }
 
 function linkCommand(targets: Target[], artifacts: string, options: Options, print: (text: string) => void): number {
