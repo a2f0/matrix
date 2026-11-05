@@ -14,9 +14,9 @@
 import { rmSync, statfsSync } from "node:fs";
 import path from "node:path";
 import { type Candidate, findCandidates, measure, selected, TIERS, type Tier, unsafeReason } from "./candidates";
-import { applyMachine, machineItems } from "./machine";
+import { applyMachine, type MachineItem, machineItems } from "./machine";
 import { busyRoots, type Proc, processes } from "./processes";
-import { resolveTargets } from "./targets";
+import { resolveTargets, type Target } from "./targets";
 
 interface RepoReport {
   readonly name: string;
@@ -107,70 +107,19 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
   const { workspace, targets } = resolveTargets(cwd, options.names);
   const volume = workspace ?? targets[0]?.root ?? cwd;
   const before = free(volume);
-  let procs: Proc[];
-  try {
-    procs = discover();
-  } catch (error) {
-    if (!options.includeBusy) throw error;
-    procs = [];
-  }
+  const procs = listProcesses(discover, options.includeBusy);
   const busy = busyRoots(
     procs,
     targets.map(target => target.root),
   );
 
-  const repos: RepoReport[] = targets.map(target => {
-    const report: RepoReport = { ...target, candidates: [] };
-    report.busy = workersOf(busy.get(target.root));
-    try {
-      report.candidates = findCandidates(target.root);
-    } catch (error) {
-      report.error = (error as Error).message;
-    }
-    // du counts a directory once per call, so a nested cache measured alongside its parent
-    // would read as empty: measure outer paths and nested ones in separate calls.
-    const nested = (candidate: Candidate) => report.candidates.some(other => candidate.path.startsWith(`${other.path}/`));
-    for (const group of [report.candidates.filter(candidate => !nested(candidate)), report.candidates.filter(nested)]) {
-      const sizes = measure(group.map(candidate => path.join(target.root, candidate.path)));
-      for (const candidate of group) candidate.bytes = sizes.get(path.join(target.root, candidate.path)) ?? 0;
-    }
-    return report;
-  });
+  const repos: RepoReport[] = targets.map(target => scanRepo(target, busy));
   const machine = options.machine ? machineItems(procs) : [];
 
   // A repository that could not be scanned was not cleaned: report it as a failure.
   let failures = repos.filter(repo => repo.error).length;
   if (options.apply) {
-    for (const repo of repos) {
-      if (repo.error) continue;
-      // Scans and earlier removals take a while; judge each repository from a fresh process list.
-      if (!options.includeBusy) {
-        repo.busy = workersOf(
-          busyRoots(
-            discover(),
-            targets.map(target => target.root),
-          ).get(repo.root),
-        );
-        if (repo.busy) continue;
-      }
-      repo.removed = [];
-      repo.failed = [];
-      for (const candidate of selected(repo.candidates, options.tiers)) {
-        // Re-check at removal time: the tree may have changed since the scan.
-        const reason = unsafeReason(repo.root, candidate.path);
-        if (reason) {
-          if (reason !== "missing") repo.failed.push({ path: candidate.path, error: reason });
-          continue;
-        }
-        try {
-          rmSync(path.join(repo.root, candidate.path), { recursive: true, force: true });
-          repo.removed.push(candidate.path);
-        } catch (error) {
-          repo.failed.push({ path: candidate.path, error: (error as Error).message });
-        }
-      }
-      failures += repo.failed.length;
-    }
+    failures += cleanRepos(repos, targets, options, discover);
     // --include-busy covers repositories only: package caches and DerivedData always wait for installs and builds.
     failures += applyMachine(machine, discover);
   }
@@ -178,59 +127,153 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
 
   const totals: Record<Tier, number> = { caches: 0, builds: 0, deps: 0 };
   for (const tier of TIERS) for (const repo of repos) totals[tier] += tierBytes(repo.candidates, tier);
-  if (options.json) {
-    console.log(
-      JSON.stringify(
-        {
-          applied: options.apply,
-          workspace: workspace ?? null,
-          tiers: [...options.tiers],
-          free: { before, ...(after !== undefined && { after }) },
-          totals,
-          repos: repos.map(repo => ({ ...repo, skipped: repo.busy && !options.includeBusy ? "busy" : undefined })),
-          ...(options.machine && { machine: machine.map(({ apply: _apply, ...item }) => item) }),
-        },
-        null,
-        2,
-      ),
-    );
-    return failures > 0 ? 1 : 0;
-  }
+  const report: Report = { options, workspace, before, after, totals, repos, machine };
+  console.log(options.json ? jsonReport(report) : textReport(report));
+  return failures > 0 ? 1 : 0;
+}
 
-  const lines = [`Space cleanup ${options.apply ? "(applied)" : "(dry run)"}: ${size(before)} free${workspace ? ` in matrix workspace ${workspace}` : ""}`];
-  for (const repo of repos) {
-    const chosen = selected(repo.candidates, options.tiers);
-    const status = repo.error
-      ? ` error: ${repo.error}`
-      : repo.busy && !options.includeBusy
-        ? ` skipped, busy: ${repo.busy
-            .slice(0, 3)
-            .map(proc => `${proc.name} ${proc.pid}`)
-            .join(", ")}${repo.busy.length > 3 ? ", ..." : ""}`
-        : "";
-    const perTier = TIERS.map(tier => `${tier} ${size(tierBytes(repo.candidates, tier))}`).join(", ");
-    lines.push(`\n${repo.name}${status}\n  ${perTier}`);
-    for (const candidate of chosen.toSorted((a, b) => b.bytes - a.bytes).slice(0, 8))
-      lines.push(
-        `  ${options.apply && repo.removed?.includes(candidate.path) ? "removed" : candidate.tier.padEnd(7)} ${size(candidate.bytes).padStart(10)}  ${candidate.path}`,
-      );
-    if (chosen.length > 8) lines.push(`  ... and ${chosen.length - 8} more`);
-    for (const failure of repo.failed ?? []) lines.push(`  FAILED ${failure.path}: ${failure.error}`);
+/** Everything one run found and did, as both reports print it. */
+interface Report {
+  readonly options: Options;
+  readonly workspace: string | undefined;
+  readonly before: number;
+  readonly after: number | undefined;
+  readonly totals: Record<Tier, number>;
+  readonly repos: RepoReport[];
+  readonly machine: MachineItem[];
+}
+
+/** The process list; with --include-busy a failure to list them counts as no processes. */
+function listProcesses(discover: () => Proc[], includeBusy: boolean): Proc[] {
+  try {
+    return discover();
+  } catch (error) {
+    if (!includeBusy) throw error;
+    return [];
   }
+}
+
+/** One repository's candidates, each sized, and the processes working in it. */
+function scanRepo(target: Target, busy: Map<string, Proc[]>): RepoReport {
+  const report: RepoReport = { ...target, candidates: [] };
+  report.busy = workersOf(busy.get(target.root));
+  try {
+    report.candidates = findCandidates(target.root);
+  } catch (error) {
+    report.error = (error as Error).message;
+  }
+  // du counts a directory once per call, so a nested cache measured alongside its parent
+  // would read as empty: measure outer paths and nested ones in separate calls.
+  const nested = (candidate: Candidate) => report.candidates.some(other => candidate.path.startsWith(`${other.path}/`));
+  for (const group of [report.candidates.filter(candidate => !nested(candidate)), report.candidates.filter(nested)]) {
+    const sizes = measure(group.map(candidate => path.join(target.root, candidate.path)));
+    for (const candidate of group) candidate.bytes = sizes.get(path.join(target.root, candidate.path)) ?? 0;
+  }
+  return report;
+}
+
+/** Removes the chosen tiers from every scanned repository that is not busy; returns the number of failed removals. */
+function cleanRepos(repos: RepoReport[], targets: Target[], options: Options, discover: () => Proc[]): number {
+  let failures = 0;
+  for (const repo of repos) {
+    if (repo.error) continue;
+    // Scans and earlier removals take a while; judge each repository from a fresh process list.
+    if (!options.includeBusy) {
+      repo.busy = workersOf(
+        busyRoots(
+          discover(),
+          targets.map(target => target.root),
+        ).get(repo.root),
+      );
+      if (repo.busy) continue;
+    }
+    failures += removeCandidates(repo, options.tiers);
+  }
+  return failures;
+}
+
+/** Removes one repository's chosen candidates, rechecking each first; returns the number that failed. */
+function removeCandidates(repo: RepoReport, tiers: Set<Tier>): number {
+  const removed: string[] = [];
+  const failed: Array<{ path: string; error: string }> = [];
+  repo.removed = removed;
+  repo.failed = failed;
+  for (const candidate of selected(repo.candidates, tiers)) {
+    // Re-check at removal time: the tree may have changed since the scan.
+    const reason = unsafeReason(repo.root, candidate.path);
+    if (reason) {
+      if (reason !== "missing") failed.push({ path: candidate.path, error: reason });
+      continue;
+    }
+    try {
+      rmSync(path.join(repo.root, candidate.path), { recursive: true, force: true });
+      removed.push(candidate.path);
+    } catch (error) {
+      failed.push({ path: candidate.path, error: (error as Error).message });
+    }
+  }
+  return failed.length;
+}
+
+function jsonReport({ options, workspace, before, after, totals, repos, machine }: Report): string {
+  return JSON.stringify(
+    {
+      applied: options.apply,
+      workspace: workspace ?? null,
+      tiers: [...options.tiers],
+      free: { before, ...(after !== undefined && { after }) },
+      totals,
+      repos: repos.map(repo => ({ ...repo, skipped: repo.busy && !options.includeBusy ? "busy" : undefined })),
+      ...(options.machine && { machine: machine.map(({ apply: _apply, ...item }) => item) }),
+    },
+    null,
+    2,
+  );
+}
+
+function textReport({ options, workspace, before, after, totals, repos, machine }: Report): string {
+  const lines = [`Space cleanup ${options.apply ? "(applied)" : "(dry run)"}: ${size(before)} free${workspace ? ` in matrix workspace ${workspace}` : ""}`];
+  for (const repo of repos) lines.push(...repoLines(repo, options));
   if (options.machine) {
     lines.push("\nmachine");
-    for (const item of machine) {
-      const state = item.reportOnly ? "review" : item.skipped ? `skipped (${item.skipped})` : (item.result ?? (options.apply ? "" : "would clean"));
-      lines.push(`  ${size(item.bytes).padStart(10)}  ${item.description}: ${state}`);
-    }
+    for (const item of machine) lines.push(`  ${size(item.bytes).padStart(10)}  ${item.description}: ${machineState(item, options.apply)}`);
   }
   lines.push(
     `\nTotals: caches ${size(totals.caches)}, builds ${size(totals.builds)}${options.tiers.has("builds") ? "" : " (--builds)"}, deps ${size(totals.deps)}${options.tiers.has("deps") ? "" : " (--deps)"}`,
   );
   if (after !== undefined) lines.push(`Free: ${size(before)} -> ${size(after)}`);
   else lines.push("Nothing changed; rerun with --apply to remove the listed tiers.");
-  console.log(lines.join("\n"));
-  return failures > 0 ? 1 : 0;
+  return lines.join("\n");
+}
+
+/** One repository's section: its status, per-tier sizes, largest chosen paths, and failures. */
+function repoLines(repo: RepoReport, options: Options): string[] {
+  const chosen = selected(repo.candidates, options.tiers);
+  const perTier = TIERS.map(tier => `${tier} ${size(tierBytes(repo.candidates, tier))}`).join(", ");
+  const lines = [`\n${repo.name}${repoStatus(repo, options.includeBusy)}\n  ${perTier}`];
+  for (const candidate of chosen.toSorted((a, b) => b.bytes - a.bytes).slice(0, 8))
+    lines.push(
+      `  ${options.apply && repo.removed?.includes(candidate.path) ? "removed" : candidate.tier.padEnd(7)} ${size(candidate.bytes).padStart(10)}  ${candidate.path}`,
+    );
+  if (chosen.length > 8) lines.push(`  ... and ${chosen.length - 8} more`);
+  for (const failure of repo.failed ?? []) lines.push(`  FAILED ${failure.path}: ${failure.error}`);
+  return lines;
+}
+
+function repoStatus(repo: RepoReport, includeBusy: boolean): string {
+  if (repo.error) return ` error: ${repo.error}`;
+  if (!repo.busy || includeBusy) return "";
+  const shown = repo.busy
+    .slice(0, 3)
+    .map(proc => `${proc.name} ${proc.pid}`)
+    .join(", ");
+  return ` skipped, busy: ${shown}${repo.busy.length > 3 ? ", ..." : ""}`;
+}
+
+function machineState(item: MachineItem, apply: boolean): string {
+  if (item.reportOnly) return "review";
+  if (item.skipped) return `skipped (${item.skipped})`;
+  return item.result ?? (apply ? "" : "would clean");
 }
 
 if (import.meta.main) {
