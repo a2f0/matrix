@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { effectiveHelpers, helperName, inspectGitTransport, type Runner, sshEndpoint } from "./gitTransport";
+import { gitIn, gitInit, tempDir } from "./testFixtures";
 
 let root: string;
 const saved: Record<string, string | undefined> = {};
@@ -11,24 +10,23 @@ const ISOLATION = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTE
 
 /** A repository whose only Git configuration is its own: no system or global files. */
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), "matrix-git-transport-"));
+  root = tempDir("matrix-git-transport");
   for (const name of ISOLATION) saved[name] = process.env[name];
   process.env.GIT_CONFIG_GLOBAL = path.join(root, "global");
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   process.env.HOME = root;
   writeFileSync(process.env.GIT_CONFIG_GLOBAL, "");
-  execFileSync("git", ["init", "-q"], { cwd: root });
+  gitInit(root);
 });
 afterEach(() => {
   for (const name of ISOLATION) {
     if (saved[name] === undefined) delete process.env[name];
     else process.env[name] = saved[name];
   }
-  rmSync(root, { recursive: true, force: true });
 });
 
 function config(...pairs: Array<[string, string]>): void {
-  for (const [key, value] of pairs) execFileSync("git", ["config", "--add", key, value], { cwd: root });
+  for (const [key, value] of pairs) gitIn(root, "config", "--add", key, value);
 }
 
 const record = (key: string, value: string) => `${key}\n${value}\0`;

@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir, userInfo } from "node:os";
+import { copyFileSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import path from "node:path";
 import { ROOT } from "./cli";
+import { tempDir } from "./testFixtures";
 
 const SOURCE = path.join(ROOT, "scripts", "sentry");
 const TRUSTED_PATH_LINE = /^TRUSTED_PATH=.*$/m;
@@ -34,7 +35,7 @@ function writeExecutable(file: string, lines: string[]) {
 }
 
 beforeEach(() => {
-  temporary = realpathSync(mkdtempSync(path.join(tmpdir(), "matrix-sentry-mcp-")));
+  temporary = realpathSync(tempDir("matrix-sentry-mcp"));
   matrix = path.join(temporary, "matrix");
   secrets = path.join(temporary, "matrix-secrets");
   bin = path.join(temporary, "trusted-bin");
@@ -59,7 +60,6 @@ beforeEach(() => {
   writeRootEnv(`SENTRY_AUTH_TOKEN=upload-token\nSENTRY_MCP_AUTH_TOKEN="${TOKEN}"\n`);
 });
 
-afterEach(() => rmSync(temporary, { recursive: true, force: true }));
 
 test("the shipped launcher uses a fixed privileged-mode bash and system tool directories", () => {
   const source = readFileSync(path.join(SOURCE, "mcp.sh"), "utf8");

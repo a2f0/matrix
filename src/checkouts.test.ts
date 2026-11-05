@@ -1,28 +1,22 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
+import { gitIn, gitInit, tempDir } from "./testFixtures";
 
 const REPO = "a2f0/demo";
 let temporary: string, root: string, seed: string, remote: string, checkout: string;
 
-function run(cwd: string, ...args: string[]): string {
-  const identity = ["-c", "commit.gpgsign=false", "-c", "user.name=Matrix Test", "-c", "user.email=matrix@example.com"];
-  return execFileSync("git", [...identity, ...args], { cwd, encoding: "utf8", stdio: "pipe" }).trim();
-}
-
 function commit(cwd: string, file: string, content: string): string {
   writeFileSync(path.join(cwd, file), content);
-  run(cwd, "add", file);
-  run(cwd, "commit", "-q", "-m", `update ${file}`);
-  return run(cwd, "rev-parse", "HEAD");
+  gitIn(cwd, "add", file);
+  gitIn(cwd, "commit", "-q", "-m", `update ${file}`);
+  return gitIn(cwd, "rev-parse", "HEAD");
 }
 
 function publish(content: string): string {
   const head = commit(seed, "README.md", content);
-  run(seed, "push", "-q", remote, "HEAD");
+  gitIn(seed, "push", "-q", remote, "HEAD");
   return head;
 }
 
@@ -37,19 +31,17 @@ function withEnv<T>(values: Record<string, string>, action: () => T): T {
 }
 
 function setup(branch: string): void {
-  temporary = mkdtempSync(path.join(tmpdir(), "matrix-test-"));
+  temporary = tempDir("matrix-test");
   root = path.join(temporary, "matrix");
   seed = path.join(temporary, "seed");
   remote = path.join(temporary, "remote.git");
   checkout = path.join(root, "checkouts", "demo");
   mkdirSync(root);
   mkdirSync(seed);
-  run(seed, "init", "-q", "-b", branch);
+  gitIn(seed, "init", "-q", "-b", branch);
   commit(seed, "README.md", "one\n");
-  run(temporary, "clone", "-q", "--bare", seed, remote);
+  gitIn(temporary, "clone", "-q", "--bare", seed, remote);
 }
-
-afterEach(() => rmSync(temporary, { recursive: true, force: true }));
 
 describe("syncRepo", () => {
   beforeEach(() => setup("main"));
@@ -71,14 +63,14 @@ describe("syncRepo", () => {
     writeFileSync(path.join(checkout, "notes.txt"), "keep me\n");
     let head = publish("two\n");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "uncommitted changes" });
-    expect(run(checkout, "rev-parse", "origin/main")).toBe(head);
+    expect(gitIn(checkout, "rev-parse", "origin/main")).toBe(head);
     expect(readFileSync(path.join(checkout, "notes.txt"), "utf8")).toBe("keep me\n");
 
     rmSync(path.join(checkout, "notes.txt"));
-    run(checkout, "switch", "-q", "-c", "sweep/topic");
+    gitIn(checkout, "switch", "-q", "-c", "sweep/topic");
     head = publish("three\n");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "on branch sweep/topic" });
-    expect(run(checkout, "rev-parse", "origin/main")).toBe(head);
+    expect(gitIn(checkout, "rev-parse", "origin/main")).toBe(head);
   });
 
   test("never replaces local default-branch commits", () => {
@@ -87,7 +79,7 @@ describe("syncRepo", () => {
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "local main has unpushed commits" });
     publish("two\n");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "local main has diverged from origin" });
-    expect(run(checkout, "rev-parse", "HEAD")).toBe(local);
+    expect(gitIn(checkout, "rev-parse", "HEAD")).toBe(local);
   });
 
   test("rejects checkouts that are not the managed repository", () => {
@@ -95,33 +87,33 @@ describe("syncRepo", () => {
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error", reason: "not a separate Git checkout" });
     rmSync(checkout, { recursive: true });
     syncRepo(root, REPO, remote);
-    run(checkout, "remote", "set-url", "origin", "git@github.com:a2f0/other.git");
+    gitIn(checkout, "remote", "set-url", "origin", "git@github.com:a2f0/other.git");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error", reason: "origin is a2f0/other, expected a2f0/demo" });
   });
 
   test("never reports credentials embedded in a mismatched origin", () => {
     syncRepo(root, REPO, remote);
-    run(checkout, "remote", "set-url", "origin", "https://user:secret@github.com/a2f0/other.git");
+    gitIn(checkout, "remote", "set-url", "origin", "https://user:secret@github.com/a2f0/other.git");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ reason: "origin is a2f0/other, expected a2f0/demo" });
-    run(checkout, "remote", "set-url", "origin", "https://user:secret@example.com/demo.git");
+    gitIn(checkout, "remote", "set-url", "origin", "https://user:secret@example.com/demo.git");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ error: "origin is https://example.com/demo.git, expected a2f0/demo" });
-    run(checkout, "remote", "set-url", "origin", "https://github.com/a2f0/other.git?access_token=secret#secret");
+    gitIn(checkout, "remote", "set-url", "origin", "https://github.com/a2f0/other.git?access_token=secret#secret");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ error: "origin is https://github.com/a2f0/other.git, expected a2f0/demo" });
   });
 
   test("refuses to overwrite ignored local files that upstream starts tracking", () => {
     commit(seed, ".gitignore", "local.env\n");
-    run(seed, "push", "-q", remote, "HEAD");
+    gitIn(seed, "push", "-q", remote, "HEAD");
     syncRepo(root, REPO, remote);
     writeFileSync(path.join(checkout, "local.env"), "secret\n");
-    const head = run(checkout, "rev-parse", "HEAD");
+    const head = gitIn(checkout, "rev-parse", "HEAD");
     writeFileSync(path.join(seed, "local.env"), "upstream\n");
-    run(seed, "add", "-f", "local.env");
-    run(seed, "commit", "-q", "-m", "track local.env");
-    run(seed, "push", "-q", remote, "HEAD");
+    gitIn(seed, "add", "-f", "local.env");
+    gitIn(seed, "commit", "-q", "-m", "track local.env");
+    gitIn(seed, "push", "-q", remote, "HEAD");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error" });
     expect(readFileSync(path.join(checkout, "local.env"), "utf8")).toBe("secret\n");
-    expect(run(checkout, "rev-parse", "HEAD")).toBe(head);
+    expect(gitIn(checkout, "rev-parse", "HEAD")).toBe(head);
   });
 
   test("runs no checkout hooks or fsmonitor that plain Git would run", () => {
@@ -131,24 +123,24 @@ describe("syncRepo", () => {
     writeFileSync(path.join(checkout, ".git", "hooks", "post-merge"), `#!/bin/sh\necho post-merge >> "${marker}"\n`, { mode: 0o755 });
     const fsmonitor = path.join(temporary, "fsmonitor");
     writeFileSync(fsmonitor, `#!/bin/sh\necho fsmonitor >> "${marker}"\nexit 1\n`, { mode: 0o755 });
-    run(checkout, "config", "core.fsmonitor", fsmonitor);
+    gitIn(checkout, "config", "core.fsmonitor", fsmonitor);
     publish("two\n");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "updated" });
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: true });
     expect(existsSync(marker)).toBe(false);
 
     publish("three\n");
-    run(checkout, "fetch", "-q", "origin");
-    run(checkout, "merge", "-q", "--ff-only", "origin/main");
-    run(checkout, "status", "--porcelain");
+    gitIn(checkout, "fetch", "-q", "origin");
+    gitIn(checkout, "merge", "-q", "--ff-only", "origin/main");
+    gitIn(checkout, "status", "--porcelain");
     expect(readFileSync(marker, "utf8")).toContain("post-merge");
     expect(readFileSync(marker, "utf8")).toContain("fsmonitor");
   });
 
   test("refuses symlinked checkouts that could reach clones outside the workspace", () => {
     const external = path.join(temporary, "external");
-    run(temporary, "clone", "-q", remote, external);
-    const head = run(external, "rev-parse", "HEAD");
+    gitIn(temporary, "clone", "-q", remote, external);
+    const head = gitIn(external, "rev-parse", "HEAD");
     publish("two\n");
     const refused = { action: "error", reason: "checkouts/demo is a symlink; checkouts must be clones inside the workspace" };
 
@@ -166,60 +158,60 @@ describe("syncRepo", () => {
     symlinkSync(external, path.join(temporary, "elsewhere", "demo"));
     symlinkSync(path.join(temporary, "elsewhere"), path.join(root, "checkouts"));
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "error", reason: "checkouts is a symlink; checkouts must be clones inside the workspace" });
-    expect(run(external, "rev-parse", "HEAD")).toBe(head);
+    expect(gitIn(external, "rev-parse", "HEAD")).toBe(head);
   });
 
   test("refuses worktrees and linked Git directories of clones outside the workspace", () => {
     const external = path.join(temporary, "external");
-    run(temporary, "clone", "-q", remote, external);
-    const head = run(external, "rev-parse", "HEAD");
+    gitIn(temporary, "clone", "-q", remote, external);
+    const head = gitIn(external, "rev-parse", "HEAD");
     publish("two\n");
     const refused = { action: "error", reason: "not a standalone clone with its own .git directory" };
 
-    run(external, "worktree", "add", "-q", "--detach", checkout);
+    gitIn(external, "worktree", "add", "-q", "--detach", checkout);
     expect(syncRepo(root, REPO, remote)).toMatchObject(refused);
-    run(external, "worktree", "remove", "--force", checkout);
+    gitIn(external, "worktree", "remove", "--force", checkout);
 
     mkdirSync(checkout, { recursive: true });
     symlinkSync(path.join(external, ".git"), path.join(checkout, ".git"));
     expect(syncRepo(root, REPO, remote)).toMatchObject(refused);
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, error: refused.reason });
-    expect(run(external, "rev-parse", "main")).toBe(head);
-    expect(run(external, "rev-parse", "origin/main")).toBe(head);
+    expect(gitIn(external, "rev-parse", "main")).toBe(head);
+    expect(gitIn(external, "rev-parse", "origin/main")).toBe(head);
   });
 
   test("names the remote origin regardless of clone.defaultRemoteName", () => {
     const config = path.join(temporary, "gitconfig");
     writeFileSync(config, "[clone]\n\tdefaultRemoteName = upstream\n");
     expect(withEnv({ GIT_CONFIG_GLOBAL: config }, () => syncRepo(root, REPO, remote))).toMatchObject({ action: "cloned", defaultBranch: "main" });
-    expect(run(checkout, "remote")).toBe("origin");
+    expect(gitIn(checkout, "remote")).toBe("origin");
   });
 
   test("fetches only into remote-tracking refs whatever refspec is configured", () => {
     syncRepo(root, REPO, remote);
     const local = commit(checkout, "local.txt", "local\n");
-    run(checkout, "switch", "-q", "-c", "sweep/topic");
-    run(checkout, "config", "remote.origin.fetch", "+refs/heads/main:refs/heads/main");
+    gitIn(checkout, "switch", "-q", "-c", "sweep/topic");
+    gitIn(checkout, "config", "remote.origin.fetch", "+refs/heads/main:refs/heads/main");
     const head = publish("two\n");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "on branch sweep/topic" });
-    expect(run(checkout, "rev-parse", "main")).toBe(local);
-    expect(run(checkout, "rev-parse", "origin/main")).toBe(head);
+    expect(gitIn(checkout, "rev-parse", "main")).toBe(local);
+    expect(gitIn(checkout, "rev-parse", "origin/main")).toBe(head);
   });
 
   test("keeps local-only tags when fetch.pruneTags is configured", () => {
     syncRepo(root, REPO, remote);
-    run(checkout, "config", "fetch.pruneTags", "true");
-    run(checkout, "tag", "local-only");
+    gitIn(checkout, "config", "fetch.pruneTags", "true");
+    gitIn(checkout, "tag", "local-only");
     publish("two\n");
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "updated" });
-    expect(run(checkout, "tag", "--list", "local-only")).toBe("local-only");
+    expect(gitIn(checkout, "tag", "--list", "local-only")).toBe("local-only");
   });
 
   test("ignores inherited Git repository variables such as those set inside hooks", () => {
     syncRepo(root, REPO, remote);
     const external = path.join(temporary, "external");
-    run(temporary, "clone", "-q", remote, external);
-    const before = run(external, "rev-parse", "origin/main");
+    gitIn(temporary, "clone", "-q", remote, external);
+    const before = gitIn(external, "rev-parse", "origin/main");
     const head = publish("two\n");
     const inherited = {
       GIT_DIR: path.join(external, ".git"),
@@ -229,7 +221,7 @@ describe("syncRepo", () => {
     };
     expect(withEnv(inherited, () => syncRepo(root, REPO, remote))).toMatchObject({ action: "updated", head });
     expect(withEnv(inherited, () => checkoutStatus(root, REPO, remote))).toMatchObject({ ready: true });
-    expect(run(external, "rev-parse", "origin/main")).toBe(before);
+    expect(gitIn(external, "rev-parse", "origin/main")).toBe(before);
   });
 
   test("reports a clone failure as an error", () => {
@@ -256,23 +248,23 @@ describe("checkoutStatus", () => {
 
     writeFileSync(path.join(checkout, "README.md"), "edited\n");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
-    run(checkout, "checkout", "-q", "--", "README.md");
+    gitIn(checkout, "checkout", "-q", "--", "README.md");
 
-    run(checkout, "switch", "-q", "-c", "sweep/topic");
+    gitIn(checkout, "switch", "-q", "-c", "sweep/topic");
     commit(checkout, "change.txt", "change\n");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, branch: "sweep/topic", ahead: 1, behind: 0 });
-    run(checkout, "switch", "-q", "main");
+    gitIn(checkout, "switch", "-q", "main");
 
     publish("two\n");
-    run(checkout, "fetch", "-q", "origin");
+    gitIn(checkout, "fetch", "-q", "origin");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, behind: 1 });
   });
 
   test("counts untracked files even when Git is configured to hide them", () => {
     syncRepo(root, REPO, remote);
-    run(checkout, "config", "status.showUntrackedFiles", "no");
+    gitIn(checkout, "config", "status.showUntrackedFiles", "no");
     writeFileSync(path.join(checkout, "draft.txt"), "draft\n");
-    expect(run(checkout, "status", "--porcelain")).toBe("");
+    expect(gitIn(checkout, "status", "--porcelain")).toBe("");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
     expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "uncommitted changes" });
   });
@@ -280,31 +272,31 @@ describe("checkoutStatus", () => {
   test("counts tracked files whose index flags hide edits from status", () => {
     syncRepo(root, REPO, remote);
     for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
-      run(checkout, "update-index", flag, "README.md");
+      gitIn(checkout, "update-index", flag, "README.md");
       writeFileSync(path.join(checkout, "README.md"), "edited\n");
-      expect(run(checkout, "status", "--porcelain")).toBe("");
+      expect(gitIn(checkout, "status", "--porcelain")).toBe("");
       expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
       publish(`${flag}\n`);
       expect(syncRepo(root, REPO, remote)).toMatchObject({ action: "skipped", reason: "uncommitted changes" });
       expect(readFileSync(path.join(checkout, "README.md"), "utf8")).toBe("edited\n");
-      run(checkout, "update-index", flag.replace("--", "--no-"), "README.md");
-      run(checkout, "checkout", "-q", "--", "README.md");
+      gitIn(checkout, "update-index", flag.replace("--", "--no-"), "README.md");
+      gitIn(checkout, "checkout", "-q", "--", "README.md");
     }
   });
 
   test("counts dirty submodules even when Git is configured to ignore them", () => {
     const library = path.join(temporary, "library");
     mkdirSync(library);
-    run(library, "init", "-q", "-b", "main");
+    gitInit(library);
     commit(library, "lib.txt", "lib\n");
-    run(seed, "-c", "protocol.file.allow=always", "submodule", "add", "-q", library, "lib");
-    run(seed, "commit", "-q", "-m", "add submodule");
-    run(seed, "push", "-q", remote, "HEAD");
+    gitIn(seed, "-c", "protocol.file.allow=always", "submodule", "add", "-q", library, "lib");
+    gitIn(seed, "commit", "-q", "-m", "add submodule");
+    gitIn(seed, "push", "-q", remote, "HEAD");
     syncRepo(root, REPO, remote);
-    run(checkout, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init");
-    run(checkout, "config", "submodule.lib.ignore", "all");
+    gitIn(checkout, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init");
+    gitIn(checkout, "config", "submodule.lib.ignore", "all");
     writeFileSync(path.join(checkout, "lib", "lib.txt"), "edited\n");
-    expect(run(checkout, "status", "--porcelain")).toBe("");
+    expect(gitIn(checkout, "status", "--porcelain")).toBe("");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: false, changes: 1 });
   });
 
@@ -315,10 +307,10 @@ describe("checkoutStatus", () => {
     // An ignored node_modules leaves the checkout ready whatever it holds.
     writeFileSync(path.join(checkout, ".git", "info", "exclude"), "node_modules/\n");
     writeFileSync(path.join(checkout, "package.json"), `${JSON.stringify({ devDependencies: { "@a2f0/agent-tool": "0.1.21" } })}\n`);
-    run(checkout, "add", "package.json");
-    run(checkout, "commit", "-q", "-m", "pin agent-tool");
-    run(checkout, "push", "-q", "origin", "HEAD");
-    run(checkout, "fetch", "-q", "origin");
+    gitIn(checkout, "add", "package.json");
+    gitIn(checkout, "commit", "-q", "-m", "pin agent-tool");
+    gitIn(checkout, "push", "-q", "origin", "HEAD");
+    gitIn(checkout, "fetch", "-q", "origin");
     expect(checkoutStatus(root, REPO, remote)).toMatchObject({ ready: true, agentTool: { pinned: "0.1.21", installed: null, current: false } });
 
     const installed = path.join(checkout, "node_modules", "@a2f0", "agent-tool");

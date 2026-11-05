@@ -1,41 +1,20 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
+import { MINIMUM_AGENT_TOOL } from "./audit";
 import { main, type Services } from "./cli";
+import { checkoutFixture, gitIn, gitInit, tempDir } from "./testFixtures";
 
 let root: string;
-
-function git(cwd: string, ...args: string[]): void {
-  execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.name=Matrix Test", "-c", "user.email=matrix@example.com", ...args], { cwd, stdio: "ignore" });
-}
 
 /** A conforming checkout whose origin metadata satisfies `status` without a network. */
 function checkout(name: string): void {
   const directory = path.join(root, "checkouts", name);
-  mkdirSync(directory, { recursive: true });
-  const files: Record<string, string> = {
-    "AGENTS.md": "# Guidance\n\n## Output capture\n\nUse `bun run agent:run` and `bun run agent:logs`.\n",
-    "README.md": `# ${name}\n\n## Quick start\n`,
-    ".gitignore": ".DS_Store\n",
-    "package.json": JSON.stringify({ scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", "agents:check": "agent-tool skills check && agent-tool permissions check" }, devDependencies: { "@a2f0/agent-tool": "0.1.21" } }),
-    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }),
-    ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
-    ".codex/rules/agent-tool.rules": "",
-    "agent-tool.json": "{}",
-    ".agent-tool-skills.json": JSON.stringify({ schemaVersion: 1, files: {} }),
-  };
-  for (const [file, content] of Object.entries(files)) {
-    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
-    writeFileSync(path.join(directory, file), content);
-  }
-  git(directory, "init", "-q", "-b", "main");
-  git(directory, "add", "-A");
-  git(directory, "commit", "-q", "-m", "init");
-  git(directory, "remote", "add", "origin", `git@github.com:a2f0/${name}.git`);
-  git(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
-  git(directory, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  checkoutFixture(directory, MINIMUM_AGENT_TOOL);
+  gitIn(directory, "commit", "-q", "-m", "init");
+  gitIn(directory, "update-ref", "refs/remotes/origin/main", "HEAD");
+  gitIn(directory, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
 }
 
 /** Run the CLI in its own process, as a script would, and return its exit status and JSON output. */
@@ -47,15 +26,13 @@ function matrix(...args: string[]): { status: number | null; output: Record<stri
 }
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), "matrix-cli-"));
+  root = tempDir("matrix-cli");
   const manifest = { schemaVersion: 1, protocol: "ssh", discover: { owner: "a2f0", visibility: "public", exclude: [] }, repos: ["a2f0/good", "a2f0/missing"] };
   writeFileSync(path.join(root, "matrix.json"), `${JSON.stringify(manifest)}\n`);
   // Sweep ledgers live in the workspace's Git directory.
-  git(root, "init", "-q");
+  gitInit(root);
   checkout("good");
 });
-
-afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 test("audit exits zero only when every selected checkout passes", () => {
   expect(matrix("audit", "good")).toMatchObject({ status: 0, output: { ok: true, failures: {} } });

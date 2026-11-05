@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type CheckoutStatus, notReady } from "./checkouts";
 import { listSweeps, sweepsDirectory } from "./sweepLedger";
 import { retro } from "./sweepRetro";
 import { markdownReport, parseEvent, parseUpdate, recordEntry, startSweep, sweepReport } from "./sweeps";
+import { gitIn, gitInit, tempDir } from "./testFixtures";
 
 const HEAD = "a".repeat(40);
 let root: string;
@@ -30,11 +30,9 @@ function start(branch: string, repos: string[], minute = 0) {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), "matrix-sweeps-"));
-  execFileSync("git", ["init", "-q"], { cwd: root });
+  root = tempDir("matrix-sweeps");
+  gitInit(root);
 });
-
-afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("startSweep", () => {
   test("opens ready checkouts at their commit and skips the rest with a reason", () => {
@@ -54,9 +52,9 @@ describe("startSweep", () => {
   test("keeps ledgers private in the Git common directory, never in the worktree", () => {
     start("chore/demo", ["a2f0/one"]);
     const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
-    expect(directory.startsWith(path.join(execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim(), "matrix"))).toBe(true);
+    expect(directory.startsWith(path.join(gitIn(root, "rev-parse", "--path-format=absolute", "--git-common-dir"), "matrix"))).toBe(true);
     expect(statSync(path.join(directory, "sweep.json")).mode & 0o777).toBe(0o600);
-    expect(execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" })).toBe("");
+    expect(gitIn(root, "status", "--porcelain")).toBe("");
   });
 
   test("refuses a second ledger for the same branch and invalid names", () => {

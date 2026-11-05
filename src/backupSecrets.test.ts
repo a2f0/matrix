@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "./cli";
+import { tempDir } from "./testFixtures";
 
 const SCRIPT = path.join(ROOT, "scripts", "secrets", "backupSecrets.sh");
 let temporary: string, secrets: string, output: string, gnupg: string, passphrase: string;
@@ -31,7 +31,7 @@ function decrypt(archive: string, passphrase: string): string {
 function entry(zip: string, name: string): string { return execFileSync("unzip", ["-p", zip, name], { encoding: "utf8" }); }
 
 beforeEach(() => {
-  temporary = mkdtempSync(path.join(tmpdir(), "matrix-backup-"));
+  temporary = tempDir("matrix-backup");
   secrets = path.join(temporary, "matrix-secrets");
   output = path.join(temporary, "backups");
   gnupg = path.join(temporary, "gnupg");
@@ -42,8 +42,6 @@ beforeEach(() => {
   passphrase = path.join(temporary, "passphrase");
   writeFileSync(passphrase, "fixture-passphrase\n", { mode: 0o600 });
 });
-
-afterEach(() => rmSync(temporary, { recursive: true, force: true }));
 
 test("non-interactive backups require an explicit encryption choice", () => {
   const result = backup(output);

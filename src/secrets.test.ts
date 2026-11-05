@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, expect, test } from "bun:test";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type Gh, runGh } from "./gh";
 import { deployAll, deploySecrets, dotenvNames, secretsRoot } from "./secrets";
+import { tempDir } from "./testFixtures";
 
 let secrets: string, calls: string[][];
 const remote: Record<string, string[]> = { secret: ["DEPLOY_KEY", "LEGACY_TOKEN"], variable: [] };
@@ -20,11 +20,9 @@ function ci(file: string, content: string): string {
 }
 
 beforeEach(() => {
-  secrets = mkdtempSync(path.join(tmpdir(), "matrix-secrets-"));
+  secrets = tempDir("matrix-secrets");
   calls = [];
 });
-
-afterEach(() => rmSync(secrets, { recursive: true, force: true }));
 
 test("reads names in order and skips comments, export prefixes, and quoted multi-line values", () => {
   const source = [

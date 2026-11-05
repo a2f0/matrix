@@ -1,23 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { symlinkSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 import { createServer } from "node:http";
 import { connect } from "node:http2";
 import { compareImages, importsOf, measureLoad, moduleGraph, navigate, parseOptions, profileTable, serve, shot, summarize } from "../skills/performance-pass/scripts/perf";
-
-const temps: string[] = [];
-afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+import { tempDir, write } from "./testFixtures";
 
 function tree(files: Record<string, string>): string {
-  const root = mkdtempSync(path.join(os.tmpdir(), "performance-pass-"));
-  temps.push(root);
-  for (const [rel, text] of Object.entries(files)) {
-    mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
-    writeFileSync(path.join(root, rel), text);
-  }
+  const root = tempDir("performance-pass");
+  write(root, files);
   return root;
 }
 

@@ -1,15 +1,20 @@
 // Fixtures shared by matrix tests: temporary directories that clean up after
 // each test, Git with a fixed identity, and file trees.
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import path from "node:path";
 
 const temporary: string[] = [];
 
-/** A new empty directory, by its real path as Git and lsof report it, removed after the current test. */
+/**
+ * A new empty directory under the system temp directory, removed after the
+ * current test. Wrap it in realpathSync where a test compares paths with
+ * what Git or lsof report; the shorter path keeps gpg's socket paths under
+ * the Unix limit.
+ */
 export function tempDir(prefix: string): string {
-  const directory = realpathSync(mkdtempSync(path.join(tmpdir(), `${prefix}-`)));
+  const directory = mkdtempSync(path.join(tmpdir(), `${prefix}-`));
   temporary.push(directory);
   return directory;
 }
