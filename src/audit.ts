@@ -61,6 +61,24 @@ function compareVersions(left: string, right: string): number {
   return 0;
 }
 
+const OUTPUT_CAPTURE_SCRIPTS = ["agent:run", "agent:logs"];
+
+/** What the root package.json lacks of the output-capture scripts. */
+function outputCaptureScriptProblems(checkout: Checkout): string[] {
+  if (checkout.packageJson === undefined) return ["no root package.json for the agent:run and agent:logs scripts"];
+  return OUTPUT_CAPTURE_SCRIPTS.filter(name => typeof checkout.scripts[name] !== "string").map(name => `no ${name} script`);
+}
+
+/** What AGENTS.md lacks of the Output capture guidance. */
+function outputCaptureGuidanceProblems(guidance: string | undefined): string[] {
+  if (guidance === undefined) return ["no AGENTS.md for the Output capture section"];
+  // An AGENTS.md without sections carries the same text as a paragraph.
+  const sectioned = headings(guidance).some(heading => heading.level >= 2);
+  const text = sectioned ? section(guidance, "Output capture") : guidance;
+  if (text === undefined) return ["AGENTS.md has no Output capture section"];
+  return OUTPUT_CAPTURE_SCRIPTS.filter(name => !text.includes(name)).map(name => `Output capture guidance does not mention ${name}`);
+}
+
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
 
 /** Hermes truncates a context file past this many characters (Unicode code points), dropping its middle. */
@@ -152,21 +170,7 @@ export const RULES: readonly Rule[] = [
     id: "output-capture",
     summary: "agent:run and agent:logs scripts, and an Output capture section in AGENTS.md",
     source: "AGENTS.md#output-capture",
-    check: checkout => {
-      const found: string[] = [];
-      if (checkout.packageJson === undefined) found.push("no root package.json for the agent:run and agent:logs scripts");
-      else for (const name of ["agent:run", "agent:logs"]) if (typeof checkout.scripts[name] !== "string") found.push(`no ${name} script`);
-      const guidance = checkout.read("AGENTS.md");
-      if (guidance === undefined) found.push("no AGENTS.md for the Output capture section");
-      else {
-        // An AGENTS.md without sections carries the same text as a paragraph.
-        const sectioned = headings(guidance).some(heading => heading.level >= 2);
-        const text = sectioned ? section(guidance, "Output capture") : guidance;
-        if (text === undefined) found.push("AGENTS.md has no Output capture section");
-        else for (const name of ["agent:run", "agent:logs"]) if (!text.includes(name)) found.push(`Output capture guidance does not mention ${name}`);
-      }
-      return problems(found);
-    },
+    check: checkout => problems([...outputCaptureScriptProblems(checkout), ...outputCaptureGuidanceProblems(checkout.read("AGENTS.md"))]),
   },
   {
     id: "readme-title",
