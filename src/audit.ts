@@ -5,9 +5,9 @@ import { type CheckoutStatus, redact } from "./checkouts";
 import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
+import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
 import { plural } from "./text";
 
-const AGENT_TOOL = "@a2f0/agent-tool";
 /**
  * The oldest pin the sweep rules support: 0.1.21 provides `branch create`,
  * `branch push`, `pr checks --wait`, and `repo cleanup` with local pruning, so
@@ -57,23 +57,6 @@ const pass: Outcome = { status: "pass" };
 const fail = (detail: string): Outcome => ({ status: "fail", detail });
 const skip = (detail: string): Outcome => ({ status: "skip", detail });
 const problems = (list: string[]): Outcome => (list.length === 0 ? pass : fail(list.join("; ")));
-
-function object(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
-function json(source: string | undefined): Record<string, unknown> | undefined {
-  if (source === undefined) return undefined;
-  try { return object(JSON.parse(source)); } catch { return undefined; }
-}
-
-function dependency(manifest: Record<string, unknown> | undefined, name: string): string | undefined {
-  for (const field of ["devDependencies", "dependencies"]) {
-    const version = object(manifest?.[field])?.[name];
-    if (typeof version === "string") return version;
-  }
-  return undefined;
-}
 
 /** agent-tool publishes itself; its checkout runs the source CLI instead of a pin. */
 function isProducer(checkout: Checkout): boolean { return checkout.packageJson?.name === AGENT_TOOL; }
@@ -171,14 +154,14 @@ function commandRunsGraphCheck(value: unknown): boolean {
  * or a runner script under scripts/. Generated permission rules name the command too, so they never count.
  */
 function agentToolGraphChecked(checkout: Checkout): boolean {
-  const graph = object(json(checkout.read("agent-tool.json"))?.graph);
+  const graph = object(parseObject(checkout.read("agent-tool.json"))?.graph);
   if (!Array.isArray(graph?.include) || graph.include.length === 0) return false;
   const runsIt = (text: string) => /\bgraph\s+check\b/.test(text);
   const scripts = Object.values(object(checkout.packageJson?.scripts) ?? {});
   if (scripts.some(script => typeof script === "string" && runsIt(script))) return true;
   const workflows = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => checkout.read(file) ?? "");
   if (workflows.some(text => text.split("\n").some(line => /^\s*(-\s*)?run:/.test(line) && runsIt(line)))) return true;
-  if (checkout.tracked(":(glob)scripts/**/*.json").some(file => commandRunsGraphCheck(json(checkout.read(file))))) return true;
+  if (checkout.tracked(":(glob)scripts/**/*.json").some(file => commandRunsGraphCheck(parseObject(checkout.read(file))))) return true;
   // A repository's own runner script passing the arguments (skyline's scripts/testing/check.ts).
   return checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)scripts/**/*.${extension}`))
     .filter(file => !/\.(test|spec)\.[cm]?[jt]s$/.test(file))
@@ -186,7 +169,7 @@ function agentToolGraphChecked(checkout: Checkout): boolean {
 }
 
 function managedSkills(checkout: Checkout): string[] {
-  return Object.keys(object(json(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
+  return Object.keys(object(parseObject(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
 }
 
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
@@ -342,7 +325,7 @@ export const RULES: readonly Rule[] = [
       if (!checkout.exists("assets/brand")) return skip("no assets/brand");
       const found: string[] = [];
       if (!checkout.exists("assets/brand/logo.svg")) found.push("no assets/brand/logo.svg");
-      if (!object(json(checkout.read("agent-tool.json"))?.images)) found.push("agent-tool.json declares no images");
+      if (!object(parseObject(checkout.read("agent-tool.json"))?.images)) found.push("agent-tool.json declares no images");
       const rasters = checkout.tracked("assets/brand").filter(file => /\.(png|ico|icns|jpe?g|gif|webp|bmp|tiff?)$/i.test(file));
       if (rasters.length > 0) found.push(`committed rasters: ${rasters.join(", ")}`);
       return problems(found);
@@ -372,11 +355,11 @@ export const RULES: readonly Rule[] = [
       const websites = checkout.tracked(":(glob)**/astro.config.*");
       if (typeof script !== "string" || websites.length === 0) return skip("no website that shows captured screenshots");
       const found: string[] = [];
-      const targets = object(object(json(checkout.read("agent-tool.json"))?.screenshots)?.targets);
+      const targets = object(object(parseObject(checkout.read("agent-tool.json"))?.screenshots)?.targets);
       if (!targets || Object.keys(targets).length === 0) found.push("agent-tool.json declares no screenshots targets");
       // A declared target proves nothing unless some build or dev script runs it.
       const scripts = checkout.tracked(":(glob)**/package.json")
-        .flatMap(file => Object.values(object(object(json(checkout.read(file)))?.scripts) ?? {}));
+        .flatMap(file => Object.values(object(object(parseObject(checkout.read(file)))?.scripts) ?? {}));
       if (!scripts.some(value => typeof value === "string" && /\bagent-tool\b[^&|;]*\sscreenshots build\b/.test(value))) found.push("no package script runs agent-tool screenshots build");
       const copies = checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)**/*.${extension}`))
         .filter(file => !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
@@ -482,7 +465,7 @@ export function openCheckout(repo: string, directory: string): Checkout {
       if (result.status !== 0) throw new Error(`git ls-files failed in ${repo}: ${result.stderr}`);
       return result.stdout.split("\0").filter(Boolean);
     },
-    packageJson: json(read("package.json")),
+    packageJson: parseObject(read("package.json")),
   };
 }
 
@@ -540,7 +523,7 @@ export function audit(root: string, repos: string[], rules: Rule[], statusOf: (r
 /** Ask the registry through Bun, which matrix already requires, when each release of a package appeared. */
 export function registryReleases(name: string): Record<string, string> {
   const result = spawnSync(process.execPath, ["info", name, "time", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const times = result.error || result.status !== 0 ? undefined : json(result.stdout);
+  const times = result.error || result.status !== 0 ? undefined : parseObject(result.stdout);
   const releases = Object.fromEntries(Object.entries(times ?? {}).filter((entry): entry is [string, string] => EXACT_VERSION.test(entry[0]) && typeof entry[1] === "string"));
   if (Object.keys(releases).length === 0) {
     throw new Error(`Could not read ${name}'s releases from the registry: ${result.error?.message ?? (result.stderr?.trim() || `exit ${result.status}`)}`);

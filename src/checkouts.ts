@@ -2,6 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import path from "node:path";
 import { git, gitOutput, gitSucceeds } from "./git";
 import { CHECKOUTS, checkoutPath, parseGitHubRepo, repoName } from "./manifest";
+import { AGENT_TOOL, dependency, parseObject } from "./packageJson";
 import { errorMessage } from "./text";
 
 export interface SyncResult {
@@ -96,27 +97,14 @@ function changeCount(directory: string): number {
   return status.length + hidden.length;
 }
 
-const AGENT_TOOL = "@a2f0/agent-tool";
-
 function packageJson(file: string): Record<string, unknown> | undefined {
-  try {
-    const value: unknown = JSON.parse(readFileSync(file, "utf8"));
-    return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-  } catch { return undefined; }
-}
-
-function dependency(manifest: Record<string, unknown>, name: string): string | undefined {
-  for (const field of ["devDependencies", "dependencies"]) {
-    const version = (manifest[field] as Record<string, unknown> | undefined)?.[name];
-    if (typeof version === "string") return version;
-  }
-  return undefined;
+  try { return parseObject(readFileSync(file, "utf8")); } catch { return undefined; }
 }
 
 /** Sync updates sources but never installs, so node_modules can lag the pin that scripts expect. */
 function agentToolInstall(directory: string): AgentToolInstall | undefined {
   const manifest = packageJson(path.join(directory, "package.json"));
-  const pinned = manifest && dependency(manifest, AGENT_TOOL);
+  const pinned = dependency(manifest, AGENT_TOOL);
   if (pinned === undefined) return undefined;
   const version = packageJson(path.join(directory, "node_modules", AGENT_TOOL, "package.json"))?.version;
   const installed = typeof version === "string" ? version : null;
