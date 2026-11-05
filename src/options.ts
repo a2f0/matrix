@@ -41,10 +41,15 @@ function readOption(parsed: Parsed, args: string[], index: number, spec: Record<
   if (value === undefined || (separate && value.startsWith("--"))) {
     throw new Error(`${command} option '--${name}' needs a value; use --${name}=<value> for one that starts with --.`);
   }
+  recordValue(parsed, kind, name, value, command);
+  return separate ? 1 : 0;
+}
+
+/** Append a list option's value, or set a value option's once. */
+function recordValue(parsed: Parsed, kind: "value" | "list", name: string, value: string, command: string): void {
   if (kind === "list") parsed.lists[name] = [...(parsed.lists[name] ?? []), value];
   else if (name in parsed.values) throw new Error(`${command} option '--${name}' was given twice.`);
   else parsed.values[name] = value;
-  return separate ? 1 : 0;
 }
 
 /** A positive integer option, or undefined when absent so the command's own default applies. */
