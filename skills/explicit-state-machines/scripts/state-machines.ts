@@ -12,7 +12,7 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { git } from "./git";
-import { type FileReport, language, scanFile } from "./scan";
+import { type FileReport, language, MAX_BYTES, scanFile } from "./scan";
 import { resolveTargets } from "./targets";
 
 export interface Options {
@@ -75,7 +75,9 @@ export function parseOptions(argv: string[]): Options {
 export function readInside(root: string, file: string): string | undefined {
   const full = path.join(root, file);
   try {
-    if (!lstatSync(full).isFile()) return undefined;
+    const stat = lstatSync(full);
+    // Check the size before reading, so a huge tracked file is never loaded.
+    if (!stat.isFile() || stat.size > MAX_BYTES) return undefined;
     // The resolved path must be exactly root/file: any symlinked component,
     // a parent directory included, changes it, even one pointing back inside.
     const real = realpathSync(full);

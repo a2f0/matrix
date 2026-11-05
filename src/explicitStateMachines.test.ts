@@ -63,6 +63,64 @@ describe("explicit-state-machines scan", () => {
     expect(signals.find(signal => signal.kind === "flags")?.names).toEqual(["_running", "is_dirty"]);
   });
 
+  test("finds machines held in refs, private fields, object members and nested status writes", () => {
+    // Shapes the first sweep's readers found and the scanner missed.
+    const refs = "busy.current = true;\nbusy.current = false;\nconst [paging, setPaging] = useState(false);\nsetPaging(true);";
+    expect(scanText(refs, "c")).toEqual([{ kind: "flags", names: ["busy", "paging"], lines: [1, 2, 3, 4] }]);
+    const element = "this.#rendered = false;\nthis.#loading = true;\nthis.#rendered = true;\nthis.#loading = false;";
+    expect(scanText(element, "c").map(signal => signal.names)).toEqual([["loading", "rendered"]]);
+    const viewer = "this.booting = true;\nviewer.unavailable = false;\nthis.booting = false;\nviewer.unavailable = true;";
+    expect(scanText(viewer, "c").map(signal => signal.names)).toEqual([["booting", "unavailable"]]);
+    const report = 'record.steps[i]!.status = "running";\nrecord.steps[i]!.status = "passed";\nrecord.steps[index].status = "failed";';
+    expect(scanText(report, "c")).toEqual([{ kind: "status", names: ["status"], values: ["failed", "passed", "running"], lines: [1, 2, 3] }]);
+    expect(scanText("a.b == true;\nisDone !== false;\nconst f = () => true;\nx <= true;", "c")).toEqual([]);
+  });
+
+  test("reads extensionless and Expect scripts by their shebang", () => {
+    const script = "#!/usr/bin/env bash\nlocked=false\napplying=false\nlocked=true\napplying=true\n";
+    expect(language("bin/deploy")).toBe("maybe");
+    expect(language("bin/deploy", "#!/usr/bin/env bash")).toBe("hash");
+    expect(language("bin/deploy", "#!/bin/sh")).toBe("hash");
+    expect(language("bin/run", "#!/usr/bin/env -S python3 -u")).toBe("hash");
+    expect(language("LICENSE", "MIT License")).toBeUndefined();
+    expect(language("qemu.exp")).toBe("hash");
+    expect(language("bin/boot", "#!/usr/bin/expect -f")).toBe("hash");
+    expect(language("bin/run", "#!/usr/bin/env PYTHONPATH=. python3.13")).toBe("hash");
+    expect(language("bin/node", "#!/usr/bin/env node")).toBeUndefined();
+    expect(language("bin/shout", "#!/opt/shellac")).toBeUndefined();
+    // A long, unrecognized first line returns at once instead of backtracking.
+    const started = performance.now();
+    expect(language("blob", `#!${"/x".repeat(200_000)}`)).toBeUndefined();
+    expect(language("blob", `#!${"a".repeat(400_000)} b`)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(200);
+    // A real Expect script: flags and a status set with Tcl's `set`.
+    const expect_ = [
+      "#!/usr/bin/expect -f",
+      "set is_booted 0",
+      "set ::is_installing false",
+      "set phase fetch",
+      "proc install {} {",
+      "    set is_installing true",
+      '    set phase "install"',
+      "}",
+      "set is_booted 1",
+      "set is_installing false",
+      "set phase verify",
+      "set timeout 30",
+    ].join("\n");
+    const report = scanFile("qemu.exp", expect_);
+    expect(report?.signals).toEqual([
+      { kind: "flags", names: ["is_booted", "is_installing"], lines: [2, 3, 6, 9, 10] },
+      { kind: "status", names: ["phase"], values: ["fetch", "install", "verify"], lines: [4, 7, 11] },
+    ]);
+    // Shell `set` options are not assignments.
+    expect(scanText("set -euo pipefail\nset -x\nset +e", "hash")).toEqual([]);
+    expect(scanFile("bin/deploy", script)).toBeUndefined();
+    const flagged = "#!/usr/bin/env bash\nisLocked=false\nisApplying=false\nisLocked=true\nisApplying=true\n";
+    expect(scanFile("bin/deploy", flagged)?.signals[0]?.names).toEqual(["isApplying", "isLocked"]);
+    expect(scanFile("LICENSE", "isLocked=false\nisApplying=false\nisLocked=true\nisApplying=true")).toBeUndefined();
+  });
+
   test("ignores one flag, flags set only one way, guards, settings, comments and explicit unions", () => {
     expect(scanText("const [isLoading, setIsLoading] = useState(false);\nsetIsLoading(true);\nsetIsLoading(false);", "c")).toEqual([]);
     expect(scanText("let isDone = false;\nlet isReady = false;\nisDone = true;", "c")).toEqual([]);
