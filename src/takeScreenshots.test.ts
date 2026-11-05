@@ -4,7 +4,7 @@ import { existsSync, lstatSync, utimesSync, mkdirSync, mkdtempSync, readFileSync
 import os from "node:os";
 import path from "node:path";
 import {
-  acquireLock, artifactsRoot, claimNamespace, drainGroup, existingCase, processGroup, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
+  acquireLock, artifactsRoot, claimNamespace, drainGroup, existingCase, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
   type Runner, storeDir, targetFor, updateOwner,
 } from "../skills/take-screenshots/scripts/artifacts";
 
@@ -46,6 +46,13 @@ function repo(root: string, ignore: string, scripts: Record<string, string> = { 
   git(root, "commit", "-qm", "init");
   git(root, "remote", "add", "origin", "git@github.com:a2f0/app.git");
   return root;
+}
+
+/** A process's group id, from ps. */
+function processGroup(pid: number): number {
+  const value = Number(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim());
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`cannot read the process group of ${pid}`);
+  return value;
 }
 
 const output: string[] = [];

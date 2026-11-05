@@ -471,7 +471,7 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   if (!apply) return { ...base, before: state.state, action, ...(superseded ? { superseded } : {}) };
   // Recheck at apply time: another process may have linked or written since the plan.
   const current = linkState(target, artifacts);
-  if (current.state !== state.state || (current.state === "directory" && current.entries !== (state as { entries: number }).entries)) {
+  if (current.state !== state.state || (current.state === "directory" && state.state === "directory" && current.entries !== state.entries)) {
     return blocked(`${LINK} changed while planning; run link again`);
   }
   const claimed = claimNamespace(target, artifacts, true);
@@ -582,23 +582,13 @@ interface LockInfo {
   readonly startedAt: string;
 }
 
-/** A process's group id, from ps; undefined when it cannot be read. */
-export function processGroup(pid: number): number | undefined {
-  const result = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  const value = Number(result.stdout.trim());
-  return result.status === 0 && Number.isInteger(value) && value > 0 ? value : undefined;
-}
-
-function groupAlive(pgid: number): boolean {
-  try { process.kill(-pgid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
-}
-
 function readLock(file: string): LockInfo | undefined {
   try { return JSON.parse(readFileSync(file, "utf8")) as LockInfo; } catch { return undefined; }
 }
 
-function alive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+/** Whether a process, or with a negative id every process of a group, still runs. */
+function alive(id: number): boolean {
+  try { process.kill(id, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
 /**
@@ -621,7 +611,7 @@ export function acquireLock(file: string, info: LockInfo): () => void {
     if (held.host === info.host && !alive(held.pid)) {
       // A killed holder's capture children keep its process group and may still be writing.
       // The group can also hold the shell or agent that started it, so name it for a person to inspect; never suggest killing it.
-      if (held.pgid !== undefined && groupAlive(held.pgid)) {
+      if (held.pgid !== undefined && alive(-held.pgid)) {
         throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which died, but its process group ${held.pgid} still has processes that may be writing screenshots; inspect them with \`ps -o pid,command -g ${held.pgid}\`, stop any leftover capture processes, then remove the lock`);
       }
       throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which is no longer running (started ${held.startedAt} in ${held.checkout}); remove it, then capture again`);
@@ -671,7 +661,7 @@ const RUNNER: Runner = {
  * killed, so their output is incomplete; `stuck` that some still run.
  */
 export async function drainGroup(pgid: number, graceMs = 30_000, killMs = 10_000): Promise<"exited" | "stopped" | "stuck"> {
-  const empty = () => !groupAlive(pgid);
+  const empty = () => !alive(-pgid);
   const wait = async (ms: number) => {
     for (const deadline = Date.now() + ms; Date.now() < deadline; await new Promise(done => setTimeout(done, 100))) if (empty()) return true;
     return empty();
@@ -731,11 +721,12 @@ export async function capture(target: Target, artifacts: string, options: { appl
   const upstream = gitValue(target.root, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD");
   const merged = upstream ? git(target.root, "merge-base", "--is-ancestor", commit, upstream).status === 0 : null;
   const store = storeDir(target, artifacts);
+  const planned = readRecord(store);
   const plan: CapturePlan = {
     name: target.name, project: target.project, store,
     command: ["bun", "run", "screenshots", ...options.args].join(" "),
     commit, branch, dirty, merged,
-    ...(readRecord(store) ? { previous: readRecord(store)! } : {}),
+    ...(planned ? { previous: planned } : {}),
   };
   if (!options.apply) return plan;
   const startedAt = new Date().toISOString();
@@ -788,7 +779,11 @@ export async function capture(target: Target, artifacts: string, options: { appl
       const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
       if (moved) process.stderr.write(`${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`);
       if (!kept) process.stderr.write(`${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`);
-      const finished: CaptureRecord = { ...base, status: exitCode !== 0 || signal || !kept || moved || drained !== "exited" ? "failed" : inheritsIncomplete ? "incomplete" : "complete", finishedAt: new Date().toISOString(), exitCode };
+      const finalStatus = (): CaptureRecord["status"] => {
+        if (exitCode !== 0 || signal || !kept || moved || drained !== "exited") return "failed";
+        return inheritsIncomplete ? "incomplete" : "complete";
+      };
+      const finished: CaptureRecord = { ...base, status: finalStatus(), finishedAt: new Date().toISOString(), exitCode };
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
       Object.assign(plan, { applied: true, record: finished });
@@ -798,7 +793,7 @@ export async function capture(target: Target, artifacts: string, options: { appl
     return plan;
   } catch (error) {
     // Release only when no capture process can still be writing.
-    if (group === undefined || !groupAlive(group)) release();
+    if (group === undefined || !alive(-group)) release();
     throw error;
   } finally {
     process.off("SIGINT", hold);
@@ -846,10 +841,13 @@ function describeCapture(entry: StatusEntry): string {
   const record = entry.capture;
   if (!record) return "no capture recorded";
   const since = entry.sinceCapture!;
-  const where = since.relation === "current" ? "at HEAD"
-    : since.relation === "behind" ? `${since.commits} commit(s) behind HEAD`
-      : since.relation === "ahead" ? `${since.commits} commit(s) ahead of HEAD`
-        : since.relation === "diverged" ? "on a branch HEAD does not contain" : "commit not in this clone; fetch";
+  const where = {
+    current: "at HEAD",
+    behind: `${since.commits} commit(s) behind HEAD`,
+    ahead: `${since.commits} commit(s) ahead of HEAD`,
+    diverged: "on a branch HEAD does not contain",
+    unknown: "commit not in this clone; fetch",
+  }[since.relation];
   const flags = [record.dirty ? "dirty" : "", record.merged === false ? "unmerged" : "", record.args.length > 0 ? `partial: ${record.args.join(" ")}` : ""].filter(Boolean);
   return `${record.status} ${record.finishedAt ?? record.startedAt} at ${record.commit.slice(0, 10)}${record.branch ? ` (${record.branch})` : ""}, ${where}${flags.length ? `; ${flags.join(", ")}` : ""}`;
 }
