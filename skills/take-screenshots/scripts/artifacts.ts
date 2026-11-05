@@ -185,12 +185,20 @@ export function targetFor(root: string, project?: string, resolve: (root: string
 /** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
 export const OWNER = "repository.json";
 
+/**
+ * Replaces a file through a private, hidden temporary file beside it, so a
+ * reader never sees half a file and concurrent writers never share one.
+ */
+function writeAtomic(file: string, text: string, mode?: number): void {
+  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${process.hrtime.bigint()}.tmp`);
+  writeFileSync(temporary, text, { flag: "wx", ...(mode === undefined ? {} : { mode }) });
+  renameSync(temporary, file);
+}
+
 /** Adds a GitHub-confirmed remote name to the owner file, atomically, so offline clones still find the namespace. */
 function writeOwner(file: string, owner: Owner): void {
-  const temporary = `${file}.${process.pid}.${process.hrtime.bigint()}.tmp`;
   const body = { repo: owner.repo, ...(owner.aliases.length ? { aliases: owner.aliases } : {}), ...(owner.id ? { id: owner.id } : {}), ...(owner.explicit ? { explicit: true } : {}) };
-  writeFileSync(temporary, `${JSON.stringify(body)}\n`, { flag: "wx" });
-  renameSync(temporary, file);
+  writeAtomic(file, `${JSON.stringify(body)}\n`);
 }
 
 /**
@@ -627,17 +635,13 @@ export function acquireLock(file: string, info: LockInfo): () => void {
 /** Rewrites a lock this process holds, atomically. */
 function replaceLock(file: string, info: LockInfo): void {
   if (readLock(file)?.pid !== info.pid) throw new Error(`the capture lock ${file} is no longer this process's`);
-  const temporary = `${file}.${info.pid}.${process.hrtime.bigint()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(info)}\n`, { flag: "wx", mode: 0o644 });
-  renameSync(temporary, file);
+  writeAtomic(file, `${JSON.stringify(info)}\n`, 0o644);
 }
 
 /** Replace the record atomically, so a reader never sees half a file. */
 export function writeRecord(store: string, record: CaptureRecord): void {
   mkdirSync(store, { recursive: true });
-  const temporary = path.join(store, `.${RECORD}.${process.pid}.tmp`);
-  writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" });
-  renameSync(temporary, path.join(store, RECORD));
+  writeAtomic(path.join(store, RECORD), `${JSON.stringify(record, null, 2)}\n`);
 }
 
 export interface Runner {
