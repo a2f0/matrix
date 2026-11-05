@@ -2,15 +2,18 @@ import { spawnSync } from "node:child_process";
 import { existsSync, statfsSync, writeSync } from "node:fs";
 import path from "node:path";
 import { audit, registryReleases, selectRules } from "./audit";
-import { type CheckoutStatus, checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
+import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DiskSpace, markdownHealth } from "./health";
 import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
-import { deployAll, type Gh, runGh, secretsRoot } from "./secrets";
-import { type AgentToolTeardown, teardownAll } from "./teardown";
-import { knownCauses, listSweeps, markdownReport, parseUpdate, recordEntry, recordResolution, retro, startSweep, sweepReport } from "./sweeps";
+import { type Gh, runGh } from "./gh";
+import { deployAll, secretsRoot } from "./secrets";
+import { type AgentToolTeardown, isAgentToolTeardown, teardownAll } from "./teardown";
+import { listSweeps } from "./sweepLedger";
+import { knownCauses, recordResolution, retro } from "./sweepRetro";
+import { markdownReport, parseUpdate, recordEntry, startSweep, sweepReport } from "./sweeps";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -68,8 +71,10 @@ function teardown(root: string, directory: string, apply: boolean): AgentToolTea
   if (result.error) throw new Error(`agent-tool teardown could not run: ${result.error.message}`);
   // It exits 1 when something remains, with the same report.
   if (result.status !== 0 && result.status !== 1) throw new Error(`agent-tool teardown failed: ${(result.stderr || result.stdout).trim().split("\n").at(-1) ?? `exit ${result.status}`}`);
-  try { return JSON.parse(result.stdout) as AgentToolTeardown; }
-  catch { throw new Error(`agent-tool teardown printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`); }
+  let report: unknown;
+  try { report = JSON.parse(result.stdout); } catch { report = undefined; }
+  if (!isAgentToolTeardown(report)) throw new Error(`agent-tool teardown printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
+  return report;
 }
 
 function diskSpace(directory: string): DiskSpace {
@@ -123,7 +128,7 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
     const [branch, ...names] = positional;
     usage(branch !== undefined, "Usage: matrix sweep start <branch> [--topic text] [--issue owner/repo#n] [repo...]");
     const repos = selectRepos(manifest, names);
-    output(startSweep(root, branch!, repos, repo => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol)), { topic: values.topic, issue: values.issue }));
+    output(startSweep(root, branch!, repos, statusReader(root, manifest), { topic: values.topic, issue: values.issue }));
     return 0;
   }
   if (action === "record") {
@@ -160,9 +165,9 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
     usage(positional.length === 0 || values.last === undefined, "sweep retro takes branches or --last, not both.");
     output(retro(root, {
       branches: positional,
-      last: count(values.last, "last", 5),
-      minRepos: count(values["min-repos"], "min-repos", 2),
-      minSweeps: count(values["min-sweeps"], "min-sweeps", 2),
+      last: count(values.last, "last"),
+      minRepos: count(values["min-repos"], "min-repos"),
+      minSweeps: count(values["min-sweeps"], "min-sweeps"),
     }));
     return 0;
   }
@@ -181,18 +186,15 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
   if (!command || command === "--help" || command === "-h") { services.write(HELP); return 0; }
   const manifest = loadManifest(root);
   if (command === "sync" || command === "status") {
-    const option = args.find(arg => arg.startsWith("-"));
-    usage(option === undefined, `Unknown ${command} option '${option}'.`);
-    const repos = selectRepos(manifest, args);
+    const repos = selectRepos(manifest, parseOptions(args, {}, command).positional);
     if (command === "status") {
-      const checkouts = repos.map(repo => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol)));
-      const staleInstalls = checkouts.filter(checkout => checkout.agentTool && !checkout.agentTool.current).map(checkout => checkout.repo);
-      output({ ready: checkouts.every(checkout => checkout.ready), checkouts, staleInstalls, unmanaged: unmanagedCheckouts(root, manifest.repos) });
+      const checkouts = repos.map(statusReader(root, manifest));
+      output({ ready: checkouts.every(checkout => checkout.ready), checkouts, staleInstalls: staleInstalls(checkouts), unmanaged: unmanagedCheckouts(root, manifest.repos) });
       return 0;
     }
     const results = repos.map(repo => {
       const result = syncRepo(root, repo, cloneUrl(repo, manifest.protocol));
-      process.stderr.write(`${repo}: ${result.action}${result.reason ? ` (${result.reason})` : ""}\n`);
+      services.warn(`${repo}: ${result.action}${result.reason ? ` (${result.reason})` : ""}\n`);
       return result;
     });
     const ok = results.every(result => result.action !== "error");
@@ -200,8 +202,9 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
     return ok ? 0 : 1;
   }
   if (command === "discover") {
-    usage(args.length === 0 || (args.length === 1 && args[0] === "--apply"), "Usage: matrix discover [--apply]");
-    const apply = args[0] === "--apply";
+    const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "discover");
+    usage(positional.length === 0, "Usage: matrix discover [--apply]");
+    const apply = booleans.has("apply");
     const plan = planDiscovery(manifest, services.listOwnerRepos(manifest.discover));
     if (apply && plan.added.length > 0) {
       // Round-trip through validation so a discovered name collision fails before writing.
@@ -211,10 +214,8 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
     return 0;
   }
   if (command === "deploy-secrets") {
-    const apply = args.includes("--apply");
-    const names = args.filter(arg => arg !== "--apply");
-    const option = names.find(arg => arg.startsWith("-"));
-    usage(option === undefined, `Unknown deploy-secrets option '${option}'.`);
+    const { positional: names, booleans } = parseOptions(args, { apply: "boolean" }, "deploy-secrets");
+    const apply = booleans.has("apply");
     const secrets = secretsRoot(root);
     usage(existsSync(secrets), `Secrets folder ${secrets} does not exist; set MATRIX_SECRETS_DIR.`);
     const { ok, results } = deployAll(secrets, selectRepos(manifest, names), apply, gh);

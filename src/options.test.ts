@@ -23,7 +23,7 @@ test("rejects unknown, repeated, or incomplete options", () => {
 });
 
 test("reads positive integers", () => {
-  expect(count(undefined, "last", 5)).toBe(5);
-  expect(count("12", "last", 5)).toBe(12);
-  for (const value of ["0", "-1", "1.5", "two"]) expect(() => count(value, "last", 5)).toThrow("--last must be a positive integer.");
+  expect(count(undefined, "last")).toBeUndefined();
+  expect(count("12", "last")).toBe(12);
+  for (const value of ["0", "-1", "1.5", "two"]) expect(() => count(value, "last")).toThrow("--last must be a positive integer.");
 });

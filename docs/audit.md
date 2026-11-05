@@ -65,7 +65,7 @@ standard that a checkout's files can show, add its rule to `src/audit.ts` in the
 same change, with a fixture test and a row above, and name the rule where the
 guidance defines the standard; `bun run check` fails when the table and the
 rules disagree, and runs every local rule against matrix itself. When agent-tool replaces a documented command,
-add the old spelling to `SUPERSEDED`. Once a rule enforces something guidance
+add the old spelling to `SUPERSEDED` in `src/superseded.ts`. Once a rule enforces something guidance
 explains at length, shorten the guidance to the rule.
 
 A failure is evidence for a sweep, not authorization to change a checkout. When

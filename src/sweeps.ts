@@ -1,97 +1,26 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import type { CheckoutStatus } from "./checkouts";
-import { git, gitOutput } from "./git";
-import { repoName } from "./manifest";
-
-export const STATUSES = ["pending", "skipped", "unchanged", "in-progress", "open", "merged", "blocked", "failed"] as const;
-export type SweepStatus = (typeof STATUSES)[number];
-/** Statuses that still need work. `open` is final when a request stops at open PRs, so retro lists it separately. */
-const REMAINING: readonly SweepStatus[] = ["pending", "in-progress", "blocked"];
-
-/** Friction worth learning from: a step rerun, a substitute tool or reviewer, a declined finding, or a person's help. */
-export const EVENT_KINDS = ["retry", "fallback", "declined", "manual"] as const;
-export type EventKind = (typeof EVENT_KINDS)[number];
-export const VERDICTS = ["BLOCKER", "MAJOR", "MINOR", "SUGGESTION", "CLEAN"] as const;
-export type Verdict = (typeof VERDICTS)[number];
+import { type CheckoutStatus, notReady } from "./checkouts";
+import { findRepo } from "./manifest";
+import {
+  appendUpdate, type EntryUpdate, EVENT_KINDS, type EventKind, loadEntries, loadEntry, loadSweep, type RepoEntry, report,
+  STATUSES, type StoredUpdate, type Sweep, type SweepEvent, type SweepReport, sweepDirectory, VERDICTS, writeJson,
+} from "./sweepLedger";
 
 const CAUSE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-const PULL_REQUEST = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/[1-9][0-9]*$/;
+export const PULL_REQUEST = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/[1-9][0-9]*$/;
 const ISSUE = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+#[1-9][0-9]*$/;
-
-export interface Sweep {
-  readonly schemaVersion: 1;
-  readonly branch: string;
-  readonly topic?: string;
-  /** Tracking issue as owner/repo#number, when the request asked for one. */
-  readonly issue?: string;
-  readonly startedAt: string;
-  readonly repos: string[];
-}
-
-export interface SweepEvent {
-  readonly kind: EventKind;
-  /** A short kebab-case cause, such as `enospc`, that retro groups across repositories and sweeps. */
-  readonly cause: string;
-  readonly detail?: string;
-  readonly at: string;
-}
-
-export interface RepoEntry {
-  readonly repo: string;
-  readonly status: SweepStatus;
-  readonly reason?: string;
-  readonly base?: string;
-  readonly head?: string;
-  readonly pr?: string;
-  readonly merge?: string;
-  readonly validation?: string;
-  readonly reviewer?: string;
-  readonly verdict?: Verdict;
-  readonly deploy?: string;
-  readonly cleanup?: string;
-  readonly notes: string[];
-  readonly events: SweepEvent[];
-  readonly updatedAt: string;
-}
 
 const TEXT_FIELDS = ["reason", "validation", "reviewer", "deploy", "cleanup"] as const;
 const OID_FIELDS = ["base", "head", "merge"] as const;
 
-export interface EntryUpdate {
-  status?: SweepStatus;
-  reason?: string;
-  base?: string;
-  head?: string;
-  pr?: string;
-  merge?: string;
-  validation?: string;
-  reviewer?: string;
-  verdict?: Verdict;
-  deploy?: string;
-  cleanup?: string;
-  notes?: string[];
-  events?: Array<Omit<SweepEvent, "at">>;
-}
-
-export interface SweepReport {
-  readonly sweep: Sweep;
-  readonly updatedAt: string;
-  readonly counts: Partial<Record<SweepStatus, number>>;
-  /** Repositories still pending, in progress, or blocked. */
-  readonly remaining: string[];
-  readonly events: number;
-  readonly repos: RepoEntry[];
-}
-
-function oneOf<T extends string>(values: readonly T[], value: string, field: string): T {
+export function oneOf<T extends string>(values: readonly T[], value: string, field: string): T {
   if (!(values as readonly string[]).includes(value)) throw new Error(`--${field} must be one of ${values.join(", ")}.`);
   return value as T;
 }
 
-function text(value: string, field: string): string {
+export function text(value: string, field: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`--${field} must not be empty.`);
   return trimmed;
@@ -123,137 +52,6 @@ export function parseUpdate(values: Record<string, string>, lists: Record<string
   const events = EVENT_KINDS.flatMap(kind => (lists[kind] ?? []).map(value => parseEvent(kind, value)));
   if (events.length > 0) update.events = events;
   return update;
-}
-
-/** Ledgers live in the Git common directory, beside agent-tool's run receipts, so they are never committed. */
-export function sweepsDirectory(root: string): string {
-  return path.join(gitOutput(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), "matrix", "sweeps");
-}
-
-function checkBranch(root: string, branch: string): void {
-  if (branch.startsWith("-") || git(root, ["check-ref-format", `refs/heads/${branch}`]).status !== 0) {
-    throw new Error(`'${branch}' is not a valid branch name.`);
-  }
-}
-
-function sweepDirectory(root: string, branch: string): string {
-  checkBranch(root, branch);
-  // encodeURIComponent is injective, so distinct branch names never share a directory.
-  return path.join(sweepsDirectory(root), encodeURIComponent(branch));
-}
-
-/** Resolutions sit beside the ledgers, since one can close a cause seen across many sweeps. */
-function resolutionsDirectory(root: string): string { return path.join(path.dirname(sweepsDirectory(root)), "resolutions"); }
-
-/** One repository's numbered update files. */
-function entryDirectory(directory: string, repo: string): string { return path.join(directory, "repos", repoName(repo)); }
-
-function readJson<T>(file: string): T {
-  try { return JSON.parse(readFileSync(file, "utf8")) as T; } catch (error) {
-    throw new Error(`Could not read ${file}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-/** Write through a rename so a reader never sees a partial file. */
-function writeJson(file: string, value: unknown): void {
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temporary, file);
-}
-
-/** An update as stored: the fields it sets, the notes and events it adds, and when. */
-type StoredUpdate = EntryUpdate & { readonly at: string };
-
-const UPDATE = /^([0-9]+)\.json$/;
-
-/** Update files in append order. */
-function updateFiles(folder: string): string[] {
-  return readdirSync(folder).filter(name => UPDATE.test(name)).sort((left, right) => Number(UPDATE.exec(left)![1]) - Number(UPDATE.exec(right)![1]));
-}
-
-/**
- * Append an update as the next numbered file; recording never rewrites an earlier one.
- * A hard link publishes the complete file only if its number is still free, so
- * concurrent writers each take a distinct number and replay follows append order.
- */
-function appendUpdate(directory: string, repo: string, update: StoredUpdate): void {
-  const folder = entryDirectory(directory, repo);
-  mkdirSync(folder, { recursive: true, mode: 0o700 });
-  const temporary = path.join(folder, `.${randomUUID()}.tmp`);
-  writeFileSync(temporary, `${JSON.stringify(update, null, 2)}\n`, { mode: 0o600 });
-  try {
-    for (let sequence = updateFiles(folder).length + 1; ; sequence++) {
-      try {
-        linkSync(temporary, path.join(folder, `${String(sequence).padStart(6, "0")}.json`));
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-    }
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-/** Replay a repository's updates in append order. A new status without a reason clears the old reason. */
-function loadEntry(directory: string, repo: string): RepoEntry {
-  const folder = entryDirectory(directory, repo);
-  const updates = updateFiles(folder).map(name => readJson<StoredUpdate>(path.join(folder, name)));
-  let entry: Record<string, unknown> = { repo, status: "pending", notes: [], events: [], updatedAt: "" };
-  for (const update of updates) {
-    const { at, notes = [], events = [], ...fields } = update;
-    const previous = entry;
-    entry = { ...previous, ...fields };
-    if (fields.status !== undefined && fields.reason === undefined) delete entry.reason;
-    entry.notes = [...(previous.notes as string[]), ...notes];
-    entry.events = [...(previous.events as SweepEvent[]), ...events.map(event => ({ ...event, at }))];
-    entry.updatedAt = at;
-  }
-  return entry as unknown as RepoEntry;
-}
-
-function loadSweep(root: string, branch: string): { directory: string; sweep: Sweep } {
-  const directory = sweepDirectory(root, branch);
-  const file = path.join(directory, "sweep.json");
-  if (!existsSync(file)) throw new Error(`No sweep ledger for '${branch}'; run sweep start.`);
-  const sweep = readJson<Sweep>(file);
-  if (sweep.schemaVersion !== 1) throw new Error(`${file} has unsupported schemaVersion ${String(sweep.schemaVersion)}.`);
-  // Case-insensitive filesystems, such as macOS's default, map chore/Fix and chore/fix to one directory.
-  if (sweep.branch !== branch) throw new Error(`The ledger at ${directory} belongs to '${sweep.branch}', not '${branch}'.`);
-  return { directory, sweep };
-}
-
-function loadEntries(directory: string, sweep: Sweep): RepoEntry[] {
-  return sweep.repos.map(repo => loadEntry(directory, repo));
-}
-
-function plural(count: number, noun: string): string { return `${count} ${noun}${count === 1 ? "" : "s"}`; }
-
-/** Why a checkout cannot join a sweep yet, or undefined when it is ready. */
-export function notReady(status: CheckoutStatus): string | undefined {
-  if (status.error) return status.error;
-  if (!status.present) return "checkout missing; run sync";
-  if (status.branch === null) return "detached HEAD";
-  if (status.branch !== status.defaultBranch) return `on branch ${status.branch}`;
-  if (status.changes) return plural(status.changes, "local change");
-  if (status.ahead) return plural(status.ahead, "unpushed commit");
-  if (status.behind) return `${plural(status.behind, "commit")} behind origin; run sync`;
-  return undefined;
-}
-
-function report(sweep: Sweep, entries: RepoEntry[]): SweepReport {
-  const counts: Partial<Record<SweepStatus, number>> = {};
-  for (const entry of entries) counts[entry.status] = (counts[entry.status] ?? 0) + 1;
-  const updatedAt = entries.map(entry => entry.updatedAt).reduce((latest, at) => (at > latest ? at : latest), sweep.startedAt);
-  return {
-    sweep,
-    updatedAt,
-    counts,
-    remaining: entries.filter(entry => REMAINING.includes(entry.status)).map(entry => entry.repo),
-    events: entries.reduce((total, entry) => total + entry.events.length, 0),
-    repos: entries,
-  };
 }
 
 export interface StartOptions { topic?: string; issue?: string }
@@ -301,8 +99,7 @@ export function startSweep(root: string, branch: string, selected: string[], sta
 }
 
 function resolveRepo(sweep: Sweep, name: string): string {
-  const key = name.toLowerCase();
-  const repo = sweep.repos.find(candidate => candidate.toLowerCase() === key || repoName(candidate).toLowerCase() === key);
+  const repo = findRepo(sweep.repos, name);
   if (!repo) throw new Error(`'${name}' is not part of sweep '${sweep.branch}'.`);
   return repo;
 }
@@ -320,19 +117,6 @@ export function sweepReport(root: string, branch: string): SweepReport {
   return report(sweep, loadEntries(directory, sweep));
 }
 
-/** Every recorded sweep, newest first. */
-export function listSweeps(root: string): SweepReport[] {
-  const directory = sweepsDirectory(root);
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .map(name => path.join(directory, name))
-    .filter(folder => existsSync(path.join(folder, "sweep.json")))
-    .map(folder => {
-      const sweep = readJson<Sweep>(path.join(folder, "sweep.json"));
-      return report(sweep, loadEntries(folder, sweep));
-    })
-    .sort((left, right) => right.sweep.startedAt.localeCompare(left.sweep.startedAt) || left.sweep.branch.localeCompare(right.sweep.branch));
-}
 
 function cell(value: string | undefined): string { return (value ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|").trim(); }
 
@@ -360,130 +144,4 @@ export function markdownReport(result: SweepReport): string {
     lines.push(`| ${entry.repo} | ${entry.status} | ${pullLink(entry.pr)} | ${cell(review)} | ${cell(detail)} | ${cell(friction)} |`);
   }
   return `${lines.join("\n")}\n`;
-}
-
-/** How a recurring cause was resolved: a fix, guidance, or a recorded decision. */
-export interface Resolution {
-  readonly kind: EventKind;
-  readonly cause: string;
-  readonly resolution: string;
-  readonly pr?: string;
-  readonly at: string;
-}
-
-/** Record that a cause was resolved; retro stops listing it as recurring until it happens again. */
-export function recordResolution(root: string, kind: string, cause: string, resolution: string, pr?: string, now = new Date()): Resolution {
-  const event = parseEvent(oneOf(EVENT_KINDS, kind, "kind"), cause);
-  if (event.detail !== undefined) throw new Error(`Name the cause alone, such as '${event.cause}', without a detail.`);
-  if (pr !== undefined && !PULL_REQUEST.test(pr)) throw new Error("--pr must be a GitHub pull request URL.");
-  const value: Resolution = { kind: event.kind, cause: event.cause, resolution: text(resolution, "resolution"), ...(pr !== undefined && { pr }), at: now.toISOString() };
-  // A unique file per resolution, so concurrent writers never overwrite each other.
-  writeJson(path.join(resolutionsDirectory(root), `${now.getTime()}-${randomUUID()}.json`), value);
-  return value;
-}
-
-/** Every recorded resolution, oldest first. */
-export function listResolutions(root: string): Resolution[] {
-  const directory = resolutionsDirectory(root);
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter(name => name.endsWith(".json"))
-    .map(name => readJson<Resolution>(path.join(directory, name)))
-    .sort((left, right) => left.at.localeCompare(right.at));
-}
-
-/** Causes earlier ledgers used, by kind, so a new spelling of an old cause can be caught. */
-export function knownCauses(root: string): Map<EventKind, Set<string>> {
-  const known = new Map<EventKind, Set<string>>();
-  for (const { repos } of listSweeps(root)) {
-    for (const event of repos.flatMap(entry => entry.events)) {
-      const causes = known.get(event.kind) ?? new Set<string>();
-      causes.add(event.cause);
-      known.set(event.kind, causes);
-    }
-  }
-  return known;
-}
-
-export interface RetroOptions {
-  branches?: string[];
-  /** Newest sweeps to read when no branches are named. */
-  last?: number;
-  /** A cause recurs when it reaches this many repositories... */
-  minRepos?: number;
-  /** ...or this many sweeps. */
-  minSweeps?: number;
-}
-
-export interface Recurrence {
-  readonly kind: EventKind;
-  readonly cause: string;
-  readonly occurrences: number;
-  readonly repos: string[];
-  readonly sweeps: string[];
-  readonly details: string[];
-  /** When it last happened. */
-  readonly lastSeen: string;
-  /** The newest resolution recorded after it last happened. */
-  readonly resolution?: Resolution;
-}
-
-export interface Retro {
-  readonly sweeps: string[];
-  /** Causes that recur across repositories or sweeps and have no resolution since: each needs a lesson, fix, or recorded decision. */
-  readonly recurring: Recurrence[];
-  /** Recurring causes resolved after they last happened. */
-  readonly resolved: Recurrence[];
-  readonly isolated: Recurrence[];
-  readonly reviews: { verdicts: Partial<Record<Verdict, number>>; reviewers: Record<string, number> };
-  /** Entries left pending, in progress, blocked, or with an open PR. */
-  readonly unfinished: Array<{ branch: string; repo: string; status: SweepStatus; reason?: string; pr?: string }>;
-}
-
-/** Group friction across sweeps so recurring causes surface as lesson candidates. */
-export function retro(root: string, options: RetroOptions = {}): Retro {
-  const { branches = [], last = 5, minRepos = 2, minSweeps = 2 } = options;
-  const reports = branches.length > 0 ? branches.map(branch => sweepReport(root, branch)) : listSweeps(root).slice(0, last);
-  const groups = new Map<string, { kind: EventKind; cause: string; occurrences: number; repos: Set<string>; sweeps: Set<string>; details: string[]; lastSeen: string }>();
-  const verdicts: Partial<Record<Verdict, number>> = {};
-  const reviewers: Record<string, number> = {};
-  const unfinished: Retro["unfinished"] = [];
-  for (const { sweep, repos } of reports) {
-    for (const entry of repos) {
-      for (const event of entry.events) {
-        const key = `${event.kind}:${event.cause}`;
-        const group = groups.get(key) ?? { kind: event.kind, cause: event.cause, occurrences: 0, repos: new Set(), sweeps: new Set(), details: [], lastSeen: event.at };
-        group.occurrences++;
-        if (event.at > group.lastSeen) group.lastSeen = event.at;
-        group.repos.add(entry.repo);
-        group.sweeps.add(sweep.branch);
-        if (event.detail) group.details.push(`${sweep.branch} ${entry.repo}: ${event.detail}`);
-        groups.set(key, group);
-      }
-      if (entry.verdict) verdicts[entry.verdict] = (verdicts[entry.verdict] ?? 0) + 1;
-      if (entry.reviewer) reviewers[entry.reviewer] = (reviewers[entry.reviewer] ?? 0) + 1;
-      if (REMAINING.includes(entry.status) || entry.status === "open") {
-        unfinished.push({ branch: sweep.branch, repo: entry.repo, status: entry.status, ...(entry.reason && { reason: entry.reason }), ...(entry.pr && { pr: entry.pr }) });
-      }
-    }
-  }
-  const resolutions = listResolutions(root);
-  const recurrences: Recurrence[] = [...groups.values()]
-    .map(group => {
-      const resolution = resolutions.filter(entry => entry.kind === group.kind && entry.cause === group.cause && entry.at > group.lastSeen).at(-1);
-      return {
-        kind: group.kind, cause: group.cause, occurrences: group.occurrences, repos: [...group.repos].sort(), sweeps: [...group.sweeps].sort(),
-        details: group.details, lastSeen: group.lastSeen, ...(resolution && { resolution }),
-      };
-    })
-    .sort((left, right) => right.occurrences - left.occurrences || `${left.kind}:${left.cause}`.localeCompare(`${right.kind}:${right.cause}`));
-  const recurs = (group: Recurrence) => group.repos.length >= minRepos || group.sweeps.length >= minSweeps;
-  return {
-    sweeps: reports.map(({ sweep }) => sweep.branch),
-    recurring: recurrences.filter(group => recurs(group) && !group.resolution),
-    resolved: recurrences.filter(group => recurs(group) && group.resolution),
-    isolated: recurrences.filter(group => !recurs(group)),
-    reviews: { verdicts, reviewers },
-    unfinished,
-  };
 }

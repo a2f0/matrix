@@ -94,7 +94,7 @@ export function linkTargets(source: string): string[] {
 }
 
 /** GitHub's anchor for a heading: lowercase, punctuation removed, spaces as hyphens. */
-export function anchor(text: string): string {
+function anchor(text: string): string {
   return text.replace(/`/g, "").trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "").replace(/ /g, "-");
 }
 

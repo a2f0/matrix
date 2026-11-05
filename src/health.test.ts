@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { Audit } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
 import { assessHealth, markdownHealth } from "./health";
-import type { Retro } from "./sweeps";
+import type { Retro } from "./sweepRetro";
 
 function status(repo: string, overrides: Partial<CheckoutStatus> = {}): CheckoutStatus {
   return { repo, path: `checkouts/${repo.split("/")[1]}`, present: true, ready: true, branch: "main", defaultBranch: "main", head: "a".repeat(40), changes: 0, ahead: 0, behind: 0, ...overrides };

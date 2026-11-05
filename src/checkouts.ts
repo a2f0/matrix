@@ -2,6 +2,8 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import path from "node:path";
 import { git, gitOutput, gitSucceeds } from "./git";
 import { CHECKOUTS, checkoutPath, parseGitHubRepo, repoName } from "./manifest";
+import { AGENT_TOOL, dependency, parseObject } from "./packageJson";
+import { errorMessage, plural } from "./text";
 
 export interface SyncResult {
   readonly repo: string;
@@ -32,14 +34,12 @@ export interface CheckoutStatus {
   readonly error?: string;
 }
 
-export interface AgentToolInstall {
+interface AgentToolInstall {
   readonly pinned: string;
   /** Null when node_modules has no agent-tool package. */
   readonly installed: string | null;
   readonly current: boolean;
 }
-
-function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 /** Drop URL userinfo, query, and fragment so a credential-bearing remote never reaches output. */
 export function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, ""); }
@@ -97,27 +97,14 @@ function changeCount(directory: string): number {
   return status.length + hidden.length;
 }
 
-const AGENT_TOOL = "@a2f0/agent-tool";
-
 function packageJson(file: string): Record<string, unknown> | undefined {
-  try {
-    const value: unknown = JSON.parse(readFileSync(file, "utf8"));
-    return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-  } catch { return undefined; }
-}
-
-function dependency(manifest: Record<string, unknown>, name: string): string | undefined {
-  for (const field of ["devDependencies", "dependencies"]) {
-    const version = (manifest[field] as Record<string, unknown> | undefined)?.[name];
-    if (typeof version === "string") return version;
-  }
-  return undefined;
+  try { return parseObject(readFileSync(file, "utf8")); } catch { return undefined; }
 }
 
 /** Sync updates sources but never installs, so node_modules can lag the pin that scripts expect. */
 function agentToolInstall(directory: string): AgentToolInstall | undefined {
   const manifest = packageJson(path.join(directory, "package.json"));
-  const pinned = manifest && dependency(manifest, AGENT_TOOL);
+  const pinned = dependency(manifest, AGENT_TOOL);
   if (pinned === undefined) return undefined;
   const version = packageJson(path.join(directory, "node_modules", AGENT_TOOL, "package.json"))?.version;
   const installed = typeof version === "string" ? version : null;
@@ -162,7 +149,7 @@ export function syncRepo(root: string, repo: string, url: string): SyncResult {
     gitOutput(directory, ["merge", "--quiet", "--ff-only", "--no-overwrite-ignore", remote]);
     return { ...state, action: "updated", head: remote };
   } catch (error) {
-    return { ...base, action: "error", reason: message(error) };
+    return { ...base, action: "error", reason: errorMessage(error) };
   }
 }
 
@@ -178,12 +165,29 @@ export function checkoutStatus(root: string, repo: string, url: string): Checkou
     const changes = changeCount(directory);
     const counts = gitOutput(directory, ["rev-list", "--left-right", "--count", `HEAD...refs/remotes/origin/${state.defaultBranch}`]);
     const [ahead = 0, behind = 0] = counts.split(/\s+/).map(Number);
-    const ready = state.branch === state.defaultBranch && changes === 0 && ahead === 0 && behind === 0;
     const agentTool = agentToolInstall(directory);
-    return { ...base, present: true, ready, ...state, changes, ahead, behind, ...(agentTool && { agentTool }) };
+    const details = { ...state, changes, ahead, behind, ...(agentTool && { agentTool }) };
+    return { ...base, present: true, ready: notReady({ ...base, present: true, ...details }) === undefined, ...details };
   } catch (error) {
-    return { ...base, present: true, ready: false, error: message(error) };
+    return { ...base, present: true, ready: false, error: errorMessage(error) };
   }
+}
+
+/** Why a checkout cannot join a sweep yet, or undefined when it is ready. */
+export function notReady(status: Omit<CheckoutStatus, "ready">): string | undefined {
+  if (status.error) return status.error;
+  if (!status.present) return "checkout missing; run sync";
+  if (status.branch === null) return "detached HEAD";
+  if (status.branch !== status.defaultBranch) return `on branch ${status.branch}`;
+  if (status.changes) return plural(status.changes, "local change");
+  if (status.ahead) return plural(status.ahead, "unpushed commit");
+  if (status.behind) return `${plural(status.behind, "commit")} behind origin; run sync`;
+  return undefined;
+}
+
+/** Checkouts whose node_modules hold a different agent-tool than they pin. */
+export function staleInstalls(statuses: CheckoutStatus[]): string[] {
+  return statuses.filter(status => status.agentTool && !status.agentTool.current).map(status => status.repo);
 }
 
 /** Entries under checkouts/ that matrix.json does not manage. They are reported, never removed. */

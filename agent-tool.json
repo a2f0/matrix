@@ -40,12 +40,15 @@
       {
         "name": "primitives",
         "include": [
+          "src/gh.ts",
           "src/git.ts",
           "src/manifest.ts",
           "src/markdown.ts",
           "src/options.ts",
+          "src/packageJson.ts",
           "src/teardown.ts",
-          "src/testSetup.ts"
+          "src/testSetup.ts",
+          "src/text.ts"
         ]
       },
       {
@@ -58,9 +61,14 @@
         "name": "commands",
         "include": [
           "src/audit.ts",
+          "src/auditCheckout.ts",
+          "src/cycleGuards.ts",
           "src/discover.ts",
           "src/gitTransport.ts",
           "src/secrets.ts",
+          "src/superseded.ts",
+          "src/sweepLedger.ts",
+          "src/sweepRetro.ts",
           "src/sweeps.ts"
         ]
       },

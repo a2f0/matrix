@@ -3,6 +3,9 @@
 // inspected with the workspace's own pinned agent-tool (`--repo <checkout>`), which behaves the
 // same whatever a checkout pins.
 
+import { object } from "./packageJson";
+import { errorMessage } from "./text";
+
 /** What agent-tool's `teardown` reports for one repository; only the fields matrix reads. */
 export interface AgentToolTeardown {
   ok: boolean;
@@ -15,7 +18,7 @@ export interface AgentToolTeardown {
   skipped: Array<{ file: string }>;
 }
 
-export interface RepoTeardown {
+interface RepoTeardown {
   readonly repo: string;
   readonly path: string;
   readonly ok: boolean;
@@ -35,9 +38,16 @@ export interface Teardown {
   readonly repos: RepoTeardown[];
 }
 
+/** Whether parsed JSON has the shape of agent-tool's teardown report, checked as far as matrix reads it. */
+export function isAgentToolTeardown(value: unknown): value is AgentToolTeardown {
+  const report = object(value);
+  return typeof report?.ok === "boolean"
+    && [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray);
+}
+
 const name = (item: { id: string; label: string | null }) => item.label ? `${item.label} (${item.id})` : item.id;
 
-export function summarize(repo: string, path: string, report: AgentToolTeardown): RepoTeardown {
+function summarize(repo: string, path: string, report: AgentToolTeardown): RepoTeardown {
   return {
     repo,
     path,
@@ -63,7 +73,7 @@ export function teardownAll(targets: Array<{ repo: string; path: string }>, insp
   const repos = targets.map(({ repo, path }) => {
     try { return summarize(repo, path, inspect(path, apply)); }
     catch (error) {
-      return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [(error as Error).message] };
+      return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [errorMessage(error)] };
     }
   });
   return { ok: repos.every(item => item.ok), applied: apply, repos };

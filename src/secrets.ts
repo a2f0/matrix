@@ -1,15 +1,14 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { type Gh, runGh } from "./gh";
 import { repoName } from "./manifest";
+import { errorMessage } from "./text";
 
 const KINDS = { secret: "secrets.env", variable: "variables.env" } as const;
 type Kind = keyof typeof KINDS;
 const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
 
-export type Gh = (args: string[]) => string;
-
-export interface CiFile {
+interface CiFile {
   /** Repository settings this file manages; set on apply, never deleted. */
   deploy: string[];
   /** Settings already on GitHub that this file does not name; left untouched. */
@@ -30,17 +29,6 @@ export interface DeployResult {
 /** The workspace's secrets folder: MATRIX_SECRETS_DIR, or matrix-secrets beside the matrix repository. */
 export function secretsRoot(root: string, env: NodeJS.ProcessEnv = process.env): string {
   return path.resolve(env.MATRIX_SECRETS_DIR || path.join(root, "..", "matrix-secrets"));
-}
-
-export function runGh(args: string[]): string {
-  const result = spawnSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (result.error) throw new Error(`Could not run gh: ${result.error.message}`);
-  if (result.status !== 0) {
-    // gh can quote the file it was setting from, so a failed set reports no output.
-    const detail = args[1] === "set" ? `exit ${result.status}; output withheld because it can contain values` : result.stderr.trim();
-    throw new Error(`gh ${args.slice(0, 2).join(" ")} failed (${detail}).`);
-  }
-  return result.stdout;
 }
 
 /**
@@ -73,7 +61,7 @@ export function dotenvNames(source: string, file: string): string[] {
     if (/^\s*(?:#.*)?$/.test(line)) continue;
     const match = ASSIGNMENT.exec(line);
     if (!match) throw new Error(`${file}:${index + 1} is not a NAME=value line.`);
-    const [, name, value] = match as unknown as [string, string, string];
+    const [, name, value] = match;
     if (/^GITHUB_/i.test(name)) throw new Error(`${file}:${index + 1}: GitHub reserves names that start with GITHUB_.`);
     // GitHub names are case-insensitive, so TOKEN and token are one setting.
     if (seen.has(name.toUpperCase())) throw new Error(`${file}:${index + 1}: ${name} is assigned twice.`);
@@ -117,13 +105,11 @@ export function deploySecrets(secrets: string, repo: string, apply: boolean, gh:
       gh([kind, "set", "--repo", repo, "--env-file", file]);
       plan.applied = true;
     } catch (error) {
-      return { ...result, error: message(error) };
+      return { ...result, error: errorMessage(error) };
     }
   }
   return result;
 }
-
-function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 /** Deploy each repository in turn, recording a failure without hiding the others' results. */
 export function deployAll(secrets: string, repos: string[], apply: boolean, gh: Gh = runGh): { ok: boolean; results: DeployResult[] } {
@@ -131,7 +117,7 @@ export function deployAll(secrets: string, repos: string[], apply: boolean, gh: 
     try {
       return deploySecrets(secrets, repo, apply, gh);
     } catch (error) {
-      return { repo, error: message(error) };
+      return { repo, error: errorMessage(error) };
     }
   });
   return { ok: results.every(result => result.error === undefined), results };
