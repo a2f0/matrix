@@ -198,3 +198,16 @@ test("sweep record warns about a new cause, and resolve quiets a recurring one",
   expect(() => main(["sweep", "resolve", "rerun", "machine-load", "--resolution", "x"], root, undefined, services)).toThrow("--kind must be one of");
   expect(() => main(["sweep", "resolve", "retry", "machine-load:detail", "--resolution", "x"], root, undefined, services)).toThrow("without a detail");
 });
+
+test("status, discover, and deploy-secrets parse options like every other command", () => {
+  const { services, writes } = fakeServices();
+  expect(() => main(["status", "--apply"], root, undefined, services)).toThrow("Unknown status option '--apply'.");
+  expect(() => main(["sync", "-n"], root, undefined, services)).toThrow("Unknown sync option '-n'.");
+  expect(() => main(["discover", "good"], root, undefined, services)).toThrow("Usage: matrix discover [--apply]");
+  expect(() => main(["deploy-secrets", "--force"], root, undefined, services)).toThrow("Unknown deploy-secrets option '--force'.");
+  expect(main(["status", "good"], root, undefined, services)).toBe(0);
+  expect(JSON.parse(writes.join(""))).toMatchObject({ ready: true, checkouts: [{ repo: "a2f0/good", ready: true }], staleInstalls: ["a2f0/good"] });
+  writes.length = 0;
+  expect(main(["discover"], root, undefined, services)).toBe(0);
+  expect(JSON.parse(writes.join(""))).toEqual({ applied: false, added: ["a2f0/new"], notDiscovered: [] });
+});

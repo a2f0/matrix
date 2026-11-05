@@ -126,7 +126,7 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
     const [branch, ...names] = positional;
     usage(branch !== undefined, "Usage: matrix sweep start <branch> [--topic text] [--issue owner/repo#n] [repo...]");
     const repos = selectRepos(manifest, names);
-    output(startSweep(root, branch!, repos, repo => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol)), { topic: values.topic, issue: values.issue }));
+    output(startSweep(root, branch!, repos, statusReader(root, manifest), { topic: values.topic, issue: values.issue }));
     return 0;
   }
   if (action === "record") {
@@ -163,9 +163,9 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
     usage(positional.length === 0 || values.last === undefined, "sweep retro takes branches or --last, not both.");
     output(retro(root, {
       branches: positional,
-      last: count(values.last, "last", 5),
-      minRepos: count(values["min-repos"], "min-repos", 2),
-      minSweeps: count(values["min-sweeps"], "min-sweeps", 2),
+      last: count(values.last, "last"),
+      minRepos: count(values["min-repos"], "min-repos"),
+      minSweeps: count(values["min-sweeps"], "min-sweeps"),
     }));
     return 0;
   }
@@ -184,17 +184,15 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
   if (!command || command === "--help" || command === "-h") { services.write(HELP); return 0; }
   const manifest = loadManifest(root);
   if (command === "sync" || command === "status") {
-    const option = args.find(arg => arg.startsWith("-"));
-    usage(option === undefined, `Unknown ${command} option '${option}'.`);
-    const repos = selectRepos(manifest, args);
+    const repos = selectRepos(manifest, parseOptions(args, {}, command).positional);
     if (command === "status") {
-      const checkouts = repos.map(repo => checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol)));
+      const checkouts = repos.map(statusReader(root, manifest));
       output({ ready: checkouts.every(checkout => checkout.ready), checkouts, staleInstalls: staleInstalls(checkouts), unmanaged: unmanagedCheckouts(root, manifest.repos) });
       return 0;
     }
     const results = repos.map(repo => {
       const result = syncRepo(root, repo, cloneUrl(repo, manifest.protocol));
-      process.stderr.write(`${repo}: ${result.action}${result.reason ? ` (${result.reason})` : ""}\n`);
+      services.warn(`${repo}: ${result.action}${result.reason ? ` (${result.reason})` : ""}\n`);
       return result;
     });
     const ok = results.every(result => result.action !== "error");
@@ -202,8 +200,9 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
     return ok ? 0 : 1;
   }
   if (command === "discover") {
-    usage(args.length === 0 || (args.length === 1 && args[0] === "--apply"), "Usage: matrix discover [--apply]");
-    const apply = args[0] === "--apply";
+    const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "discover");
+    usage(positional.length === 0, "Usage: matrix discover [--apply]");
+    const apply = booleans.has("apply");
     const plan = planDiscovery(manifest, services.listOwnerRepos(manifest.discover));
     if (apply && plan.added.length > 0) {
       // Round-trip through validation so a discovered name collision fails before writing.
@@ -213,10 +212,8 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
     return 0;
   }
   if (command === "deploy-secrets") {
-    const apply = args.includes("--apply");
-    const names = args.filter(arg => arg !== "--apply");
-    const option = names.find(arg => arg.startsWith("-"));
-    usage(option === undefined, `Unknown deploy-secrets option '${option}'.`);
+    const { positional: names, booleans } = parseOptions(args, { apply: "boolean" }, "deploy-secrets");
+    const apply = booleans.has("apply");
     const secrets = secretsRoot(root);
     usage(existsSync(secrets), `Secrets folder ${secrets} does not exist; set MATRIX_SECRETS_DIR.`);
     const { ok, results } = deployAll(secrets, selectRepos(manifest, names), apply, gh);

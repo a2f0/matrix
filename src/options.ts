@@ -39,9 +39,9 @@ export function parseOptions(args: string[], spec: Record<string, FlagKind>, com
   return parsed;
 }
 
-/** A positive integer option, or the default when absent. */
-export function count(value: string | undefined, name: string, fallback: number): number {
-  if (value === undefined) return fallback;
+/** A positive integer option, or undefined when absent so the command's own default applies. */
+export function count(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
   if (!/^[1-9][0-9]*$/.test(value)) throw new Error(`--${name} must be a positive integer.`);
   return Number(value);
 }
