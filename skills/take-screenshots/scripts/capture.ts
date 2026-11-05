@@ -242,12 +242,34 @@ interface RunOutcome {
 
 /** The record of a finished capture, after checking that the clone still shows the planned commit through the link. */
 function finishedRecord(target: Target, artifacts: string, plan: CapturePlan, base: Omit<CaptureRecord, "status">, outcome: RunOutcome): CaptureRecord {
-  const { commit, dirty } = plan;
   const { exitCode, signal, drained, inheritsIncomplete } = outcome;
-  // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
-  const kept = linkState(target, artifacts).state === "linked";
-  // The record names one commit: a branch switch or new edit mid-capture makes that untrue.
-  const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
+  const shows = showsPlannedCommit(target, artifacts, plan);
+  const finalStatus = (): CaptureRecord["status"] => {
+    if (exitCode !== 0 || signal || !shows || drained !== "exited") return "failed";
+    return inheritsIncomplete ? "incomplete" : "complete";
+  };
+  return { ...base, status: finalStatus(), finishedAt: new Date().toISOString(), exitCode };
+}
+
+/**
+ * Whether the clone still shows the planned commit through the link, saying why when it does not.
+ * A check that fails proves nothing, so it counts as not showing it: the record must still be written.
+ */
+function showsPlannedCommit(target: Target, artifacts: string, plan: CapturePlan): boolean {
+  const { commit, dirty } = plan;
+  let kept: boolean;
+  let moved: boolean;
+  try {
+    // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
+    kept = linkState(target, artifacts).state === "linked";
+    // The record names one commit: a branch switch or new edit mid-capture makes that untrue.
+    moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
+  } catch (error) {
+    process.stderr.write(
+      `Could not check ${target.name} after the capture (${error instanceof Error ? error.message : String(error)}), so it fails; capture again.\n`,
+    );
+    return false;
+  }
   if (moved)
     process.stderr.write(
       `${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`,
@@ -256,9 +278,5 @@ function finishedRecord(target: Target, artifacts: string, plan: CapturePlan, ba
     process.stderr.write(
       `${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`,
     );
-  const finalStatus = (): CaptureRecord["status"] => {
-    if (exitCode !== 0 || signal || !kept || moved || drained !== "exited") return "failed";
-    return inheritsIncomplete ? "incomplete" : "complete";
-  };
-  return { ...base, status: finalStatus(), finishedAt: new Date().toISOString(), exitCode };
+  return kept && !moved;
 }

@@ -335,6 +335,28 @@ describe("take-screenshots artifacts", () => {
     expect(readRecord(store)).toMatchObject({ status: "complete", dirty: true, over: { dirty: true } });
   });
 
+  test("a git failure while settling a capture records it failed, never leaving it running", async () => {
+    const { home, app } = workspace();
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const store = path.join(home, "matrix-artifacts/app/screenshots");
+    const index = path.join(app, ".git/index");
+    const saved = readFileSync(index);
+    // HEAD still resolves, but the dirty check cannot read the index.
+    const corrupting: Runner = {
+      async capture() {
+        writeFileSync(index, "corrupt");
+        return { code: 0 };
+      },
+    };
+    expect(await main(["capture", "--apply"], app, corrupting, print)).toBe(1);
+    expect(readRecord(store)).toMatchObject({ status: "failed", exitCode: 0 });
+    expect(readRecord(store)?.finishedAt).toEqual(expect.any(String));
+    expect(existsSync(path.join(home, "matrix-artifacts/app", LOCK))).toBe(false);
+    writeFileSync(index, saved);
+    expect(await main(["capture", "--apply"], app, { capture: async () => ({ code: 0 }) }, print)).toBe(0);
+    expect(readRecord(store)?.status).toBe("complete");
+  });
+
   test("ignores inherited variables that bind git to other configuration or repositories", async () => {
     const { home, app } = workspace();
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
