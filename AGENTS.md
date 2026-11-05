@@ -60,6 +60,9 @@ clone's gitignored `.secrets`; `docs/secrets.md` covers layout, backups, CI
 deployment, Sentry MCP. Never read, print, log, or commit secret values; names
 are fine. Change that folder only on request, and back it up first.
 
+Git reaches GitHub only over SSH, never HTTPS, even when port 22 times out
+([setup](docs/health.md#github-over-ssh)).
+
 ## Checking standards
 
 `bun run audit [repo...]` checks every checkout against the standards below
@@ -255,11 +258,9 @@ directories can make delegated agents stop for permission prompts.
    These commands validate refs, avoid local upstream inheritance, and preserve
    normal hooks. Use the checkout's own pinned CLI; the audit's
    `agent-tool-pin` rule confirms every pin has these commands. Run the
-   checkout's documented setup before committing so its hooks run. Agent shells
-   do not activate mise's per-directory tools, so the
-   default Bun, Node, or Terraform can differ from a checkout's pins; put the
-   pinned versions under `~/.local/share/mise/installs` first on `PATH` instead
-   of running `mise trust`. Commit only the sweep's change.
+   checkout's documented setup before committing so its hooks run. Put its
+   pinned tools from `~/.local/share/mise/installs` first on `PATH`, since agent
+   shells ignore mise; do not run `mise trust`. Commit only the sweep's change.
 5. Ship each checkout independently with the `ship-pr` workflow. Use the
    checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
    `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.

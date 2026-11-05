@@ -37,6 +37,7 @@ function checkout(name: string, files: Record<string, string | null> = {}): stri
     writeFileSync(path.join(directory, file), content);
   }
   execFileSync("git", ["add", "-A"], { cwd: directory });
+  execFileSync("git", ["remote", "add", "origin", `git@github.com:a2f0/${name}.git`], { cwd: directory });
   return `a2f0/${name}`;
 }
 
@@ -288,13 +289,32 @@ describe("audit", () => {
       "docs/shipping.md": "Run `git push -u origin HEAD`, then `gh pr checks 12 --watch`.\nOr `git push origin --delete feat/x`.\n",
       "docs/cleanup.md": "Delete atomically: `git push --force-with-lease=refs/heads/x:abc --delete origin x`.\n",
       "scripts/ship.sh": "gh pr checks --watch\n",
+      "docs/network.md": "Force HTTPS: `GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:`.\n",
     });
     expect(failures(repo)["superseded-guidance"]).toBe([
       "review-reply-endpoint at AGENTS.md:7 (use agent-tool pr threads reply)",
       "pr-checks-watch at docs/shipping.md:1 (use agent-tool pr checks --wait)",
       "push-head-upstream at docs/shipping.md:1 (use agent-tool branch push <reviewed-head> --remote origin)",
       "push-delete at docs/shipping.md:2 (use agent-tool repo cleanup)",
+      "https-insteadof at docs/network.md:1 (use SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh))",
     ].join("; "));
+  });
+
+  test("requires origin to fetch and push over SSH", () => {
+    const repo = checkout("https");
+    const directory = path.join(root, "checkouts", "https");
+    execFileSync("git", ["remote", "set-url", "origin", "https://token@github.com/a2f0/https.git"], { cwd: directory });
+    expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin fetches over https://github.com/a2f0/https.git; use git@github.com:a2f0/https.git; origin pushes over https://github.com/a2f0/https.git; use git@github.com:a2f0/https.git" });
+    execFileSync("git", ["remote", "set-url", "origin", "git@github.com:a2f0/https.git"], { cwd: directory });
+    execFileSync("git", ["remote", "set-url", "--push", "origin", "https://github.com/a2f0/https.git"], { cwd: directory });
+    expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin pushes over https://github.com/a2f0/https.git; use git@github.com:a2f0/https.git" });
+    execFileSync("git", ["remote", "set-url", "--push", "origin", "ssh://git@ssh.github.com:443/a2f0/https.git"], { cwd: directory });
+    expect(failures(repo, ["origin-ssh"])).toEqual({});
+    // Git pushes to every push URL, so a second HTTPS one fails too.
+    execFileSync("git", ["remote", "set-url", "--add", "--push", "origin", "https://github.com/a2f0/mirror.git"], { cwd: directory });
+    expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin pushes over https://github.com/a2f0/mirror.git; use git@github.com:a2f0/https.git" });
+    execFileSync("git", ["remote", "remove", "origin"], { cwd: directory });
+    expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "no origin fetch URL; no origin push URL" });
   });
 
   test("rejects unknown rules", () => {

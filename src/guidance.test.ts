@@ -108,7 +108,8 @@ describe("guidance", () => {
     const context = { releases: () => { throw new Error("remote rules do not run here"); } };
     const failures = RULES
       // Matrix, like agent-tool, is agent tooling, so its README describes the skills it installs.
-      .filter(rule => !rule.remote && !["superseded-guidance", "readme-agent-free"].includes(rule.id))
+      // origin-ssh reads this clone's remote, not committed files; CI's checkout clones over HTTPS.
+      .filter(rule => !rule.remote && !["superseded-guidance", "readme-agent-free", "origin-ssh"].includes(rule.id))
       .flatMap(rule => {
         const outcome = rule.check(checkout, context);
         return outcome.status === "fail" ? [`${rule.id}: ${outcome.detail}`] : [];

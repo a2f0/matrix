@@ -4,6 +4,7 @@ import path from "node:path";
 import { audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
+import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DiskSpace, markdownHealth } from "./health";
 import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
@@ -58,6 +59,8 @@ export interface Services {
   diskSpace(directory: string): DiskSpace;
   /** agent-tool's `teardown` for one repository, run with the workspace's pinned agent-tool. */
   teardown(root: string, directory: string, apply: boolean): AgentToolTeardown;
+  /** How this machine's Git and gh reach GitHub. */
+  gitTransport(root: string): GitTransport;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -81,6 +84,7 @@ const SERVICES: Services = {
   registryReleases,
   diskSpace,
   teardown,
+  gitTransport: root => inspectGitTransport(root),
 };
 
 /** The workspace, then every checkout present, or only the named checkouts. */
@@ -235,6 +239,7 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
       audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry(services)),
       retro: retro(root),
       disk: services.diskSpace(root),
+      git: services.gitTransport(root),
       running: teardownAll(teardownTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
       ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
     });

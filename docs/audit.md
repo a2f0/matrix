@@ -36,6 +36,7 @@ first and check `branch` for checkouts that are not on their default branch.
 | `screenshots-gallery` | With a `screenshots` package script and an Astro site: a `screenshots` target in `agent-tool.json`, a package script that runs `agent-tool screenshots build`, and no copy of the capture guard (`withSharedCapture`) outside tests | [Artifacts](artifacts.md#repository-contract) |
 | `harness-permissions` | `.agent-tool-permissions.json`, `.claude/settings.json`, and `.codex/rules/agent-tool.rules`, and `permissions check` in the `agents:check` script or a workflow; agent-tool itself is exempt | [Harness permissions](tooling.md#harness-permissions) |
 | `import-cycle-guard` | TypeScript sources have Biome `noImportCycles` at `error` with `ignoreTypes: false`, a type-aware error-level dependency-cruiser `no-circular` rule, agent-tool `graph check` configured and run by a package script, run group, workflow step, or runner under `scripts/`, or a module-graph test; a Python package has `test_module_graph.py` | [Import cycles and layering](tooling.md#import-cycles-and-layering) |
+| `origin-ssh` | `origin` fetches and pushes over SSH (`git@github.com:`, or `ssh.github.com` on port 443), after `insteadOf` rewrites | [GitHub over SSH](health.md#github-over-ssh) |
 | `superseded-guidance` | No tracked Markdown, outside managed skills, names a command a shared command replaced | [Superseded guidance](#superseded-guidance) |
 
 A rule checks the evidence a standard leaves in files. It does not prove the
@@ -55,6 +56,7 @@ which the agent-tool pin updates:
 | `gh pr checks --watch` | `agent-tool pr checks --wait` |
 | `git push -u origin HEAD` | `agent-tool branch push <reviewed-head> --remote origin` |
 | `git push ... --delete`, except a `--force-with-lease` deletion that a checkout requires | `agent-tool repo cleanup` |
+| `url.https://github.com/.insteadOf`, which sends GitHub SSH URLs to HTTPS and its keychain helper | SSH through `ssh.github.com:443` ([GitHub over SSH](health.md#github-over-ssh)) |
 
 ## Changing the audit
 
