@@ -61,7 +61,7 @@ export function dotenvNames(source: string, file: string): string[] {
     if (/^\s*(?:#.*)?$/.test(line)) continue;
     const match = ASSIGNMENT.exec(line);
     if (!match) throw new Error(`${file}:${index + 1} is not a NAME=value line.`);
-    const [, name, value] = match as unknown as [string, string, string];
+    const [, name, value] = match;
     if (/^GITHUB_/i.test(name)) throw new Error(`${file}:${index + 1}: GitHub reserves names that start with GITHUB_.`);
     // GitHub names are case-insensitive, so TOKEN and token are one setting.
     if (seen.has(name.toUpperCase())) throw new Error(`${file}:${index + 1}: ${name} is assigned twice.`);

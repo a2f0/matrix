@@ -4,6 +4,7 @@ import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
 import { git, gitOutput } from "./git";
 import { findRepo, repoName } from "./manifest";
+import { object } from "./packageJson";
 import { errorMessage, plural } from "./text";
 
 export const STATUSES = ["pending", "skipped", "unchanged", "in-progress", "open", "merged", "blocked", "failed"] as const;
@@ -149,10 +150,27 @@ function resolutionsDirectory(root: string): string { return path.join(path.dirn
 /** One repository's numbered update files. */
 function entryDirectory(directory: string, repo: string): string { return path.join(directory, "repos", repoName(repo)); }
 
-function readJson<T>(file: string): T {
-  try { return JSON.parse(readFileSync(file, "utf8")) as T; } catch (error) {
+/** Read a ledger file, checking the fields that locate and order its records. */
+function readJson<T>(file: string, valid: (value: unknown) => value is T): T {
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(file, "utf8")); } catch (error) {
     throw new Error(`Could not read ${file}: ${errorMessage(error)}`);
   }
+  if (!valid(value)) throw new Error(`Could not read ${file}: it is not a sweep ledger record.`);
+  return value;
+}
+
+function isSweep(value: unknown): value is Sweep {
+  const sweep = object(value);
+  return typeof sweep?.branch === "string" && typeof sweep.startedAt === "string"
+    && Array.isArray(sweep.repos) && sweep.repos.every(repo => typeof repo === "string");
+}
+
+function isStoredUpdate(value: unknown): value is StoredUpdate { return typeof object(value)?.at === "string"; }
+
+function isResolution(value: unknown): value is Resolution {
+  const resolution = object(value);
+  return ["kind", "cause", "resolution", "at"].every(field => typeof resolution?.[field] === "string");
 }
 
 /** Write through a rename so a reader never sees a partial file. */
@@ -200,25 +218,27 @@ function appendUpdate(directory: string, repo: string, update: StoredUpdate): vo
 /** Replay a repository's updates in append order. A new status without a reason clears the old reason. */
 function loadEntry(directory: string, repo: string): RepoEntry {
   const folder = entryDirectory(directory, repo);
-  const updates = updateFiles(folder).map(name => readJson<StoredUpdate>(path.join(folder, name)));
-  let entry: Record<string, unknown> = { repo, status: "pending", notes: [], events: [], updatedAt: "" };
-  for (const update of updates) {
-    const { at, notes = [], events = [], ...fields } = update;
-    const previous = entry;
-    entry = { ...previous, ...fields };
-    if (fields.status !== undefined && fields.reason === undefined) delete entry.reason;
-    entry.notes = [...(previous.notes as string[]), ...notes];
-    entry.events = [...(previous.events as SweepEvent[]), ...events.map(event => ({ ...event, at }))];
-    entry.updatedAt = at;
+  const updates = updateFiles(folder).map(name => readJson(path.join(folder, name), isStoredUpdate));
+  let entry: RepoEntry = { repo, status: "pending", notes: [], events: [], updatedAt: "" };
+  for (const { at, notes = [], events = [], ...fields } of updates) {
+    const next: { -readonly [Field in keyof RepoEntry]: RepoEntry[Field] } = {
+      ...entry,
+      ...fields,
+      notes: [...entry.notes, ...notes],
+      events: [...entry.events, ...events.map(event => ({ ...event, at }))],
+      updatedAt: at,
+    };
+    if (fields.status !== undefined && fields.reason === undefined) delete next.reason;
+    entry = next;
   }
-  return entry as unknown as RepoEntry;
+  return entry;
 }
 
 function loadSweep(root: string, branch: string): { directory: string; sweep: Sweep } {
   const directory = sweepDirectory(root, branch);
   const file = path.join(directory, "sweep.json");
   if (!existsSync(file)) throw new Error(`No sweep ledger for '${branch}'; run sweep start.`);
-  const sweep = readJson<Sweep>(file);
+  const sweep = readJson(file, isSweep);
   if (sweep.schemaVersion !== 1) throw new Error(`${file} has unsupported schemaVersion ${String(sweep.schemaVersion)}.`);
   // Case-insensitive filesystems, such as macOS's default, map chore/Fix and chore/fix to one directory.
   if (sweep.branch !== branch) throw new Error(`The ledger at ${directory} belongs to '${sweep.branch}', not '${branch}'.`);
@@ -326,7 +346,7 @@ export function listSweeps(root: string): SweepReport[] {
     .map(name => path.join(directory, name))
     .filter(folder => existsSync(path.join(folder, "sweep.json")))
     .map(folder => {
-      const sweep = readJson<Sweep>(path.join(folder, "sweep.json"));
+      const sweep = readJson(path.join(folder, "sweep.json"), isSweep);
       return report(sweep, loadEntries(folder, sweep));
     })
     .sort((left, right) => right.sweep.startedAt.localeCompare(left.sweep.startedAt) || left.sweep.branch.localeCompare(right.sweep.branch));
@@ -386,7 +406,7 @@ export function listResolutions(root: string): Resolution[] {
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter(name => name.endsWith(".json"))
-    .map(name => readJson<Resolution>(path.join(directory, name)))
+    .map(name => readJson(path.join(directory, name), isResolution))
     .sort((left, right) => left.at.localeCompare(right.at));
 }
 

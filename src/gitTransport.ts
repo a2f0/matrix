@@ -20,13 +20,13 @@ export interface GitTransport {
 interface Run { readonly status: number | null; readonly stdout: string; readonly stderr: string; readonly error?: Error }
 
 /** What the inspection runs; tests replace it. */
-export type Runner = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Run;
+export type Runner = (command: string, args: string[]) => Run;
 
 /** The SSH endpoint that keeps working where port 22 is blocked. */
 export const SSH_OVER_HTTPS = { hostname: "ssh.github.com", port: 443 } as const;
 
-const runner: Runner = (command, args, env) => {
-  const result = spawnSync(command, args, { encoding: "utf8", env: { ...process.env, ...env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" }, timeout: 30_000 });
+const runner: Runner = (command, args) => {
+  const result = spawnSync(command, args, { encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" }, timeout: 30_000 });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", ...(result.error && { error: result.error }) };
 };
 

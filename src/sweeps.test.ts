@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
@@ -209,4 +209,13 @@ describe("retro", () => {
     expect(notReady({ ...ready("a2f0/one"), behind: 3 })).toBe("3 commits behind origin; run sync");
     expect(notReady({ ...ready("a2f0/one"), error: "origin is a2f0/other, expected a2f0/one" })).toBe("origin is a2f0/other, expected a2f0/one");
   });
+});
+
+test("refuses ledger files without the fields that locate and order records", () => {
+  start("chore/demo", ["a2f0/one"]);
+  const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
+  writeFileSync(path.join(directory, "repos", "one", "000002.json"), "{\"status\": \"open\"}\n");
+  expect(() => sweepReport(root, "chore/demo")).toThrow("000002.json: it is not a sweep ledger record.");
+  writeFileSync(path.join(directory, "sweep.json"), "[]\n");
+  expect(() => sweepReport(root, "chore/demo")).toThrow("sweep.json: it is not a sweep ledger record.");
 });

@@ -10,7 +10,7 @@ import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, sav
 import { count, parseOptions } from "./options";
 import { type Gh, runGh } from "./gh";
 import { deployAll, secretsRoot } from "./secrets";
-import { type AgentToolTeardown, teardownAll } from "./teardown";
+import { type AgentToolTeardown, isAgentToolTeardown, teardownAll } from "./teardown";
 import { knownCauses, listSweeps, markdownReport, parseUpdate, recordEntry, recordResolution, retro, startSweep, sweepReport } from "./sweeps";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
@@ -69,8 +69,10 @@ function teardown(root: string, directory: string, apply: boolean): AgentToolTea
   if (result.error) throw new Error(`agent-tool teardown could not run: ${result.error.message}`);
   // It exits 1 when something remains, with the same report.
   if (result.status !== 0 && result.status !== 1) throw new Error(`agent-tool teardown failed: ${(result.stderr || result.stdout).trim().split("\n").at(-1) ?? `exit ${result.status}`}`);
-  try { return JSON.parse(result.stdout) as AgentToolTeardown; }
-  catch { throw new Error(`agent-tool teardown printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`); }
+  let report: unknown;
+  try { report = JSON.parse(result.stdout); } catch { report = undefined; }
+  if (!isAgentToolTeardown(report)) throw new Error(`agent-tool teardown printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
+  return report;
 }
 
 function diskSpace(directory: string): DiskSpace {

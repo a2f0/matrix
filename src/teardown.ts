@@ -3,6 +3,7 @@
 // inspected with the workspace's own pinned agent-tool (`--repo <checkout>`), which behaves the
 // same whatever a checkout pins.
 
+import { object } from "./packageJson";
 import { errorMessage } from "./text";
 
 /** What agent-tool's `teardown` reports for one repository; only the fields matrix reads. */
@@ -35,6 +36,13 @@ export interface Teardown {
   readonly ok: boolean;
   readonly applied: boolean;
   readonly repos: RepoTeardown[];
+}
+
+/** Whether parsed JSON has the shape of agent-tool's teardown report, checked as far as matrix reads it. */
+export function isAgentToolTeardown(value: unknown): value is AgentToolTeardown {
+  const report = object(value);
+  return typeof report?.ok === "boolean"
+    && [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray);
 }
 
 const name = (item: { id: string; label: string | null }) => item.label ? `${item.label} (${item.id})` : item.id;
