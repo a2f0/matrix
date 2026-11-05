@@ -5,6 +5,7 @@ import { type CheckoutStatus, redact } from "./checkouts";
 import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
+import { plural } from "./text";
 
 const AGENT_TOOL = "@a2f0/agent-tool";
 /**
@@ -269,7 +270,7 @@ export const RULES: readonly Rule[] = [
       // Age counts from the first newer release published, which a later backport cannot reset.
       const first = newer.reduce((oldest, version) => (Date.parse(releases[version]!) < Date.parse(releases[oldest]!) ? version : oldest));
       const age = Math.floor(((context.now ?? new Date()).getTime() - Date.parse(releases[first]!)) / DAY_MS);
-      const trailing = `${first} has been out ${age} day${age === 1 ? "" : "s"}`;
+      const trailing = `${first} has been out ${plural(age, "day")}`;
       return age < AGENT_TOOL_GRACE_DAYS ? skip(`${detail}; ${trailing}, inside the ${AGENT_TOOL_GRACE_DAYS}-day grace`) : fail(`${detail}; ${trailing}`);
     },
   },

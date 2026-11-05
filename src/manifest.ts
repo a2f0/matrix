@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { errorMessage } from "./text";
 
 export const CHECKOUTS = "checkouts";
 const PROTOCOLS = ["ssh", "https"] as const;
@@ -39,7 +40,7 @@ function repoList(value: unknown, field: string, uniqueNames: boolean): string[]
 
 export function parseManifest(source: string): Manifest {
   let value: unknown;
-  try { value = JSON.parse(source); } catch (error) { invalid("manifest", `is not JSON (${error instanceof Error ? error.message : String(error)})`); }
+  try { value = JSON.parse(source); } catch (error) { invalid("manifest", `is not JSON (${errorMessage(error)})`); }
   const input = record(value, "manifest", ["schemaVersion", "protocol", "discover", "repos"]);
   if (input.schemaVersion !== 1) invalid("schemaVersion", "must be 1");
   if (!PROTOCOLS.includes(input.protocol as Manifest["protocol"])) invalid("protocol", `must be one of ${PROTOCOLS.join(", ")}`);

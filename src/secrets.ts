@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { repoName } from "./manifest";
+import { errorMessage } from "./text";
 
 const KINDS = { secret: "secrets.env", variable: "variables.env" } as const;
 type Kind = keyof typeof KINDS;
@@ -117,13 +118,11 @@ export function deploySecrets(secrets: string, repo: string, apply: boolean, gh:
       gh([kind, "set", "--repo", repo, "--env-file", file]);
       plan.applied = true;
     } catch (error) {
-      return { ...result, error: message(error) };
+      return { ...result, error: errorMessage(error) };
     }
   }
   return result;
 }
-
-function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 /** Deploy each repository in turn, recording a failure without hiding the others' results. */
 export function deployAll(secrets: string, repos: string[], apply: boolean, gh: Gh = runGh): { ok: boolean; results: DeployResult[] } {
@@ -131,7 +130,7 @@ export function deployAll(secrets: string, repos: string[], apply: boolean, gh: 
     try {
       return deploySecrets(secrets, repo, apply, gh);
     } catch (error) {
-      return { repo, error: message(error) };
+      return { repo, error: errorMessage(error) };
     }
   });
   return { ok: results.every(result => result.error === undefined), results };

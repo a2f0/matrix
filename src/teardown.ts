@@ -3,6 +3,8 @@
 // inspected with the workspace's own pinned agent-tool (`--repo <checkout>`), which behaves the
 // same whatever a checkout pins.
 
+import { errorMessage } from "./text";
+
 /** What agent-tool's `teardown` reports for one repository; only the fields matrix reads. */
 export interface AgentToolTeardown {
   ok: boolean;
@@ -63,7 +65,7 @@ export function teardownAll(targets: Array<{ repo: string; path: string }>, insp
   const repos = targets.map(({ repo, path }) => {
     try { return summarize(repo, path, inspect(path, apply)); }
     catch (error) {
-      return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [(error as Error).message] };
+      return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [errorMessage(error)] };
     }
   });
   return { ok: repos.every(item => item.ok), applied: apply, repos };

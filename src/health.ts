@@ -3,6 +3,7 @@ import type { CheckoutStatus } from "./checkouts";
 import type { GitTransport } from "./gitTransport";
 import { notReady, type Recurrence, type Retro } from "./sweeps";
 import type { Teardown } from "./teardown";
+import { plural } from "./text";
 
 /** Bytes available to this user, and the volume's size. */
 export interface DiskSpace {
@@ -65,8 +66,6 @@ export interface Health {
 function list(items: string[], limit = 4): string {
   return items.length <= limit ? items.join(", ") : `${items.slice(0, limit).join(", ")}, and ${items.length - limit} more`;
 }
-
-function plural(count: number, noun: string, nouns = `${noun}s`): string { return `${count} ${count === 1 ? noun : nouns}`; }
 
 function gib(bytes: number): string { return `${Math.floor(bytes / GIB)} GiB`; }
 

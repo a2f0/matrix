@@ -4,6 +4,7 @@ import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
 import { git, gitOutput } from "./git";
 import { repoName } from "./manifest";
+import { errorMessage, plural } from "./text";
 
 export const STATUSES = ["pending", "skipped", "unchanged", "in-progress", "open", "merged", "blocked", "failed"] as const;
 export type SweepStatus = (typeof STATUSES)[number];
@@ -150,7 +151,7 @@ function entryDirectory(directory: string, repo: string): string { return path.j
 
 function readJson<T>(file: string): T {
   try { return JSON.parse(readFileSync(file, "utf8")) as T; } catch (error) {
-    throw new Error(`Could not read ${file}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Could not read ${file}: ${errorMessage(error)}`);
   }
 }
 
@@ -227,8 +228,6 @@ function loadSweep(root: string, branch: string): { directory: string; sweep: Sw
 function loadEntries(directory: string, sweep: Sweep): RepoEntry[] {
   return sweep.repos.map(repo => loadEntry(directory, repo));
 }
-
-function plural(count: number, noun: string): string { return `${count} ${noun}${count === 1 ? "" : "s"}`; }
 
 /** Why a checkout cannot join a sweep yet, or undefined when it is ready. */
 export function notReady(status: CheckoutStatus): string | undefined {

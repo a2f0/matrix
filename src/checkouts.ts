@@ -2,6 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import path from "node:path";
 import { git, gitOutput, gitSucceeds } from "./git";
 import { CHECKOUTS, checkoutPath, parseGitHubRepo, repoName } from "./manifest";
+import { errorMessage } from "./text";
 
 export interface SyncResult {
   readonly repo: string;
@@ -38,8 +39,6 @@ export interface AgentToolInstall {
   readonly installed: string | null;
   readonly current: boolean;
 }
-
-function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
 /** Drop URL userinfo, query, and fragment so a credential-bearing remote never reaches output. */
 export function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, ""); }
@@ -162,7 +161,7 @@ export function syncRepo(root: string, repo: string, url: string): SyncResult {
     gitOutput(directory, ["merge", "--quiet", "--ff-only", "--no-overwrite-ignore", remote]);
     return { ...state, action: "updated", head: remote };
   } catch (error) {
-    return { ...base, action: "error", reason: message(error) };
+    return { ...base, action: "error", reason: errorMessage(error) };
   }
 }
 
@@ -182,7 +181,7 @@ export function checkoutStatus(root: string, repo: string, url: string): Checkou
     const agentTool = agentToolInstall(directory);
     return { ...base, present: true, ready, ...state, changes, ahead, behind, ...(agentTool && { agentTool }) };
   } catch (error) {
-    return { ...base, present: true, ready: false, error: message(error) };
+    return { ...base, present: true, ready: false, error: errorMessage(error) };
   }
 }
 
