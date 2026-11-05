@@ -53,7 +53,9 @@ function count(flag: string, value: string | undefined): number {
 
 export function parseOptions(argv: string[]): Options {
   const names: string[] = [];
-  let json = false, limit = 25, minScore = 3;
+  let json = false,
+    limit = 25,
+    minScore = 3;
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--json") json = true;
@@ -126,14 +128,21 @@ export function render(reports: RepoReport[]): string {
 }
 
 export function main(argv: string[], cwd = process.cwd(), print: (text: string) => void = console.log): number {
-  if (argv.includes("--help") || argv.includes("-h")) { print(USAGE); return 0; }
+  if (argv.includes("--help") || argv.includes("-h")) {
+    print(USAGE);
+    return 0;
+  }
   let options: Options;
-  try { options = parseOptions(argv); } catch (error) {
+  try {
+    options = parseOptions(argv);
+  } catch (error) {
     print(`${(error as Error).message}\n\n${USAGE}`);
     return 2;
   }
-  let targets;
-  try { targets = resolveTargets(cwd, options.names).targets; } catch (error) {
+  let targets: ReturnType<typeof resolveTargets>["targets"];
+  try {
+    targets = resolveTargets(cwd, options.names).targets;
+  } catch (error) {
     print((error as Error).message);
     return 2;
   }
