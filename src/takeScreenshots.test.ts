@@ -3,10 +3,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, utimesSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  acquireLock, artifactsRoot, claimNamespace, drainGroup, existingCase, validRecord, githubRepo, LINK, link, linkState, LOCK, main, parseOptions, readRecord, relation, resolveTargets,
-  type Runner, storeDir, targetFor, updateOwner,
-} from "../skills/take-screenshots/scripts/artifacts";
+import { main, parseOptions } from "../skills/take-screenshots/scripts/artifacts";
+import { drainGroup, type Runner } from "../skills/take-screenshots/scripts/capture";
+import { link, linkState } from "../skills/take-screenshots/scripts/link";
+import { acquireLock } from "../skills/take-screenshots/scripts/lock";
+import { claimNamespace, existingCase, githubRepo, targetFor, updateOwner } from "../skills/take-screenshots/scripts/namespace";
+import { readRecord, relation, validRecord } from "../skills/take-screenshots/scripts/record";
+import { LINK, LOCK, storeDir } from "../skills/take-screenshots/scripts/store";
+import { artifactsRoot, resolveTargets } from "../skills/take-screenshots/scripts/targets";
 
 // Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
 process.env.MATRIX_ARTIFACTS_NO_GH = "1";
@@ -303,7 +307,7 @@ describe("take-screenshots artifacts", () => {
     temps.push(dir);
     const file = path.join(dir, LOCK);
     const script = path.join(dir, "race.ts");
-    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/lock.ts");
     writeFileSync(script, `import { acquireLock } from ${JSON.stringify(module)};
 try {
   acquireLock(${JSON.stringify(file)}, { pid: process.pid, host: "${os.hostname()}", checkout: "x", startedAt: "now" });
@@ -521,7 +525,7 @@ esac
     temps.push(dir);
     const file = path.join(dir, "repository.json");
     writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
-    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/namespace.ts");
     const script = path.join(dir, "alias.ts");
     writeFileSync(script, `import { updateOwner } from ${JSON.stringify(module)};
 const alias = process.argv[2]!;
@@ -538,7 +542,7 @@ updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...
     mkdirSync(path.join(dir, "app"));
     // A legacy owner file, written before ids were recorded.
     writeFileSync(path.join(dir, "app", "repository.json"), JSON.stringify({ repo: "a2f0/app" }));
-    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/artifacts.ts");
+    const module = path.resolve(import.meta.dir, "../skills/take-screenshots/scripts/namespace.ts");
     const script = path.join(dir, "claim.ts");
     writeFileSync(script, `import { claimNamespace } from ${JSON.stringify(module)};
 const id = process.argv[2]!;
