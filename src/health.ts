@@ -1,7 +1,7 @@
 import type { Audit } from "./audit";
 import { type CheckoutStatus, notReady, staleInstalls } from "./checkouts";
 import type { GitTransport } from "./gitTransport";
-import type { Recurrence, Retro } from "./sweeps";
+import type { Recurrence, Retro } from "./sweepRetro";
 import { leftoverRepos, type Teardown } from "./teardown";
 import { plural } from "./text";
 

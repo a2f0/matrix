@@ -67,6 +67,8 @@
           "src/gitTransport.ts",
           "src/secrets.ts",
           "src/superseded.ts",
+          "src/sweepLedger.ts",
+          "src/sweepRetro.ts",
           "src/sweeps.ts"
         ]
       },
