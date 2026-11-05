@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "./cli";
+import { tempDir } from "./testFixtures";
 
 const SCRIPT = path.join(ROOT, "scripts", "secrets", "backupSecrets.sh");
 let temporary: string, secrets: string, output: string, gnupg: string, passphrase: string;
@@ -16,22 +16,31 @@ function backup(...args: string[]): { status: number | null; stderr: string } {
 
 function archives(directory = output): string[] {
   if (!existsSync(directory)) return [];
-  return readdirSync(directory).filter(name => name.startsWith("matrix-secrets-backup-")).map(name => path.join(directory, name));
+  return readdirSync(directory)
+    .filter(name => name.startsWith("matrix-secrets-backup-"))
+    .map(name => path.join(directory, name));
 }
 
-function mode(file: string): number { return statSync(file).mode & 0o777; }
+function mode(file: string): number {
+  return statSync(file).mode & 0o777;
+}
 
 function decrypt(archive: string, passphrase: string): string {
   const zip = path.join(temporary, "decrypted.zip");
-  execFileSync("gpg", ["--batch", "--yes", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--output", zip, "--decrypt", archive],
-    { env: { ...process.env, GNUPGHOME: gnupg }, input: passphrase, stdio: ["pipe", "ignore", "ignore"] });
+  execFileSync("gpg", ["--batch", "--yes", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--output", zip, "--decrypt", archive], {
+    env: { ...process.env, GNUPGHOME: gnupg },
+    input: passphrase,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
   return zip;
 }
 
-function entry(zip: string, name: string): string { return execFileSync("unzip", ["-p", zip, name], { encoding: "utf8" }); }
+function entry(zip: string, name: string): string {
+  return execFileSync("unzip", ["-p", zip, name], { encoding: "utf8" });
+}
 
 beforeEach(() => {
-  temporary = mkdtempSync(path.join(tmpdir(), "matrix-backup-"));
+  temporary = tempDir("matrix-backup");
   secrets = path.join(temporary, "matrix-secrets");
   output = path.join(temporary, "backups");
   gnupg = path.join(temporary, "gnupg");
@@ -42,8 +51,6 @@ beforeEach(() => {
   passphrase = path.join(temporary, "passphrase");
   writeFileSync(passphrase, "fixture-passphrase\n", { mode: 0o600 });
 });
-
-afterEach(() => rmSync(temporary, { recursive: true, force: true }));
 
 test("non-interactive backups require an explicit encryption choice", () => {
   const result = backup(output);
@@ -111,7 +118,10 @@ test("finds the default secrets directory beside the relocated workspace", () =>
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: temporary };
   delete env.MATRIX_SECRETS_DIR;
   const result = spawnSync("bash", [copiedScript, output, "--no-password"], {
-    cwd: temporary, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    cwd: temporary,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
   });
   expect(result.status).toBe(0);
   expect(result.stdout).toContain(`Backed up: ${realpathSync(secrets)}`);

@@ -13,12 +13,21 @@ export interface LockInfo {
 }
 
 export function readLock(file: string): LockInfo | undefined {
-  try { return JSON.parse(readFileSync(file, "utf8")) as LockInfo; } catch { return undefined; }
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as LockInfo;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether a process, or with a negative id every process of a group, still runs. */
 export function alive(id: number): boolean {
-  try { process.kill(id, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+  try {
+    process.kill(id, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /**
@@ -33,7 +42,9 @@ export function acquireLock(file: string, info: LockInfo): () => void {
   writeFileSync(temporary, `${JSON.stringify(info)}\n`, { flag: "wx", mode: 0o644 });
   try {
     linkSync(temporary, file);
-    return () => { if (readLock(file)?.pid === info.pid) unlinkSync(file); };
+    return () => {
+      if (readLock(file)?.pid === info.pid) unlinkSync(file);
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     const held = readLock(file);
@@ -42,9 +53,13 @@ export function acquireLock(file: string, info: LockInfo): () => void {
       // A killed holder's capture children keep its process group and may still be writing.
       // The group can also hold the shell or agent that started it, so name it for a person to inspect; never suggest killing it.
       if (held.pgid !== undefined && alive(-held.pgid)) {
-        throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which died, but its process group ${held.pgid} still has processes that may be writing screenshots; inspect them with \`ps -o pid,command -g ${held.pgid}\`, stop any leftover capture processes, then remove the lock`);
+        throw new Error(
+          `the capture lock ${file} belongs to pid ${held.pid}, which died, but its process group ${held.pgid} still has processes that may be writing screenshots; inspect them with \`ps -o pid,command -g ${held.pgid}\`, stop any leftover capture processes, then remove the lock`,
+        );
       }
-      throw new Error(`the capture lock ${file} belongs to pid ${held.pid}, which is no longer running (started ${held.startedAt} in ${held.checkout}); remove it, then capture again`);
+      throw new Error(
+        `the capture lock ${file} belongs to pid ${held.pid}, which is no longer running (started ${held.startedAt} in ${held.checkout}); remove it, then capture again`,
+      );
     }
     throw new Error(`another capture of this project is running: pid ${held.pid} on ${held.host} in ${held.checkout} since ${held.startedAt}`);
   } finally {

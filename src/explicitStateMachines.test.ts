@@ -1,32 +1,18 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { codeLines, language, scanFile, scanText } from "../skills/explicit-state-machines/scripts/scan";
 import { main, parseOptions, readInside } from "../skills/explicit-state-machines/scripts/state-machines";
 import { resolveTargets } from "../skills/explicit-state-machines/scripts/targets";
 import { resolveTargets as cleanupTargets } from "../skills/space-cleanup/scripts/targets";
-
-const temps: string[] = [];
-afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-
-function git(root: string, ...args: string[]) {
-  const result = spawnSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" });
-  if (result.status !== 0) throw new Error(result.stderr);
-}
-
-function write(root: string, rel: string, text: string) {
-  mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
-  writeFileSync(path.join(root, rel), text);
-}
+import { gitIn, gitInit, tempDir, write } from "./testFixtures";
 
 function repo(root: string, files: Record<string, string>): string {
   mkdirSync(root, { recursive: true });
-  git(root, "init", "-q", "-b", "main");
-  for (const [rel, text] of Object.entries(files)) write(root, rel, text);
-  git(root, "add", ".");
-  git(root, "commit", "-qm", "init");
+  gitInit(root);
+  write(root, files);
+  gitIn(root, "add", ".");
+  gitIn(root, "commit", "-qm", "init");
   return root;
 }
 
@@ -68,7 +54,12 @@ describe("explicit-state-machines scan", () => {
 
   test("finds a status written with many values from many places, in Python too", () => {
     const signals = scanText(WORKER, "hash");
-    expect(signals.find(signal => signal.kind === "status")).toEqual({ kind: "status", names: ["status"], values: ["done", "error", "running"], lines: [4, 7, 10] });
+    expect(signals.find(signal => signal.kind === "status")).toEqual({
+      kind: "status",
+      names: ["status"],
+      values: ["done", "error", "running"],
+      lines: [4, 7, 10],
+    });
     expect(signals.find(signal => signal.kind === "flags")?.names).toEqual(["_running", "is_dirty"]);
   });
 
@@ -78,17 +69,20 @@ describe("explicit-state-machines scan", () => {
     expect(scanText("let cancelled = false;\nlet settled = false;\ncancelled = true;\nsettled = true;", "c")).toEqual([]);
     expect(scanText("let darkMode = false;\nlet enabled = true;\ndarkMode = true;\nenabled = false;", "c")).toEqual([]);
     expect(scanText("// isLoading = true; hasError = false;\n/* isLoading = false;\n hasError = true; */", "c")).toEqual([]);
-    expect(scanText("type S =\n  | { status: \"idle\" }\n  | { status: \"loading\" }\n  | { status: \"failed\" };\nreturn { status: \"idle\" };", "c")).toEqual([]);
-    expect(scanText("if (status === \"a\") x();\nif (status == \"b\") y();\nif (status === \"c\") z();", "c")).toEqual([]);
+    expect(scanText('type S =\n  | { status: "idle" }\n  | { status: "loading" }\n  | { status: "failed" };\nreturn { status: "idle" };', "c")).toEqual([]);
+    expect(scanText('if (status === "a") x();\nif (status == "b") y();\nif (status === "c") z();', "c")).toEqual([]);
   });
 
   test("keeps line numbers through block comments and URLs", () => {
-    expect(codeLines("a /* x */ b\n/* start\nmiddle\nend */ c\nurl = \"https://x\" // note", "c")).toEqual(["a  b", "", "", " c", "url = \"https://x\" "]);
+    expect(codeLines('a /* x */ b\n/* start\nmiddle\nend */ c\nurl = "https://x" // note', "c")).toEqual(["a  b", "", "", " c", 'url = "https://x" ']);
     expect(codeLines("  # comment\nx = 1", "hash")).toEqual(["", "x = 1"]);
     // Comment markers inside strings are text, not comments.
-    expect(codeLines("const glob = \"src/*\"; isLoading = true;\nconst u = 'a//b'; hasError = false; // c\nconst e = \"\\\"/*\";", "c"))
-      .toEqual(["const glob = \"src/*\"; isLoading = true;", "const u = 'a//b'; hasError = false; ", "const e = \"\\\"/*\";"]);
-    const glob = "const glob = \"src/*.ts\";\nsetIsLoading(true);\nsetIsLoading(false);\nsetHasError(true);\nsetHasError(false);";
+    expect(codeLines('const glob = "src/*"; isLoading = true;\nconst u = \'a//b\'; hasError = false; // c\nconst e = "\\"/*";', "c")).toEqual([
+      'const glob = "src/*"; isLoading = true;',
+      "const u = 'a//b'; hasError = false; ",
+      'const e = "\\"/*";',
+    ]);
+    const glob = 'const glob = "src/*.ts";\nsetIsLoading(true);\nsetIsLoading(false);\nsetHasError(true);\nsetHasError(false);';
     expect(scanText(glob, "c").map(signal => signal.names)).toEqual([["hasError", "isLoading"]]);
   });
 
@@ -97,7 +91,23 @@ describe("explicit-state-machines scan", () => {
     expect(language("scripts/run.sh")).toBe("hash");
     expect(language("pkg/sync.go")).toBe("c");
     expect(language("app/testing_tools.py")).toBe("hash");
-    for (const skipped of ["src/app.test.ts", "node_modules/x/index.js", "dist/app.js", "types.d.ts", ".agents/skills/x/run.ts", "src/__tests__/a.ts", "vendor/lib.go", "README.md", "app.min.js", "pkg/sync_test.go", "app/test_worker.py", "app/worker_test.py", "conftest.py", "AppTests.swift", "SyncSpec.kt"]) {
+    for (const skipped of [
+      "src/app.test.ts",
+      "node_modules/x/index.js",
+      "dist/app.js",
+      "types.d.ts",
+      ".agents/skills/x/run.ts",
+      "src/__tests__/a.ts",
+      "vendor/lib.go",
+      "README.md",
+      "app.min.js",
+      "pkg/sync_test.go",
+      "app/test_worker.py",
+      "app/worker_test.py",
+      "conftest.py",
+      "AppTests.swift",
+      "SyncSpec.kt",
+    ]) {
       expect(language(skipped)).toBeUndefined();
     }
     expect(scanFile("src/app.test.tsx", FETCHER)).toBeUndefined();
@@ -115,12 +125,11 @@ describe("explicit-state-machines CLI", () => {
   });
 
   test("scans every checkout of a workspace, tracked files only, and changes nothing", () => {
-    const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "explicit-state-machines-")));
-    temps.push(home);
+    const home = realpathSync(tempDir("explicit-state-machines"));
     const root = path.join(home, "matrix");
     repo(path.join(root, "checkouts", "app"), { "src/Items.tsx": FETCHER, "src/Items.test.tsx": FETCHER });
     repo(path.join(root, "checkouts", "worker"), { "worker.py": WORKER });
-    write(path.join(root, "checkouts", "app"), "src/Untracked.tsx", FETCHER);
+    write(path.join(root, "checkouts", "app"), { "src/Untracked.tsx": FETCHER });
     repo(root, { "matrix.json": "{}", ".gitignore": "checkouts/\n" });
     const before = readFileSync(path.join(root, "checkouts", "app", "src", "Items.tsx"), "utf8");
     const output: string[] = [];
@@ -146,39 +155,40 @@ describe("explicit-state-machines CLI", () => {
 
   test("defaults to listing a lone three-value status, and never reads through tracked symlinks", () => {
     expect(parseOptions([]).minScore).toBe(3);
-    const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "explicit-state-machines-")));
-    temps.push(home);
-    write(home, "secret/worker.py", WORKER);
-    const status = "def a(self):\n    self.status = \"one\"\ndef b(self):\n    self.status = \"two\"\ndef c(self):\n    self.status = \"three\"\n";
+    const home = realpathSync(tempDir("explicit-state-machines"));
+    write(home, { "secret/worker.py": WORKER });
+    const status = 'def a(self):\n    self.status = "one"\ndef b(self):\n    self.status = "two"\ndef c(self):\n    self.status = "three"\n';
     const root = repo(path.join(home, "repo"), { "status.py": status });
     symlinkSync(path.join(home, "secret", "worker.py"), path.join(root, "linked.py"));
     symlinkSync(path.join(home, "secret"), path.join(root, "linked-dir"));
-    git(root, "add", "linked.py", "linked-dir");
-    git(root, "commit", "-qm", "links");
+    gitIn(root, "add", "linked.py", "linked-dir");
+    gitIn(root, "commit", "-qm", "links");
     expect(readInside(root, "linked.py")).toBeUndefined();
     expect(readInside(root, "linked-dir/worker.py")).toBeUndefined();
     expect(readInside(root, "../secret/worker.py")).toBeUndefined();
     expect(readInside(root, "status.py")).toBe(status);
     // A tracked directory replaced by a link to an ignored directory inside the repository.
-    write(root, "src/app.py", WORKER);
-    git(root, "add", "src/app.py");
-    git(root, "commit", "-qm", "src");
-    write(root, ".secrets/app.py", "TOKEN = True");
+    write(root, { "src/app.py": WORKER });
+    gitIn(root, "add", "src/app.py");
+    gitIn(root, "commit", "-qm", "src");
+    write(root, { ".secrets/app.py": "TOKEN = True" });
     rmSync(path.join(root, "src"), { recursive: true });
     symlinkSync(path.join(root, ".secrets"), path.join(root, "src"));
     expect(readInside(root, "src/app.py")).toBeUndefined();
     rmSync(path.join(root, "src"));
-    write(root, "src/app.py", WORKER);
+    write(root, { "src/app.py": WORKER });
     expect(readInside(root, "src/app.py")).toBe(WORKER);
     const output: string[] = [];
     expect(main(["--json"], root, text => output.push(text))).toBe(0);
     const [report] = JSON.parse(output.join("\n")).repos;
-    expect(report.files.map((file: { path: string; score: number }) => [file.path, file.score])).toEqual([["src/app.py", 7], ["status.py", 3]]);
+    expect(report.files.map((file: { path: string; score: number }) => [file.path, file.score])).toEqual([
+      ["src/app.py", 7],
+      ["status.py", 3],
+    ]);
   });
 
   test("resolves targets exactly as space-cleanup does", () => {
-    const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "explicit-state-machines-")));
-    temps.push(home);
+    const home = realpathSync(tempDir("explicit-state-machines"));
     const root = path.join(home, "matrix");
     const app = repo(path.join(root, "checkouts", "app"), { "a.ts": "" });
     const lib = repo(path.join(root, "checkouts", "lib"), { "b.ts": "" });
@@ -195,7 +205,12 @@ describe("explicit-state-machines CLI", () => {
     for (const { cwd, names, roots, error } of rows) {
       for (const resolve of [resolveTargets, cleanupTargets]) {
         if (error) expect(() => resolve(cwd, names)).toThrow(error);
-        else expect(resolve(cwd, names).targets.map(target => target.root).sort()).toEqual(roots!.sort());
+        else
+          expect(
+            resolve(cwd, names)
+              .targets.map(target => target.root)
+              .sort(),
+          ).toEqual(roots!.sort());
       }
     }
   });

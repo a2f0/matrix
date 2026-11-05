@@ -7,12 +7,18 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** The value when it is a plain JSON object, else undefined. */
-export function object(value: unknown): Record<string, unknown> | undefined { return isObject(value) ? value : undefined; }
+export function object(value: unknown): Record<string, unknown> | undefined {
+  return isObject(value) ? value : undefined;
+}
 
 /** Parse JSON source that should hold an object; missing, malformed, or other JSON gives undefined. */
 export function parseObject(source: string | undefined): Record<string, unknown> | undefined {
   if (source === undefined) return undefined;
-  try { return object(JSON.parse(source)); } catch { return undefined; }
+  try {
+    return object(JSON.parse(source));
+  } catch {
+    return undefined;
+  }
 }
 
 /** The version range a package manifest declares for `name`, from devDependencies or dependencies. */

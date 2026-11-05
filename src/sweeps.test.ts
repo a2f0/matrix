@@ -1,18 +1,29 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type CheckoutStatus, notReady } from "./checkouts";
 import { listSweeps, sweepsDirectory } from "./sweepLedger";
 import { retro } from "./sweepRetro";
 import { markdownReport, parseEvent, parseUpdate, recordEntry, startSweep, sweepReport } from "./sweeps";
+import { gitIn, gitInit, tempDir } from "./testFixtures";
 
 const HEAD = "a".repeat(40);
 let root: string;
 
 function ready(repo: string): CheckoutStatus {
-  return { repo, path: `checkouts/${repo.split("/")[1]}`, present: true, ready: true, branch: "main", defaultBranch: "main", head: HEAD, changes: 0, ahead: 0, behind: 0 };
+  return {
+    repo,
+    path: `checkouts/${repo.split("/")[1]}`,
+    present: true,
+    ready: true,
+    branch: "main",
+    defaultBranch: "main",
+    head: HEAD,
+    changes: 0,
+    ahead: 0,
+    behind: 0,
+  };
 }
 
 const statuses: Record<string, CheckoutStatus> = {
@@ -30,11 +41,9 @@ function start(branch: string, repos: string[], minute = 0) {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), "matrix-sweeps-"));
-  execFileSync("git", ["init", "-q"], { cwd: root });
+  root = tempDir("matrix-sweeps");
+  gitInit(root);
 });
-
-afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("startSweep", () => {
   test("opens ready checkouts at their commit and skips the rest with a reason", () => {
@@ -54,9 +63,9 @@ describe("startSweep", () => {
   test("keeps ledgers private in the Git common directory, never in the worktree", () => {
     start("chore/demo", ["a2f0/one"]);
     const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
-    expect(directory.startsWith(path.join(execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim(), "matrix"))).toBe(true);
+    expect(directory.startsWith(path.join(gitIn(root, "rev-parse", "--path-format=absolute", "--git-common-dir"), "matrix"))).toBe(true);
     expect(statSync(path.join(directory, "sweep.json")).mode & 0o777).toBe(0o600);
-    expect(execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" })).toBe("");
+    expect(gitIn(root, "status", "--porcelain")).toBe("");
   });
 
   test("refuses a second ledger for the same branch and invalid names", () => {
@@ -68,7 +77,11 @@ describe("startSweep", () => {
 
   test("leaves nothing behind when a start fails, so a corrected retry succeeds", () => {
     expect(() => startSweep(root, "chore/demo", ["a2f0/one"], statusOf, { topic: "  " })).toThrow("--topic must not be empty");
-    expect(() => startSweep(root, "chore/demo", ["a2f0/one"], () => { throw new Error("status failed"); })).toThrow("status failed");
+    expect(() =>
+      startSweep(root, "chore/demo", ["a2f0/one"], () => {
+        throw new Error("status failed");
+      }),
+    ).toThrow("status failed");
     expect(existsSync(path.join(sweepsDirectory(root), encodeURIComponent("chore/demo")))).toBe(false);
     expect(start("chore/demo", ["a2f0/one"]).counts).toEqual({ pending: 1 });
   });
@@ -101,11 +114,25 @@ describe("recordEntry", () => {
   test("merges fields, appends notes and events, and clears a stale reason on a new status", () => {
     start("chore/demo", ["a2f0/one"]);
     recordEntry(root, "chore/demo", "one", parseUpdate({ status: "blocked", reason: "waits for producer release" }, {}), at(1));
-    const entry = recordEntry(root, "chore/demo", "A2F0/ONE", parseUpdate(
-      { status: "merged", head: "b".repeat(40), pr: "https://github.com/a2f0/one/pull/12", reviewer: "codex", verdict: "clean" },
-      { retry: ["enospc:bun install ran out of space", "browser-timing"], note: ["deploy is manual"] },
-    ), at(2));
-    expect(entry).toMatchObject({ status: "merged", base: HEAD, head: "b".repeat(40), verdict: "CLEAN", reviewer: "codex", notes: ["deploy is manual"], updatedAt: at(2).toISOString() });
+    const entry = recordEntry(
+      root,
+      "chore/demo",
+      "A2F0/ONE",
+      parseUpdate(
+        { status: "merged", head: "b".repeat(40), pr: "https://github.com/a2f0/one/pull/12", reviewer: "codex", verdict: "clean" },
+        { retry: ["enospc:bun install ran out of space", "browser-timing"], note: ["deploy is manual"] },
+      ),
+      at(2),
+    );
+    expect(entry).toMatchObject({
+      status: "merged",
+      base: HEAD,
+      head: "b".repeat(40),
+      verdict: "CLEAN",
+      reviewer: "codex",
+      notes: ["deploy is manual"],
+      updatedAt: at(2).toISOString(),
+    });
     expect(entry).not.toHaveProperty("reason");
     expect(entry.events).toEqual([
       { kind: "retry", cause: "enospc", detail: "bun install ran out of space", at: at(2).toISOString() },
@@ -124,7 +151,11 @@ describe("recordEntry", () => {
     expect(() => parseUpdate({ pr: "https://example.com/pull/1" }, {})).toThrow("pull request URL");
     expect(() => parseUpdate({ reason: "  " }, {})).toThrow("must not be empty");
     expect(() => parseEvent("retry", "Out Of Space")).toThrow("kebab-case cause");
-    expect(parseEvent("declined", "restore-claude-md: Codex asked again ")).toEqual({ kind: "declined", cause: "restore-claude-md", detail: "Codex asked again" });
+    expect(parseEvent("declined", "restore-claude-md: Codex asked again ")).toEqual({
+      kind: "declined",
+      cause: "restore-claude-md",
+      detail: "Codex asked again",
+    });
   });
 
   test("replays updates in the order they were recorded, even within one millisecond", () => {
@@ -136,12 +167,16 @@ describe("recordEntry", () => {
   test("keeps every update when processes record the same repository at once", async () => {
     start("chore/demo", ["a2f0/one"]);
     const module = path.join(import.meta.dir, "sweeps.ts");
-    const writers = Array.from({ length: 8 }, (_, index) => new Promise<number | null>((resolve, reject) => {
-      const script = `import { recordEntry } from ${JSON.stringify(module)}; recordEntry(${JSON.stringify(root)}, "chore/demo", "one", { notes: ["writer ${index}"], events: [{ kind: "retry", cause: "writer-${index}" }] });`;
-      const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "inherit"] });
-      child.on("error", reject);
-      child.on("exit", resolve);
-    }));
+    const writers = Array.from(
+      { length: 8 },
+      (_, index) =>
+        new Promise<number | null>((resolve, reject) => {
+          const script = `import { recordEntry } from ${JSON.stringify(module)}; recordEntry(${JSON.stringify(root)}, "chore/demo", "one", { notes: ["writer ${index}"], events: [{ kind: "retry", cause: "writer-${index}" }] });`;
+          const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "inherit"] });
+          child.on("error", reject);
+          child.on("exit", resolve);
+        }),
+    );
     expect(await Promise.all(writers)).toEqual(Array(8).fill(0));
     const entry = sweepReport(root, "chore/demo").repos[0]!;
     expect(entry.notes.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `writer ${index}`));
@@ -152,21 +187,28 @@ describe("recordEntry", () => {
 describe("reports", () => {
   test("renders a Markdown ledger that escapes table syntax", () => {
     start("chore/demo", ["a2f0/one", "a2f0/missing"]);
-    recordEntry(root, "chore/demo", "one", parseUpdate(
-      { status: "merged", pr: "https://github.com/a2f0/one/pull/12", reviewer: "codex", verdict: "MINOR", validation: "check | build\npassed" },
-      { retry: ["enospc"] },
-    ));
-    expect(markdownReport(sweepReport(root, "chore/demo"))).toBe([
-      "Sweep `chore/demo`: Demo change",
-      "",
-      "skipped 1, merged 1",
-      "",
-      "| Repository | Status | PR | Review | Detail | Friction |",
-      "| --- | --- | --- | --- | --- | --- |",
-      "| a2f0/one | merged | [a2f0/one#12](https://github.com/a2f0/one/pull/12) | MINOR (codex) | check \\| build passed | retry enospc |",
-      "| a2f0/missing | skipped |  |  | checkout missing; run sync |  |",
-      "",
-    ].join("\n"));
+    recordEntry(
+      root,
+      "chore/demo",
+      "one",
+      parseUpdate(
+        { status: "merged", pr: "https://github.com/a2f0/one/pull/12", reviewer: "codex", verdict: "MINOR", validation: "check | build\npassed" },
+        { retry: ["enospc"] },
+      ),
+    );
+    expect(markdownReport(sweepReport(root, "chore/demo"))).toBe(
+      [
+        "Sweep `chore/demo`: Demo change",
+        "",
+        "skipped 1, merged 1",
+        "",
+        "| Repository | Status | PR | Review | Detail | Friction |",
+        "| --- | --- | --- | --- | --- | --- |",
+        "| a2f0/one | merged | [a2f0/one#12](https://github.com/a2f0/one/pull/12) | MINOR (codex) | check \\| build passed | retry enospc |",
+        "| a2f0/missing | skipped |  |  | checkout missing; run sync |  |",
+        "",
+      ].join("\n"),
+    );
   });
 
   test("lists sweeps newest first", () => {
@@ -180,9 +222,19 @@ describe("retro", () => {
   test("surfaces causes that recur across repositories or sweeps", () => {
     start("chore/first", ["a2f0/one", "a2f0/two"], 0);
     recordEntry(root, "chore/first", "one", parseUpdate({ status: "merged", reviewer: "codex", verdict: "CLEAN" }, { retry: ["enospc:install"] }));
-    recordEntry(root, "chore/first", "two", parseUpdate({ status: "open", pr: "https://github.com/a2f0/two/pull/3" }, { retry: ["enospc"], fallback: ["reviewer-unavailable"] }));
+    recordEntry(
+      root,
+      "chore/first",
+      "two",
+      parseUpdate({ status: "open", pr: "https://github.com/a2f0/two/pull/3" }, { retry: ["enospc"], fallback: ["reviewer-unavailable"] }),
+    );
     start("chore/second", ["a2f0/one"], 5);
-    recordEntry(root, "chore/second", "one", parseUpdate({ status: "blocked", reason: "needs dnbm 0.3.0", reviewer: "claude", verdict: "MAJOR" }, { declined: ["restore-claude-md"] }));
+    recordEntry(
+      root,
+      "chore/second",
+      "one",
+      parseUpdate({ status: "blocked", reason: "needs dnbm 0.3.0", reviewer: "claude", verdict: "MAJOR" }, { declined: ["restore-claude-md"] }),
+    );
     start("chore/third", ["a2f0/one"], 9);
     recordEntry(root, "chore/third", "one", parseUpdate({ status: "merged" }, { declined: ["restore-claude-md"] }));
 
@@ -216,7 +268,7 @@ describe("retro", () => {
 test("refuses ledger files without the fields that locate and order records", () => {
   start("chore/demo", ["a2f0/one"]);
   const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
-  writeFileSync(path.join(directory, "repos", "one", "000002.json"), "{\"status\": \"open\"}\n");
+  writeFileSync(path.join(directory, "repos", "one", "000002.json"), '{"status": "open"}\n');
   expect(() => sweepReport(root, "chore/demo")).toThrow("000002.json: it is not a sweep ledger record.");
   writeFileSync(path.join(directory, "sweep.json"), "[]\n");
   expect(() => sweepReport(root, "chore/demo")).toThrow("sweep.json: it is not a sweep ledger record.");

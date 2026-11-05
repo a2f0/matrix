@@ -148,7 +148,8 @@ guidance. Use whichever mechanism the repository already runs: Biome's
 type-only imports, and most cycles found in the matrix were type-only),
 dependency-cruiser's `no-circular` rule at severity `error` with
 `tsPreCompilationDeps` or the `swc` parser, or, without either, agent-tool's
-`graph check` with a `graph` section in `agent-tool.json` (matrix uses it),
+`graph check` with a `graph` section in `agent-tool.json` (matrix runs it for
+layers beside Biome's rule),
 not a new hand-written module-graph test. A Python package needs its own
 `test_module_graph.py`, since none of these read Python. Express layers with
 the same tool: `style/noRestrictedImports` overrides scoped to

@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "ignoreUnknown": true,
+    // Checkouts are other repositories; agent-tool writes the harness trees and
+    // its manifests, and `discover --apply` rewrites matrix.json.
+    "includes": [
+      "**",
+      "!checkouts",
+      "!node_modules",
+      "!.agents",
+      "!.claude",
+      "!.codex",
+      "!.agent-tool-permissions.json",
+      "!.agent-tool-skills.json",
+      "!matrix.json",
+      "!**/*.md"
+    ]
+  },
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 160 },
+  // The code has always written single-parameter arrows without parentheses.
+  "javascript": { "formatter": { "quoteStyle": "double", "arrowParentheses": "asNeeded" } },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      // House style asserts with `!` after a check the compiler cannot follow.
+      "style": { "noNonNullAssertion": "off" },
+      "suspicious": {
+        // Type-only imports count too: a type-only cycle still tangles the modules.
+        "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } }
+      }
+    }
+  }
+}

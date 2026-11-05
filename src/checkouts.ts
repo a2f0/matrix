@@ -42,10 +42,16 @@ interface AgentToolInstall {
 }
 
 /** Drop URL userinfo, query, and fragment so a credential-bearing remote never reaches output. */
-export function redact(url: string): string { return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, ""); }
+export function redact(url: string): string {
+  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, "$1").replace(/[?#].*$/, "");
+}
 
 function isSymlink(file: string): boolean {
-  try { return lstatSync(file).isSymbolicLink(); } catch { return false; }
+  try {
+    return lstatSync(file).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 /** Keep every Git operation inside the workspace; a symlink could reach a day-to-day clone. */
@@ -56,7 +62,11 @@ function rejectSymlinks(root: string, directory: string): void {
 }
 
 function isDirectory(file: string): boolean {
-  try { return lstatSync(file).isDirectory(); } catch { return false; }
+  try {
+    return lstatSync(file).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function verifyCheckout(directory: string, repo: string, url: string): void {
@@ -87,7 +97,9 @@ function currentBranch(directory: string): string | null {
   return ref.status === 0 ? ref.stdout : null;
 }
 
-function lines(output: string): string[] { return output ? output.split("\n") : []; }
+function lines(output: string): string[] {
+  return output ? output.split("\n") : [];
+}
 
 /** Status entries plus index entries whose flags hide edits from status, counted as changes. */
 function changeCount(directory: string): number {
@@ -98,7 +110,11 @@ function changeCount(directory: string): number {
 }
 
 function packageJson(file: string): Record<string, unknown> | undefined {
-  try { return parseObject(readFileSync(file, "utf8")); } catch { return undefined; }
+  try {
+    return parseObject(readFileSync(file, "utf8"));
+  } catch {
+    return undefined;
+  }
 }
 
 /** Sync updates sources but never installs, so node_modules can lag the pin that scripts expect. */

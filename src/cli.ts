@@ -4,16 +4,16 @@ import path from "node:path";
 import { audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
+import { type Gh, runGh } from "./gh";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DiskSpace, markdownHealth } from "./health";
 import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
-import { type Gh, runGh } from "./gh";
 import { deployAll, secretsRoot } from "./secrets";
-import { type AgentToolTeardown, isAgentToolTeardown, teardownAll } from "./teardown";
 import { listSweeps } from "./sweepLedger";
 import { knownCauses, recordResolution, retro } from "./sweepRetro";
 import { markdownReport, parseUpdate, recordEntry, startSweep, sweepReport } from "./sweeps";
+import { type AgentToolTeardown, isAgentToolTeardown, teardownAll } from "./teardown";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -67,12 +67,20 @@ export interface Services {
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
-  const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), ["--repo", directory, "teardown", ...(apply ? ["--apply"] : [])], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), ["--repo", directory, "teardown", ...(apply ? ["--apply"] : [])], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (result.error) throw new Error(`agent-tool teardown could not run: ${result.error.message}`);
   // It exits 1 when something remains, with the same report.
-  if (result.status !== 0 && result.status !== 1) throw new Error(`agent-tool teardown failed: ${(result.stderr || result.stdout).trim().split("\n").at(-1) ?? `exit ${result.status}`}`);
+  if (result.status !== 0 && result.status !== 1)
+    throw new Error(`agent-tool teardown failed: ${(result.stderr || result.stdout).trim().split("\n").at(-1) ?? `exit ${result.status}`}`);
   let report: unknown;
-  try { report = JSON.parse(result.stdout); } catch { report = undefined; }
+  try {
+    report = JSON.parse(result.stdout);
+  } catch {
+    report = undefined;
+  }
   if (!isAgentToolTeardown(report)) throw new Error(`agent-tool teardown printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
   return report;
 }
@@ -83,8 +91,12 @@ function diskSpace(directory: string): DiskSpace {
 }
 
 const SERVICES: Services = {
-  write: text => { writeSync(1, text); },
-  warn: text => { writeSync(2, text); },
+  write: text => {
+    writeSync(1, text);
+  },
+  warn: text => {
+    writeSync(2, text);
+  },
   listOwnerRepos,
   registryReleases,
   diskSpace,
@@ -94,11 +106,15 @@ const SERVICES: Services = {
 
 /** The workspace, then every checkout present, or only the named checkouts. */
 function teardownTargets(root: string, manifest: Manifest, names: string[]): Array<{ repo: string; path: string }> {
-  const checkouts = selectRepos(manifest, names).map(repo => ({ repo, path: checkoutPath(root, repo) })).filter(target => existsSync(target.path));
+  const checkouts = selectRepos(manifest, names)
+    .map(repo => ({ repo, path: checkoutPath(root, repo) }))
+    .filter(target => existsSync(target.path));
   return names.length > 0 ? checkouts : [{ repo: "workspace", path: root }, ...checkouts];
 }
 
-function json(services: Services, value: unknown): void { services.write(`${JSON.stringify(value, null, 2)}\n`); }
+function json(services: Services, value: unknown): void {
+  services.write(`${JSON.stringify(value, null, 2)}\n`);
+}
 
 /** Read each checkout's status once, however many reports ask for it. */
 function statusReader(root: string, manifest: Manifest): (repo: string) => CheckoutStatus {
@@ -112,12 +128,27 @@ function registry(services: Services): { releases(name: string): Record<string, 
   return { releases: name => releases.get(name) ?? releases.set(name, services.registryReleases(name)).get(name)! };
 }
 
-function usage(condition: boolean, message: string): void { if (!condition) throw new Error(message); }
+function usage(condition: boolean, message: string): void {
+  if (!condition) throw new Error(message);
+}
 
 const RECORD_FLAGS = {
-  status: "value", reason: "value", base: "value", head: "value", pr: "value", merge: "value",
-  validation: "value", reviewer: "value", verdict: "value", deploy: "value", cleanup: "value",
-  note: "list", retry: "list", fallback: "list", declined: "list", manual: "list",
+  status: "value",
+  reason: "value",
+  base: "value",
+  head: "value",
+  pr: "value",
+  merge: "value",
+  validation: "value",
+  reviewer: "value",
+  verdict: "value",
+  deploy: "value",
+  cleanup: "value",
+  note: "list",
+  retry: "list",
+  fallback: "list",
+  declined: "list",
+  manual: "list",
 } as const;
 
 function sweepCommand(args: string[], root: string, manifest: Manifest, services: Services): number {
@@ -142,7 +173,9 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
     for (const event of update.events ?? []) {
       const earlier = [...(known.get(event.kind) ?? [])].sort();
       if (earlier.length > 0 && !earlier.includes(event.cause)) {
-        services.warn(`Note: '${event.cause}' is a new ${event.kind} cause; earlier ledgers use ${earlier.join(", ")}. Reuse one when it names the same cause, so retro can group them.\n`);
+        services.warn(
+          `Note: '${event.cause}' is a new ${event.kind} cause; earlier ledgers use ${earlier.join(", ")}. Reuse one when it names the same cause, so retro can group them.\n`,
+        );
       }
     }
     return 0;
@@ -157,18 +190,30 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
   }
   if (action === "list") {
     usage(rest.length === 0, "Usage: matrix sweep list");
-    output(listSweeps(root).map(({ sweep, updatedAt, counts, remaining, events }) => ({ branch: sweep.branch, topic: sweep.topic, startedAt: sweep.startedAt, updatedAt, counts, remaining, events })));
+    output(
+      listSweeps(root).map(({ sweep, updatedAt, counts, remaining, events }) => ({
+        branch: sweep.branch,
+        topic: sweep.topic,
+        startedAt: sweep.startedAt,
+        updatedAt,
+        counts,
+        remaining,
+        events,
+      })),
+    );
     return 0;
   }
   if (action === "retro") {
     const { positional, values } = parseOptions(rest, { last: "value", "min-repos": "value", "min-sweeps": "value" }, "sweep retro");
     usage(positional.length === 0 || values.last === undefined, "sweep retro takes branches or --last, not both.");
-    output(retro(root, {
-      branches: positional,
-      last: count(values.last, "last"),
-      minRepos: count(values["min-repos"], "min-repos"),
-      minSweeps: count(values["min-sweeps"], "min-sweeps"),
-    }));
+    output(
+      retro(root, {
+        branches: positional,
+        last: count(values.last, "last"),
+        minRepos: count(values["min-repos"], "min-repos"),
+        minSweeps: count(values["min-sweeps"], "min-sweeps"),
+      }),
+    );
     return 0;
   }
   if (action === "resolve") {
@@ -183,13 +228,21 @@ function sweepCommand(args: string[], root: string, manifest: Manifest, services
 export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, services: Services = SERVICES): number {
   const output = (value: unknown) => json(services, value);
   const [command, ...args] = argv;
-  if (!command || command === "--help" || command === "-h") { services.write(HELP); return 0; }
+  if (!command || command === "--help" || command === "-h") {
+    services.write(HELP);
+    return 0;
+  }
   const manifest = loadManifest(root);
   if (command === "sync" || command === "status") {
     const repos = selectRepos(manifest, parseOptions(args, {}, command).positional);
     if (command === "status") {
       const checkouts = repos.map(statusReader(root, manifest));
-      output({ ready: checkouts.every(checkout => checkout.ready), checkouts, staleInstalls: staleInstalls(checkouts), unmanaged: unmanagedCheckouts(root, manifest.repos) });
+      output({
+        ready: checkouts.every(checkout => checkout.ready),
+        checkouts,
+        staleInstalls: staleInstalls(checkouts),
+        unmanaged: unmanagedCheckouts(root, manifest.repos),
+      });
       return 0;
     }
     const results = repos.map(repo => {
@@ -251,7 +304,11 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
   if (command === "sweep") return sweepCommand(args, root, manifest, services);
   if (command === "teardown") {
     const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "teardown");
-    const result = teardownAll(teardownTargets(root, manifest, positional), (directory, apply) => services.teardown(root, directory, apply), booleans.has("apply"));
+    const result = teardownAll(
+      teardownTargets(root, manifest, positional),
+      (directory, apply) => services.teardown(root, directory, apply),
+      booleans.has("apply"),
+    );
     output(result);
     return result.ok ? 0 : 1;
   }

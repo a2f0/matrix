@@ -1,8 +1,17 @@
 /** The small part of CommonMark that audits and guidance checks need. */
 
-export function nonBlankLines(source: string): string[] { return source.split("\n").map(line => line.trim()).filter(Boolean); }
+export function nonBlankLines(source: string): string[] {
+  return source
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean);
+}
 
-export interface Heading { readonly level: number; readonly text: string; readonly line: number }
+export interface Heading {
+  readonly level: number;
+  readonly text: string;
+  readonly line: number;
+}
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
@@ -48,10 +57,15 @@ export function section(source: string, name: string): string | undefined {
   const start = all.findIndex(heading => heading.level >= 2 && heading.text.toLowerCase() === name.toLowerCase());
   if (start === -1) return undefined;
   const end = all.slice(start + 1).find(heading => heading.level <= all[start]!.level)?.line;
-  return source.split("\n").slice(all[start]!.line + 1, end).join("\n");
+  return source
+    .split("\n")
+    .slice(all[start]!.line + 1, end)
+    .join("\n");
 }
 
-export function hasSection(source: string, name: string): boolean { return section(source, name) !== undefined; }
+export function hasSection(source: string, name: string): boolean {
+  return section(source, name) !== undefined;
+}
 
 /** Inline, reference, and autolinks, and shortcut references the document defines. */
 export function hasLink(text: string, document: string): boolean {
@@ -71,9 +85,18 @@ export function splitCode(source: string): { prose: string; code: string[] } {
   for (const line of source.split("\n")) {
     if (fence === undefined) {
       const marker = FENCE.exec(line)?.[1];
-      if (marker) { fence = marker; block = []; continue; }
+      if (marker) {
+        fence = marker;
+        block = [];
+        continue;
+      }
       // Inline code spans open and close with the same run of backticks.
-      prose.push(line.replace(/(`+)(.+?)\1/g, (_, _ticks, span: string) => { code.push(span.trim()); return " "; }));
+      prose.push(
+        line.replace(/(`+)(.+?)\1/g, (_, _ticks, span: string) => {
+          code.push(span.trim());
+          return " ";
+        }),
+      );
     } else if (closes(line, fence)) {
       fence = undefined;
       code.push(block.join("\n"));
@@ -95,7 +118,12 @@ export function linkTargets(source: string): string[] {
 
 /** GitHub's anchor for a heading: lowercase, punctuation removed, spaces as hyphens. */
 function anchor(text: string): string {
-  return text.replace(/`/g, "").trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "").replace(/ /g, "-");
+  return text
+    .replace(/`/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "")
+    .replace(/ /g, "-");
 }
 
 /** Every anchor a document defines, with GitHub's -1, -2 suffixes for repeated headings. */

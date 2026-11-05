@@ -25,8 +25,8 @@ Use the Bun version pinned in `.mise.toml`. In agent shells, put its
 `~/.local/share/mise/installs/bun/<version>/bin` first on `PATH`; do not run
 `mise trust` to activate the checkout.
 
-Validate with `bun run check`, which records typecheck, tests, and managed-skill
-checks through the shared validation group. CI also validates the actual branch
+Validate with `bun run check`, which records each step of
+`scripts/testing/verify.json`. CI also validates the actual branch
 name using `bun run lint:branch-name <name>`. The tests check that every link,
 command, and audit rule the docs name exists, that matrix passes its own audit,
 and that this file stays within its word budget; make room for new guidance by

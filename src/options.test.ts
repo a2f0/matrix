@@ -17,7 +17,10 @@ test("rejects unknown, repeated, or incomplete options", () => {
   expect(() => parseOptions(["--topic"], spec, "sweep")).toThrow("needs a value");
   expect(() => parseOptions(["--topic", "--markdown"], spec, "sweep")).toThrow("'--topic' needs a value");
   expect(() => parseOptions(["--note", "--topic=x"], spec, "sweep")).toThrow("'--note' needs a value");
-  expect(parseOptions(["--note=--flag-like", "--topic", "-1 day"], spec, "sweep")).toMatchObject({ values: { topic: "-1 day" }, lists: { note: ["--flag-like"] } });
+  expect(parseOptions(["--note=--flag-like", "--topic", "-1 day"], spec, "sweep")).toMatchObject({
+    values: { topic: "-1 day" },
+    lists: { note: ["--flag-like"] },
+  });
   expect(() => parseOptions(["--topic", "a", "--topic", "b"], spec, "sweep")).toThrow("given twice");
   expect(() => parseOptions(["--markdown=yes"], spec, "sweep")).toThrow("takes no value");
 });

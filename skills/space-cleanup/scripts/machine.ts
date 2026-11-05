@@ -49,7 +49,9 @@ const HOST: Host = {
 const OPTIONS = String.raw`(?:\s+-\S+(?:\s+[^\s-]\S*)?)*`;
 // Anything that writes to a package cache: installs, updates, removals, and one-off runners.
 const CACHE_WRITERS = "install|i|ci|add|update|up|upgrade|remove|rm|uninstall|reinstall|link|dedupe|fetch|x|dlx|exec";
-export const INSTALLING = new RegExp(String.raw`(^|[\s/])((bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?${OPTIONS}(\s+run\s+agent-tool\s+bun${OPTIONS})?\s+(${CACHE_WRITERS})|(bunx|npx|pnpx)(\.(?:c|m)?js)?)(\s|$)`);
+export const INSTALLING = new RegExp(
+  String.raw`(^|[\s/])((bun|npm|npm-cli|pnpm|yarn|brew)(\.(?:c|m)?js|\.rb)?${OPTIONS}(\s+run\s+agent-tool\s+bun${OPTIONS})?\s+(${CACHE_WRITERS})|(bunx|npx|pnpx)(\.(?:c|m)?js)?)(\s|$)`,
+);
 
 /**
  * DerivedData entries safe to delete: each project's build products and
@@ -91,14 +93,19 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
     return proc ? `${proc.name} is running (pid ${proc.pid})` : undefined;
   };
   const dir = (id: string, description: string, location: string, reportOnly: boolean, apply?: () => string, guard?: MachineItem["guard"]) => {
-    if (existsSync(location)) items.push({ id, description: `${description} (${location.replace(home, "~")})`, reportOnly, bytes: measure([location]).get(location), apply, guard });
+    if (existsSync(location))
+      items.push({ id, description: `${description} (${location.replace(home, "~")})`, reportOnly, bytes: measure([location]).get(location), apply, guard });
   };
 
   const derived = path.join(home, "Library/Developer/Xcode/DerivedData");
   if (existsSync(derived)) {
     // A DerivedData that must not be touched sizes as nothing; applying it reports why.
     let removable: string[] = [];
-    try { removable = derivedDataRemovals(derived); } catch { /* reported by apply */ }
+    try {
+      removable = derivedDataRemovals(derived);
+    } catch {
+      /* reported by apply */
+    }
     const sizes = measure(removable);
     items.push({
       id: "xcode-derived-data",
@@ -117,33 +124,91 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
     const listing = host.output("xcrun", ["simctl", "list", "devices", "unavailable"]);
     const count = listing.split("\n").filter(line => /\(unavailable/.test(line)).length;
     // Their app data returns if the runtime is reinstalled, so deleting them is the owner's call.
-    if (count > 0) items.push({ id: "unavailable-simulators", description: `${count} simulators whose runtime is no longer installed; \`xcrun simctl delete unavailable\` removes them and their app data`, reportOnly: true });
+    if (count > 0)
+      items.push({
+        id: "unavailable-simulators",
+        description: `${count} simulators whose runtime is no longer installed; \`xcrun simctl delete unavailable\` removes them and their app data`,
+        reportOnly: true,
+      });
   }
   if (has("brew")) {
     const match = /free approximately ([\d.]+)([KMGT]?B)/.exec(host.output("brew", ["cleanup", "-n"]));
     const unit: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
     // brew cleanup removes downloads an install in progress is using.
-    if (match) items.push({ id: "homebrew-cleanup", description: "Old Homebrew versions and downloads (`brew cleanup`)", reportOnly: false, bytes: Number(match[1]) * unit[match[2]!]!, apply: () => { run("brew", ["cleanup"]); return "cleaned"; }, guard: installing });
+    if (match)
+      items.push({
+        id: "homebrew-cleanup",
+        description: "Old Homebrew versions and downloads (`brew cleanup`)",
+        reportOnly: false,
+        bytes: Number(match[1]) * unit[match[2]!]!,
+        apply: () => {
+          run("brew", ["cleanup"]);
+          return "cleaned";
+        },
+        guard: installing,
+      });
   }
   if (has("bun")) {
     const cache = host.output("bun", ["pm", "cache"]).trim().split("\n")[0];
     if (cache) dir("bun-cache", "Bun install cache", cache, false, () => run("bun", ["pm", "cache", "rm"]) || "removed", installing);
   }
   if (has("npm")) {
-    dir("npm-cache", "npm cache", path.join(home, ".npm/_cacache"), false, () => { run("npm", ["cache", "clean", "--force"]); return "cleaned"; }, installing);
+    dir(
+      "npm-cache",
+      "npm cache",
+      path.join(home, ".npm/_cacache"),
+      false,
+      () => {
+        run("npm", ["cache", "clean", "--force"]);
+        return "cleaned";
+      },
+      installing,
+    );
   }
   if (has("pnpm")) {
-    items.push({ id: "pnpm-store", description: "Packages no project references in the pnpm store (`pnpm store prune`)", reportOnly: false, apply: () => { run("pnpm", ["store", "prune"]); return "pruned"; }, guard: installing });
+    items.push({
+      id: "pnpm-store",
+      description: "Packages no project references in the pnpm store (`pnpm store prune`)",
+      reportOnly: false,
+      apply: () => {
+        run("pnpm", ["store", "prune"]);
+        return "pruned";
+      },
+      guard: installing,
+    });
   }
   dir("gradle-caches", "Gradle caches; delete with Gradle stopped if Android builds can wait for a re-download", path.join(home, ".gradle/caches"), true);
   dir("playwright-browsers", "Playwright browsers; old versions no project pins can go", path.join(home, "Library/Caches/ms-playwright"), true);
-  dir("ios-device-support", "iOS DeviceSupport; versions for devices no longer used can go", path.join(home, "Library/Developer/Xcode/iOS DeviceSupport"), true);
-  dir("simulator-devices", "Simulator devices; `xcrun simctl erase` or delete ones no project uses", path.join(home, "Library/Developer/CoreSimulator/Devices"), true);
+  dir(
+    "ios-device-support",
+    "iOS DeviceSupport; versions for devices no longer used can go",
+    path.join(home, "Library/Developer/Xcode/iOS DeviceSupport"),
+    true,
+  );
+  dir(
+    "simulator-devices",
+    "Simulator devices; `xcrun simctl erase` or delete ones no project uses",
+    path.join(home, "Library/Developer/CoreSimulator/Devices"),
+    true,
+  );
   if (has("tmutil")) {
-    const snapshots = host.output("tmutil", ["listlocalsnapshots", "/"]).split("\n").filter(line => line.includes("com.apple")).length;
-    if (snapshots > 0) items.push({ id: "local-snapshots", description: `${snapshots} Time Machine local snapshots hold deleted files' space until macOS thins them`, reportOnly: true });
+    const snapshots = host
+      .output("tmutil", ["listlocalsnapshots", "/"])
+      .split("\n")
+      .filter(line => line.includes("com.apple")).length;
+    if (snapshots > 0)
+      items.push({
+        id: "local-snapshots",
+        description: `${snapshots} Time Machine local snapshots hold deleted files' space until macOS thins them`,
+        reportOnly: true,
+      });
   }
-  if (has("docker")) items.push({ id: "docker", description: "Docker images, containers, and volumes; `docker system df` sizes them, and pruning is the owner's call", reportOnly: true });
+  if (has("docker"))
+    items.push({
+      id: "docker",
+      description: "Docker images, containers, and volumes; `docker system df` sizes them, and pruning is the owner's call",
+      reportOnly: true,
+    });
   for (const item of items) item.skipped = item.guard?.(procs);
   return items;
 }
@@ -158,10 +223,19 @@ export function applyMachine(items: MachineItem[], discover: () => Proc[]): numb
   for (const item of items) {
     if (item.reportOnly || !item.apply) continue;
     if (item.guard) {
-      try { item.skipped = item.guard(discover()); } catch (error) { item.skipped = (error as Error).message; }
+      try {
+        item.skipped = item.guard(discover());
+      } catch (error) {
+        item.skipped = (error as Error).message;
+      }
     }
     if (item.skipped) continue;
-    try { item.result = item.apply(); } catch (error) { item.result = `failed: ${(error as Error).message}`; failures++; }
+    try {
+      item.result = item.apply();
+    } catch (error) {
+      item.result = `failed: ${(error as Error).message}`;
+      failures++;
+    }
   }
   return failures;
 }

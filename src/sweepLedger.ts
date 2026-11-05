@@ -99,12 +99,16 @@ export function sweepDirectory(root: string, branch: string): string {
 }
 
 /** One repository's numbered update files. */
-function entryDirectory(directory: string, repo: string): string { return path.join(directory, "repos", repoName(repo)); }
+function entryDirectory(directory: string, repo: string): string {
+  return path.join(directory, "repos", repoName(repo));
+}
 
 /** Read a ledger file, checking the fields that locate and order its records. */
 export function readJson<T>(file: string, valid: (value: unknown) => value is T): T {
   let value: unknown;
-  try { value = JSON.parse(readFileSync(file, "utf8")); } catch (error) {
+  try {
+    value = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
     throw new Error(`Could not read ${file}: ${errorMessage(error)}`);
   }
   if (!valid(value)) throw new Error(`Could not read ${file}: it is not a sweep ledger record.`);
@@ -113,11 +117,17 @@ export function readJson<T>(file: string, valid: (value: unknown) => value is T)
 
 function isSweep(value: unknown): value is Sweep {
   const sweep = object(value);
-  return typeof sweep?.branch === "string" && typeof sweep.startedAt === "string"
-    && Array.isArray(sweep.repos) && sweep.repos.every(repo => typeof repo === "string");
+  return (
+    typeof sweep?.branch === "string" &&
+    typeof sweep.startedAt === "string" &&
+    Array.isArray(sweep.repos) &&
+    sweep.repos.every(repo => typeof repo === "string")
+  );
 }
 
-function isStoredUpdate(value: unknown): value is StoredUpdate { return typeof object(value)?.at === "string"; }
+function isStoredUpdate(value: unknown): value is StoredUpdate {
+  return typeof object(value)?.at === "string";
+}
 
 /** Write JSON to a new private file in `folder`, to publish under its final name. */
 function writeTemporary(folder: string, value: unknown): string {
@@ -139,7 +149,9 @@ const UPDATE = /^([0-9]+)\.json$/;
 
 /** Update files in append order. */
 function updateFiles(folder: string): string[] {
-  return readdirSync(folder).filter(name => UPDATE.test(name)).sort((left, right) => Number(UPDATE.exec(left)![1]) - Number(UPDATE.exec(right)![1]));
+  return readdirSync(folder)
+    .filter(name => UPDATE.test(name))
+    .sort((left, right) => Number(UPDATE.exec(left)![1]) - Number(UPDATE.exec(right)![1]));
 }
 
 /**
@@ -201,7 +213,8 @@ export function loadEntries(directory: string, sweep: Sweep): RepoEntry[] {
 export function report(sweep: Sweep, entries: RepoEntry[]): SweepReport {
   const counts: Partial<Record<SweepStatus, number>> = {};
   for (const entry of entries) counts[entry.status] = (counts[entry.status] ?? 0) + 1;
-  const updatedAt = entries.map(entry => entry.updatedAt).reduce((latest, at) => (at > latest ? at : latest), sweep.startedAt);
+  // ISO timestamps sort as text, so the last one is the latest.
+  const updatedAt = [sweep.startedAt, ...entries.map(entry => entry.updatedAt)].sort().at(-1)!;
   return {
     sweep,
     updatedAt,

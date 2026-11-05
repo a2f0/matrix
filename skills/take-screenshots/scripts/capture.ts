@@ -25,7 +25,9 @@ export const RUNNER: Runner = {
       // detached gives the capture its own process group, so its descendants can be found, signalled, and waited for.
       const child = spawn("bun", ["run", "screenshots", ...args], { cwd: root, env, stdio: "inherit", detached: true });
       child.once("error", error => reject(new Error(`Could not run bun: ${error.message}`)));
-      child.once("spawn", () => { if (child.pid) started(child.pid); });
+      child.once("spawn", () => {
+        if (child.pid) started(child.pid);
+      });
       child.once("exit", code => resolve({ code, ...(child.pid ? { pgid: child.pid } : {}) }));
     });
   },
@@ -44,9 +46,17 @@ export async function drainGroup(pgid: number, graceMs = 30_000, killMs = 10_000
   };
   if (await wait(graceMs)) return "exited";
   process.stderr.write(`Capture processes in group ${pgid} outlived the capture; stopping them, so this capture fails.\n`);
-  try { process.kill(-pgid, "SIGTERM"); } catch { /* exited meanwhile */ }
+  try {
+    process.kill(-pgid, "SIGTERM");
+  } catch {
+    /* exited meanwhile */
+  }
   if (await wait(killMs)) return "stopped";
-  try { process.kill(-pgid, "SIGKILL"); } catch { /* exited meanwhile */ }
+  try {
+    process.kill(-pgid, "SIGKILL");
+  } catch {
+    /* exited meanwhile */
+  }
   return (await wait(killMs)) ? "stopped" : "stuck";
 }
 
@@ -73,15 +83,29 @@ function isDirty(root: string): boolean {
     return result.stdout;
   };
   // `ls-files -v` tags assume-unchanged entries in lowercase and skip-worktree entries with S.
-  if (checked("ls-files", "-v").split("\n").some(line => /^[a-zS] /.test(line))) return true;
+  if (
+    checked("ls-files", "-v")
+      .split("\n")
+      .some(line => /^[a-zS] /.test(line))
+  )
+    return true;
   // Configured submodule ignore settings could hide a submodule's changes; count them all.
   return checked("status", "--porcelain=v1", "--untracked-files=normal", "--ignore-submodules=none") !== "";
 }
 
 /** How long leftover capture processes get before they are stopped; tests shorten it. */
-export interface Timing { readonly graceMs?: number; readonly killMs?: number }
+export interface Timing {
+  readonly graceMs?: number;
+  readonly killMs?: number;
+}
 
-export async function capture(target: Target, artifacts: string, options: { apply: boolean; allowDirty: boolean; args: string[] }, runner: Runner = RUNNER, timing: Timing = {}): Promise<CapturePlan> {
+export async function capture(
+  target: Target,
+  artifacts: string,
+  options: { apply: boolean; allowDirty: boolean; args: string[] },
+  runner: Runner = RUNNER,
+  timing: Timing = {},
+): Promise<CapturePlan> {
   if (typeof packageScripts(target.root).screenshots !== "string") {
     throw new Error(`${target.name} has no \`screenshots\` package script; see the take-screenshots skill's repository contract`);
   }
@@ -99,9 +123,14 @@ export async function capture(target: Target, artifacts: string, options: { appl
   const store = storeDir(target, artifacts);
   const planned = readRecord(store);
   const plan: CapturePlan = {
-    name: target.name, project: target.project, store,
+    name: target.name,
+    project: target.project,
+    store,
     command: ["bun", "run", "screenshots", ...options.args].join(" "),
-    commit, branch, dirty, merged,
+    commit,
+    branch,
+    dirty,
+    merged,
     ...(planned ? { previous: planned } : {}),
   };
   if (!options.apply) return plan;
@@ -114,7 +143,12 @@ export async function capture(target: Target, artifacts: string, options: { appl
   let group: number | undefined;
   const hold = (received: NodeJS.Signals) => {
     signal = received;
-    if (group !== undefined) try { process.kill(-group, received); } catch { /* already gone */ }
+    if (group !== undefined)
+      try {
+        process.kill(-group, received);
+      } catch {
+        /* already gone */
+      }
   };
   process.on("SIGINT", hold);
   process.on("SIGTERM", hold);
@@ -125,15 +159,22 @@ export async function capture(target: Target, artifacts: string, options: { appl
     if (foreign) throw new Error(foreign);
     // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
     const partial = options.args.length > 0;
-    const inheritsDirty = partial && previous !== undefined && previous.dirty;
+    const inheritsDirty = partial && previous?.dirty === true;
     const inheritsIncomplete = partial && (previous === undefined || previous.status !== "complete");
     const base = {
-      schemaVersion: 1 as const, project: target.project, ...(target.repo ? { repo: target.repo } : {}),
-      commit, branch, dirty: dirty || inheritsDirty, args: options.args,
+      schemaVersion: 1 as const,
+      project: target.project,
+      ...(target.repo ? { repo: target.repo } : {}),
+      commit,
+      branch,
+      dirty: dirty || inheritsDirty,
+      args: options.args,
       // Kept images are only as merged as the capture that made them.
       merged: partial && previous && previous.merged !== true && merged !== false ? previous.merged : merged,
       ...(partial && previous ? { over: { commit: previous.commit, status: previous.status, dirty: previous.dirty } } : {}),
-      checkout: target.root, host: os.hostname(), startedAt,
+      checkout: target.root,
+      host: os.hostname(),
+      startedAt,
     };
     writeRecord(store, { ...base, status: "running" });
     let exitCode: number | null = null;
@@ -153,8 +194,14 @@ export async function capture(target: Target, artifacts: string, options: { appl
       const kept = linkState(target, artifacts).state === "linked";
       // The record names one commit: a branch switch or new edit mid-capture makes that untrue.
       const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
-      if (moved) process.stderr.write(`${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`);
-      if (!kept) process.stderr.write(`${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`);
+      if (moved)
+        process.stderr.write(
+          `${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`,
+        );
+      if (!kept)
+        process.stderr.write(
+          `${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`,
+        );
       const finalStatus = (): CaptureRecord["status"] => {
         if (exitCode !== 0 || signal || !kept || moved || drained !== "exited") return "failed";
         return inheritsIncomplete ? "incomplete" : "complete";

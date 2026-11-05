@@ -3,8 +3,12 @@ import type { Manifest } from "./manifest";
 
 const LIMIT = 1000;
 
-function key(repo: string): string { return repo.toLowerCase(); }
-export function byName(left: string, right: string): number { return key(left).localeCompare(key(right)); }
+function key(repo: string): string {
+  return repo.toLowerCase();
+}
+export function byName(left: string, right: string): number {
+  return key(left).localeCompare(key(right));
+}
 
 /** List the owner's non-fork, unarchived repositories with the configured visibility. */
 export function listOwnerRepos(discover: Manifest["discover"]): string[] {

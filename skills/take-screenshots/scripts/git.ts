@@ -5,9 +5,20 @@ import { spawnSync } from "node:child_process";
 // From `git rev-parse --local-env-vars`: variables that bind Git to one repository,
 // such as those a hook sets, and that would override `cwd`.
 const REPOSITORY_VARIABLES = [
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
-  "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
-  "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CONFIG",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_GRAFT_FILE",
+  "GIT_INDEX_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_PREFIX",
+  "GIT_SHALLOW_FILE",
   "GIT_COMMON_DIR",
 ];
 
@@ -18,7 +29,13 @@ const REPOSITORY_VARIABLES = [
 export function git(cwd: string, ...args: string[]): { status: number | null; stdout: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
   for (const name of REPOSITORY_VARIABLES) delete env[name];
-  const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd, env, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], {
+    cwd,
+    env,
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   if (result.error) throw new Error(`Could not run git: ${result.error.message}`);
   return { status: result.status, stdout: result.stdout.trim() };
 }
@@ -29,4 +46,6 @@ export function gitValue(cwd: string, ...args: string[]): string | undefined {
 }
 
 // Kept in sync with space-cleanup/scripts/targets.ts toplevel.
-export function toplevel(cwd: string): string | undefined { return gitValue(cwd, "rev-parse", "--show-toplevel"); }
+export function toplevel(cwd: string): string | undefined {
+  return gitValue(cwd, "rev-parse", "--show-toplevel");
+}

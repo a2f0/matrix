@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, expect, test } from "bun:test";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type Gh, runGh } from "./gh";
 import { deployAll, deploySecrets, dotenvNames, secretsRoot } from "./secrets";
+import { tempDir } from "./testFixtures";
 
 let secrets: string, calls: string[][];
 const remote: Record<string, string[]> = { secret: ["DEPLOY_KEY", "LEGACY_TOKEN"], variable: [] };
@@ -20,20 +20,18 @@ function ci(file: string, content: string): string {
 }
 
 beforeEach(() => {
-  secrets = mkdtempSync(path.join(tmpdir(), "matrix-secrets-"));
+  secrets = tempDir("matrix-secrets");
   calls = [];
 });
-
-afterEach(() => rmSync(secrets, { recursive: true, force: true }));
 
 test("reads names in order and skips comments, export prefixes, and quoted multi-line values", () => {
   const source = [
     "# header",
     "",
     "export API_TOKEN=abc # trailing",
-    "SSH_KEY=\"-----BEGIN KEY-----",
-    "NOT_A_NAME=inside the value \\\" still inside",
-    "-----END KEY-----\"",
+    'SSH_KEY="-----BEGIN KEY-----',
+    'NOT_A_NAME=inside the value \\" still inside',
+    '-----END KEY-----"',
     "SINGLE='one",
     "two'",
     "  PLAIN = value",
@@ -46,8 +44,8 @@ test("treats a quote after a backslash as part of the value, as gh's parser does
     "SINGLE='it\\'s",
     "HIDDEN_ONE=still inside",
     "done'",
-    "DOUBLE=\"ends with a backslash \\\\\"",
-    "HIDDEN_TWO=still inside\"",
+    'DOUBLE="ends with a backslash \\\\"',
+    'HIDDEN_TWO=still inside"',
     "EMPTY=''",
     "LAST=1",
   ].join("\n");
@@ -59,8 +57,8 @@ test("rejects lines and names GitHub would refuse", () => {
   expect(() => dotenvNames("GITHUB_TOKEN=x\n", "f")).toThrow("reserves names");
   expect(() => dotenvNames("A=1\nA=2\n", "f")).toThrow("A is assigned twice");
   expect(() => dotenvNames("TOKEN=1\ntoken=2\n", "f")).toThrow("token is assigned twice");
-  expect(() => dotenvNames("A=\"open\n", "f")).toThrow("unterminated quoted value");
-  expect(() => dotenvNames("A=\"x\" B=y\n", "f")).toThrow("f:1: A has text after its closing quote.");
+  expect(() => dotenvNames('A="open\n', "f")).toThrow("unterminated quoted value");
+  expect(() => dotenvNames('A="x" B=y\n', "f")).toThrow("f:1: A has text after its closing quote.");
   expect(() => dotenvNames("A='one\ntwo' C=3\n", "f")).toThrow("f:2: A has text after its closing quote.");
   expect(dotenvNames("A=\"x\"   # note\nB='y'\n", "f")).toEqual(["A", "B"]);
 });
@@ -111,7 +109,9 @@ test("reports what a partly failed apply already set", () => {
 
 test("skips repositories without a ci folder", () => {
   expect(deploySecrets(secrets, "a2f0/other", true, gh)).toEqual({
-    repo: "a2f0/other", path: path.join(secrets, "other", "ci"), skipped: "no ci folder",
+    repo: "a2f0/other",
+    path: path.join(secrets, "other", "ci"),
+    skipped: "no ci folder",
   });
   expect(calls).toEqual([]);
 });

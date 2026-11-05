@@ -1,13 +1,28 @@
 import { spawnSync } from "node:child_process";
 
-interface GitResult { readonly status: number | null; readonly stdout: string; readonly stderr: string }
+interface GitResult {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
 
 // From `git rev-parse --local-env-vars`: variables that bind Git to one repository,
 // such as those set while a hook runs. Git clears the same set when it enters another.
 const REPOSITORY_VARIABLES = [
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
-  "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
-  "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX", "GIT_SHALLOW_FILE",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CONFIG",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_GRAFT_FILE",
+  "GIT_INDEX_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_PREFIX",
+  "GIT_SHALLOW_FILE",
   "GIT_COMMON_DIR",
 ];
 
@@ -41,4 +56,6 @@ export function gitOutput(cwd: string, args: string[]): string {
   return result.stdout;
 }
 
-export function gitSucceeds(cwd: string, args: string[]): boolean { return git(cwd, args).status === 0; }
+export function gitSucceeds(cwd: string, args: string[]): boolean {
+  return git(cwd, args).status === 0;
+}

@@ -67,7 +67,9 @@ function list(items: string[], limit = 4): string {
   return items.length <= limit ? items.join(", ") : `${items.slice(0, limit).join(", ")}, and ${items.length - limit} more`;
 }
 
-function gib(bytes: number): string { return `${Math.floor(bytes / GIB)} GiB`; }
+function gib(bytes: number): string {
+  return `${Math.floor(bytes / GIB)} GiB`;
+}
 
 /** Combine status, audit, discovery, and sweep retro into one report with suggested next steps. */
 export function assessHealth(inputs: HealthInputs): Health {
@@ -78,26 +80,44 @@ export function assessHealth(inputs: HealthInputs): Health {
   const stale = staleInstalls(inputs.statuses);
   const suggestions: string[] = [];
   const low = inputs.disk !== undefined && inputs.disk.free < MIN_FREE_DISK_GIB * GIB;
-  if (low) suggestions.push(`Free disk space before the next sweep: ${gib(inputs.disk!.free)} free of ${gib(inputs.disk!.total)}; validation needs at least ${MIN_FREE_DISK_GIB} GiB; \`bun run space\` lists what is safe to remove.`);
+  if (low)
+    suggestions.push(
+      `Free disk space before the next sweep: ${gib(inputs.disk!.free)} free of ${gib(inputs.disk!.total)}; validation needs at least ${MIN_FREE_DISK_GIB} GiB; \`bun run space\` lists what is safe to remove.`,
+    );
   const leftover = inputs.running ? leftoverRepos(inputs.running) : [];
-  if (leftover.length > 0) suggestions.push(`Stop what earlier work left running in ${list(leftover)}: \`bun run teardown\` lists it, \`--apply\` stops recorded processes, and untracked ones need stopping by hand.`);
+  if (leftover.length > 0)
+    suggestions.push(
+      `Stop what earlier work left running in ${list(leftover)}: \`bun run teardown\` lists it, \`--apply\` stops recorded processes, and untracked ones need stopping by hand.`,
+    );
   for (const problem of inputs.git?.problems ?? []) suggestions.push(`Keep Git on SSH: ${problem}; see docs/health.md#github-over-ssh.`);
   for (const { repo, reason } of notReadyList) suggestions.push(`Inspect ${repo} before the next sweep: ${reason}.`);
   if (stale.length > 0) suggestions.push(`Reinstall dependencies in ${list(stale)}; their node_modules hold a different agent-tool than they pin.`);
   for (const repo of inputs.discovery?.added ?? []) suggestions.push(`Onboard ${repo}: \`bun run discover --apply\`, then the onboarding steps in AGENTS.md.`);
-  for (const repo of inputs.discovery?.notDiscovered ?? []) suggestions.push(`Check ${repo}: it is managed, but discovery no longer finds it (renamed, archived, or no longer public?).`);
+  for (const repo of inputs.discovery?.notDiscovered ?? [])
+    suggestions.push(`Check ${repo}: it is managed, but discovery no longer finds it (renamed, archived, or no longer public?).`);
   for (const [rule, repos] of Object.entries(inputs.audit.failures)) {
     suggestions.push(`Fix \`${rule}\` in ${plural(repos.length, "checkout")} (${list(repos)}); \`bun run audit --rule ${rule}\` has the details.`);
   }
   for (const group of inputs.retro.recurring) {
-    suggestions.push(`Resolve recurring ${group.kind} \`${group.cause}\` (${plural(group.repos.length, "repository", "repositories")}, ${plural(group.sweeps.length, "sweep")}), then \`bun run sweep resolve ${group.kind} ${group.cause}\`; see docs/sweeps.md#retro.`);
+    suggestions.push(
+      `Resolve recurring ${group.kind} \`${group.cause}\` (${plural(group.repos.length, "repository", "repositories")}, ${plural(group.sweeps.length, "sweep")}), then \`bun run sweep resolve ${group.kind} ${group.cause}\`; see docs/sweeps.md#retro.`,
+    );
   }
-  for (const entry of inputs.retro.unfinished) suggestions.push(`Finish ${entry.repo} in sweep \`${entry.branch}\`: ${entry.status}${entry.reason ? `, ${entry.reason}` : ""}${entry.pr ? ` (${entry.pr})` : ""}.`);
+  for (const entry of inputs.retro.unfinished)
+    suggestions.push(
+      `Finish ${entry.repo} in sweep \`${entry.branch}\`: ${entry.status}${entry.reason ? `, ${entry.reason}` : ""}${entry.pr ? ` (${entry.pr})` : ""}.`,
+    );
   if (inputs.unmanaged.length > 0) suggestions.push(`Remove or manage ${list(inputs.unmanaged)}; matrix leaves unmanaged entries alone.`);
   return {
     ok: suggestions.length === 0,
     remote: inputs.discovery !== undefined,
-    checkouts: { total: inputs.statuses.length, ready: inputs.statuses.filter(status => status.ready).length, notReady: notReadyList, staleInstalls: stale, unmanaged: inputs.unmanaged },
+    checkouts: {
+      total: inputs.statuses.length,
+      ready: inputs.statuses.filter(status => status.ready).length,
+      notReady: notReadyList,
+      staleInstalls: stale,
+      unmanaged: inputs.unmanaged,
+    },
     audit: {
       rules: inputs.audit.rules.map(rule => rule.id),
       failures: inputs.audit.failures,
@@ -128,11 +148,19 @@ export function markdownHealth(health: Health, at = new Date()): string {
     "",
     `- Checkouts: ${checkouts.ready} of ${checkouts.total} ready; ${checkouts.staleInstalls.length > 0 ? `stale installs in ${list(checkouts.staleInstalls)}` : "no stale installs"}; ${checkouts.unmanaged.length > 0 ? `unmanaged ${list(checkouts.unmanaged)}` : "no unmanaged entries"}.`,
     `- Audit (${plural(audit.rules.length, "rule")}): ${[
-      failing.length === 0 ? (audit.unaudited.length === 0 ? "every checkout passes" : "every audited checkout passes") : failing.map(([rule, repos]) => `\`${rule}\` fails in ${repos.length}`).join(", "),
+      failing.length === 0
+        ? audit.unaudited.length === 0
+          ? "every checkout passes"
+          : "every audited checkout passes"
+        : failing.map(([rule, repos]) => `\`${rule}\` fails in ${repos.length}`).join(", "),
       ...(audit.unaudited.length > 0 ? [`${list(audit.unaudited)} not audited`] : []),
     ].join("; ")}.`,
     ...(disk ? [`- Disk: ${gib(disk.free)} free of ${gib(disk.total)}${disk.low ? `, under the ${MIN_FREE_DISK_GIB} GiB a sweep needs` : ""}.`] : []),
-    ...(git ? [`- Git: ${git.problems.length === 0 ? "GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH" : `${plural(git.problems.length, "way", "ways")} to leave SSH for GitHub`}.`] : []),
+    ...(git
+      ? [
+          `- Git: ${git.problems.length === 0 ? "GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH" : `${plural(git.problems.length, "way", "ways")} to leave SSH for GitHub`}.`,
+        ]
+      : []),
     ...(running ? [`- Running: ${running.leftover.length === 0 ? "nothing left running" : `teardown fails in ${list(running.leftover)}`}.`] : []),
     `- Discovery: ${discovery ? (discovery.added.length + discovery.notDiscovered.length === 0 ? "matrix.json matches the owner's repositories" : `${plural(discovery.added.length, "new repository", "new repositories")}, ${discovery.notDiscovered.length} no longer found`) : "not checked; run with --remote"}.`,
     `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no unresolved recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}${sweeps.resolved.length > 0 ? ` (${sweeps.resolved.length} resolved)` : ""}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`,

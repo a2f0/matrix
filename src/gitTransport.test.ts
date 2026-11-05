@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { effectiveHelpers, helperName, inspectGitTransport, type Runner, sshEndpoint } from "./gitTransport";
+import { gitIn, gitInit, tempDir } from "./testFixtures";
 
 let root: string;
 const saved: Record<string, string | undefined> = {};
@@ -11,24 +10,23 @@ const ISOLATION = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTE
 
 /** A repository whose only Git configuration is its own: no system or global files. */
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), "matrix-git-transport-"));
+  root = tempDir("matrix-git-transport");
   for (const name of ISOLATION) saved[name] = process.env[name];
   process.env.GIT_CONFIG_GLOBAL = path.join(root, "global");
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   process.env.HOME = root;
   writeFileSync(process.env.GIT_CONFIG_GLOBAL, "");
-  execFileSync("git", ["init", "-q"], { cwd: root });
+  gitInit(root);
 });
 afterEach(() => {
   for (const name of ISOLATION) {
     if (saved[name] === undefined) delete process.env[name];
     else process.env[name] = saved[name];
   }
-  rmSync(root, { recursive: true, force: true });
 });
 
 function config(...pairs: Array<[string, string]>): void {
-  for (const [key, value] of pairs) execFileSync("git", ["config", "--add", key, value], { cwd: root });
+  for (const [key, value] of pairs) gitIn(root, "config", "--add", key, value);
 }
 
 const record = (key: string, value: string) => `${key}\n${value}\0`;
@@ -88,7 +86,7 @@ test("passes SSH through port 443 with no helper and gh on SSH", () => {
   const result = inspectGitTransport(root, fakeRunner("ssh", "hostname ssh.github.com\nport 443\n", calls));
   expect(result).toEqual({ ghProtocol: "ssh", credentialHelpers: [], ssh: { hostname: "ssh.github.com", port: 443 }, problems: [] });
   // A configured command runs through the shell with Git's arguments appended.
-  expect(calls[1]).toEqual(["sh", "-c", "ssh -F ~/.config/git/ssh_config \"$@\"", "ssh -F ~/.config/git/ssh_config", "-G", "git@github.com"]);
+  expect(calls[1]).toEqual(["sh", "-c", 'ssh -F ~/.config/git/ssh_config "$@"', "ssh -F ~/.config/git/ssh_config", "-G", "git@github.com"]);
 });
 
 test("reports each way Git or gh can leave SSH", () => {
@@ -106,7 +104,9 @@ test("reports each way Git or gh can leave SSH", () => {
 });
 
 test("skips gh when it is not installed and reports an SSH command that cannot resolve", () => {
-  const result = inspectGitTransport(root, (command, args) => (command === "gh" ? fakeRunner(null, "")(command, args) : { status: 255, stdout: "", stderr: "ssh: Could not resolve" }));
+  const result = inspectGitTransport(root, (command, args) =>
+    command === "gh" ? fakeRunner(null, "")(command, args) : { status: 255, stdout: "", stderr: "ssh: Could not resolve" },
+  );
   expect(result.ghProtocol).toBeNull();
   expect(result.ssh).toEqual({ error: "`-G` through Git's ssh exited 255" });
   expect(result.problems).toEqual(["Could not resolve Git's SSH endpoint for github.com: `-G` through Git's ssh exited 255"]);
@@ -122,7 +122,11 @@ test("never reports the SSH command or its output, which can carry credentials",
   });
   expect(result.ssh).toEqual({ error: "`-G` through Git's configured core.sshCommand exited 255" });
   expect(JSON.stringify(result)).not.toContain("proxy_secret");
-  const missing = inspectGitTransport(root, command => (command === "gh" ? { status: 0, stdout: "ssh\n", stderr: "" } : { status: null, stdout: "", stderr: "", error: Object.assign(new Error("spawn sh ENOENT with proxy_secret"), { code: "ENOENT" }) }));
+  const missing = inspectGitTransport(root, command =>
+    command === "gh"
+      ? { status: 0, stdout: "ssh\n", stderr: "" }
+      : { status: null, stdout: "", stderr: "", error: Object.assign(new Error("spawn sh ENOENT with proxy_secret"), { code: "ENOENT" }) },
+  );
   expect(missing.ssh).toEqual({ error: "`-G` through Git's configured core.sshCommand could not start (ENOENT)" });
 });
 

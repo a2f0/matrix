@@ -41,15 +41,26 @@ export function validRecord(value: unknown): value is CaptureRecord {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   const over = record.over as Record<string, unknown> | undefined;
-  return record.schemaVersion === 1
-    && typeof record.status === "string" && STATUSES.has(record.status)
-    && typeof record.commit === "string" && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(record.commit)
-    && typeof record.dirty === "boolean"
-    && (record.merged === null || typeof record.merged === "boolean")
-    && Array.isArray(record.args) && record.args.every(arg => typeof arg === "string")
-    && (record.repo === undefined || typeof record.repo === "string")
-    && typeof record.project === "string"
-    && (over === undefined || (typeof over === "object" && over !== null && typeof over.commit === "string" && typeof over.status === "string" && STATUSES.has(over.status) && typeof over.dirty === "boolean"));
+  return (
+    record.schemaVersion === 1 &&
+    typeof record.status === "string" &&
+    STATUSES.has(record.status) &&
+    typeof record.commit === "string" &&
+    /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(record.commit) &&
+    typeof record.dirty === "boolean" &&
+    (record.merged === null || typeof record.merged === "boolean") &&
+    Array.isArray(record.args) &&
+    record.args.every(arg => typeof arg === "string") &&
+    (record.repo === undefined || typeof record.repo === "string") &&
+    typeof record.project === "string" &&
+    (over === undefined ||
+      (typeof over === "object" &&
+        over !== null &&
+        typeof over.commit === "string" &&
+        typeof over.status === "string" &&
+        STATUSES.has(over.status) &&
+        typeof over.dirty === "boolean"))
+  );
 }
 
 /** The newest capture's record; a missing or malformed one reads as no record, which is never complete. */
@@ -57,7 +68,9 @@ export function readRecord(store: string): CaptureRecord | undefined {
   try {
     const value: unknown = JSON.parse(readFileSync(path.join(store, RECORD), "utf8"));
     return validRecord(value) ? value : undefined;
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
 /** Replace the record atomically, so a reader never sees half a file. */

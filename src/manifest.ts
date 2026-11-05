@@ -40,13 +40,18 @@ function repoList(value: unknown, field: string, uniqueNames: boolean): string[]
 
 export function parseManifest(source: string): Manifest {
   let value: unknown;
-  try { value = JSON.parse(source); } catch (error) { invalid("manifest", `is not JSON (${errorMessage(error)})`); }
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    invalid("manifest", `is not JSON (${errorMessage(error)})`);
+  }
   const input = record(value, "manifest", ["schemaVersion", "protocol", "discover", "repos"]);
   if (input.schemaVersion !== 1) invalid("schemaVersion", "must be 1");
   if (!PROTOCOLS.includes(input.protocol as Manifest["protocol"])) invalid("protocol", `must be one of ${PROTOCOLS.join(", ")}`);
   const discover = record(input.discover, "discover", ["owner", "visibility", "exclude"]);
   if (typeof discover.owner !== "string" || !/^[A-Za-z0-9-]+$/.test(discover.owner)) invalid("discover.owner");
-  if (!VISIBILITIES.includes(discover.visibility as Manifest["discover"]["visibility"])) invalid("discover.visibility", `must be one of ${VISIBILITIES.join(", ")}`);
+  if (!VISIBILITIES.includes(discover.visibility as Manifest["discover"]["visibility"]))
+    invalid("discover.visibility", `must be one of ${VISIBILITIES.join(", ")}`);
   return {
     schemaVersion: 1,
     protocol: input.protocol as Manifest["protocol"],
@@ -59,14 +64,22 @@ export function parseManifest(source: string): Manifest {
   };
 }
 
-function manifestPath(root: string): string { return path.join(root, "matrix.json"); }
-export function loadManifest(root: string): Manifest { return parseManifest(readFileSync(manifestPath(root), "utf8")); }
+function manifestPath(root: string): string {
+  return path.join(root, "matrix.json");
+}
+export function loadManifest(root: string): Manifest {
+  return parseManifest(readFileSync(manifestPath(root), "utf8"));
+}
 export function saveManifest(root: string, manifest: Manifest): void {
   writeFileSync(manifestPath(root), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-export function repoName(repo: string): string { return repo.slice(repo.indexOf("/") + 1); }
-export function checkoutPath(root: string, repo: string): string { return path.join(root, CHECKOUTS, repoName(repo)); }
+export function repoName(repo: string): string {
+  return repo.slice(repo.indexOf("/") + 1);
+}
+export function checkoutPath(root: string, repo: string): string {
+  return path.join(root, CHECKOUTS, repoName(repo));
+}
 
 export function cloneUrl(repo: string, protocol: Manifest["protocol"]): string {
   return protocol === "ssh" ? `git@github.com:${repo}.git` : `https://github.com/${repo}.git`;
@@ -77,7 +90,9 @@ const GITHUB_SSH = String.raw`git@github\.com:|ssh:\/\/git@github\.com(?::22)?\/
 const GITHUB_REMOTE = new RegExp(`^(?:${GITHUB_SSH}|https:\\/\\/(?:[^@/]+@)?github\\.com\\/)([A-Za-z0-9-]+\\/[A-Za-z0-9._-]+?)(?:\\.git)?\\/?$`, "i");
 
 /** Whether a remote URL reaches GitHub over SSH. */
-export function isGitHubSsh(url: string): boolean { return new RegExp(`^(?:${GITHUB_SSH})`, "i").test(url); }
+export function isGitHubSsh(url: string): boolean {
+  return new RegExp(`^(?:${GITHUB_SSH})`, "i").test(url);
+}
 
 /** Normalize the GitHub remote URL forms Git accepts to owner/name. */
 export function parseGitHubRepo(url: string): string | undefined {

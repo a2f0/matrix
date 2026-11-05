@@ -45,8 +45,8 @@ deployments, including effects from hooks and CI. Destructive, replacement, or
 unverifiable upgrade groups stay pinned and are reported in the upgrade PR and
 sweep ledger.
 
-A request to perform dependency updates includes the `ship-pr` workflow through
-merge and normal merge-triggered publishing or deployment. Explicit inventory-only,
+[Sweep step 6](../AGENTS.md#sweeps-across-checkouts) sets how far a
+dependency-update request ships by default. Explicit inventory-only,
 local-change, or open-PR-only requests retain their narrower scope. A preview alone
 does not authorize deployment, and the shipping default does not authorize a
 standalone infrastructure apply or manual deployment. These scope rules do not

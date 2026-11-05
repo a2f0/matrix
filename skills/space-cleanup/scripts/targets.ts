@@ -30,9 +30,10 @@ export function resolveTargets(cwd: string, names: string[]): { workspace?: stri
   // Real paths, so they compare equal to the cwd paths lsof reports.
   const here = toplevel(cwd) && realpathSync(toplevel(cwd)!);
   const workspace = here && isMatrixWorkspace(here) ? here : undefined;
-  const checkouts = (root: string) => readdirSync(path.join(root, "checkouts"), { withFileTypes: true })
-    .filter(entry => entry.isDirectory() && existsSync(path.join(root, "checkouts", entry.name, ".git")))
-    .map(entry => ({ name: entry.name, root: realpathSync(path.join(root, "checkouts", entry.name)) }));
+  const checkouts = (root: string) =>
+    readdirSync(path.join(root, "checkouts"), { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && existsSync(path.join(root, "checkouts", entry.name, ".git")))
+      .map(entry => ({ name: entry.name, root: realpathSync(path.join(root, "checkouts", entry.name)) }));
   if (names.length === 0) {
     if (workspace) return { workspace, targets: [{ name: path.basename(workspace), root: workspace }, ...checkouts(workspace)] };
     if (!here) throw new Error(`${cwd} is not inside a git repository; name one`);

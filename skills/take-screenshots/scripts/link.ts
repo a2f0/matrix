@@ -1,10 +1,8 @@
 /** Each clone's `.screenshots` link into the shared store. Node built-ins only, like artifacts.ts. */
-import {
-  lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmdirSync, symlinkSync,
-} from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmdirSync, type Stats, symlinkSync } from "node:fs";
 import path from "node:path";
 import { claimNamespace } from "./namespace";
-import { lexists, LINK, storeDir, type Target } from "./store";
+import { LINK, lexists, storeDir, type Target } from "./store";
 
 export type LinkState =
   | { readonly state: "linked" }
@@ -14,13 +12,21 @@ export type LinkState =
   | { readonly state: "other" };
 
 function sameFile(left: string, right: string): boolean {
-  try { return realpathSync(left) === realpathSync(right); } catch { return false; }
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    return false;
+  }
 }
 
 export function linkState(target: Target, artifacts: string): LinkState {
   const link = path.join(target.root, LINK);
-  let stats;
-  try { stats = lstatSync(link); } catch { return { state: "missing" }; }
+  let stats: Stats;
+  try {
+    stats = lstatSync(link);
+  } catch {
+    return { state: "missing" };
+  }
   if (stats.isSymbolicLink()) {
     const destination = path.resolve(target.root, readlinkSync(link));
     // A link to the store's path counts even before the first capture creates the directory.
@@ -39,12 +45,23 @@ export function linkState(target: Target, artifacts: string): LinkState {
  */
 function ignorePatternMatchesFile(root: string): boolean {
   let text = "";
-  try { text = readFileSync(path.join(root, ".gitignore"), "utf8"); } catch { return false; }
-  return text.split("\n").map(line => line.trim()).some(line => [LINK, `/${LINK}`, `**/${LINK}`].includes(line));
+  try {
+    text = readFileSync(path.join(root, ".gitignore"), "utf8");
+  } catch {
+    return false;
+  }
+  return text
+    .split("\n")
+    .map(line => line.trim())
+    .some(line => [LINK, `/${LINK}`, `**/${LINK}`].includes(line));
 }
 
 function emptyOrMissing(directory: string): boolean {
-  try { return readdirSync(directory).length === 0; } catch { return !lexists(directory); }
+  try {
+    return readdirSync(directory).length === 0;
+  } catch {
+    return !lexists(directory);
+  }
 }
 
 export interface LinkResult {
@@ -87,9 +104,10 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
     else return blocked(`${LINK} holds a capture and the store already holds another; compare them, then rerun with --supersede to move this clone's aside`);
   }
   // Kept, never deleted: a person removes superseded captures once nothing needs them.
-  const superseded = action === "supersede-and-link"
-    ? path.join(artifacts, target.project, "superseded", `${target.name}-${now.toISOString().replace(/[:.]/g, "-")}`)
-    : undefined;
+  const superseded =
+    action === "supersede-and-link"
+      ? path.join(artifacts, target.project, "superseded", `${target.name}-${now.toISOString().replace(/[:.]/g, "-")}`)
+      : undefined;
   if (!apply) return { ...base, before: state.state, action, ...(superseded ? { superseded } : {}) };
   // Recheck at apply time: another process may have linked or written since the plan.
   const current = linkState(target, artifacts);
@@ -103,7 +121,9 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   const relative = path.relative(realpathSync(target.root), path.join(realpathSync(path.dirname(store)), path.basename(store)));
   if (action === "move-and-link") {
     if (lexists(store)) rmdirSync(store); // empty, checked above; rename cannot replace it across all platforms
-    try { renameSync(linkPath, store); } catch (error) {
+    try {
+      renameSync(linkPath, store);
+    } catch (error) {
       return blocked(`could not move ${LINK} into the store (${(error as NodeJS.ErrnoException).code ?? String(error)}); move it by hand`);
     }
   } else if (action === "supersede-and-link") {
@@ -116,7 +136,9 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
   } else {
     mkdirSync(store, { recursive: true });
   }
-  try { symlinkSync(relative, linkPath); } catch (error) {
+  try {
+    symlinkSync(relative, linkPath);
+  } catch (error) {
     if (action === "move-and-link") renameSync(store, linkPath);
     if (action === "supersede-and-link") renameSync(superseded!, linkPath);
     throw error;
