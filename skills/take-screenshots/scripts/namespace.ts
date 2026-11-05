@@ -212,6 +212,15 @@ function ownedClaim(target: Target, owner: Owner, identity: string): Claim {
   const sameId = target.verified === true && target.id !== undefined && owner.id === target.id;
   if (!sameName && !(target.verified && (priorName || sameId))) return foreignClaim(owner.repo, identity);
   if (!target.verified) return {};
+  return confirmedOwner(target, owner, identity);
+}
+
+/**
+ * The owner record once GitHub confirmed this repository as `identity`: that
+ * name, every other name it was known by as an alias, and its id; nothing to
+ * write when the record already says so.
+ */
+function confirmedOwner(target: Target, owner: Owner, identity: string): Claim {
   const aliases = [...owner.aliases, owner.repo, ...(target.alias ? [target.alias] : [])].filter(
     (name, index, all) => lower(name) !== lower(identity) && all.findIndex(other => lower(other) === lower(name)) === index,
   );
