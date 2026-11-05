@@ -16,7 +16,7 @@
  */
 import path from "node:path";
 import { capture, RUNNER, type Runner, type Timing } from "./capture";
-import { type LinkState, link, linkState } from "./link";
+import { type LinkResult, type LinkState, link, linkState } from "./link";
 import { type LockInfo, readLock } from "./lock";
 import { claimNamespace, existingCase, knownNamespace } from "./namespace";
 import { type CaptureRecord, RECORD, readRecord, relation } from "./record";
@@ -79,6 +79,16 @@ export interface Options {
   readonly captureArgs: string[];
 }
 
+type Switches = Record<"apply" | "json" | "allowDirty" | "supersede", boolean>;
+
+/** The boolean options, by the field each sets. */
+const SWITCHES = new Map<string, keyof Switches>([
+  ["--apply", "apply"],
+  ["--json", "json"],
+  ["--allow-dirty", "allowDirty"],
+  ["--supersede", "supersede"],
+]);
+
 export function parseOptions(argv: string[]): Options {
   const [command, ...rest] = argv;
   if (command !== "status" && command !== "link" && command !== "capture") throw new Error(`unknown command '${command ?? ""}'\n\n${USAGE}`);
@@ -87,17 +97,12 @@ export function parseOptions(argv: string[]): Options {
   const captureArgs = split === -1 ? [] : rest.slice(split + 1);
   if (captureArgs.length > 0 && command !== "capture") throw new Error("only capture forwards arguments after --");
   const names: string[] = [];
-  let apply = false,
-    json = false,
-    allowDirty = false,
-    supersede = false,
-    project: string | undefined;
+  const switches: Switches = { apply: false, json: false, allowDirty: false, supersede: false };
+  let project: string | undefined;
   for (let index = 0; index < own.length; index++) {
     const arg = own[index]!;
-    if (arg === "--apply") apply = true;
-    else if (arg === "--json") json = true;
-    else if (arg === "--allow-dirty") allowDirty = true;
-    else if (arg === "--supersede") supersede = true;
+    const field = SWITCHES.get(arg);
+    if (field) switches[field] = true;
     else if (arg === "--project")
       project =
         own[++index] ??
@@ -107,10 +112,16 @@ export function parseOptions(argv: string[]): Options {
     else if (arg.startsWith("-")) throw new Error(`unknown option ${arg}\n\n${USAGE}`);
     else names.push(arg);
   }
+  checkApplies(command, switches);
+  const { apply, json, allowDirty, supersede } = switches;
+  return { command, names, apply, json, allowDirty, supersede, captureArgs, ...(project ? { project } : {}) };
+}
+
+/** Rejects options the command does not use. */
+function checkApplies(command: Options["command"], { apply, allowDirty, supersede }: Switches): void {
   if (apply && command === "status") throw new Error("status changes nothing; --apply does not apply");
   if (allowDirty && command !== "capture") throw new Error("--allow-dirty applies only to capture");
   if (supersede && command !== "link") throw new Error("--supersede applies only to link");
-  return { command, names, apply, json, allowDirty, supersede, captureArgs, ...(project ? { project } : {}) };
 }
 
 function describeCapture(entry: StatusEntry): string {
@@ -153,39 +164,52 @@ export async function main(
   if (found.some(target => artifactsRoot(target.root) !== artifacts))
     throw new Error("the selected repositories resolve different stores; set MATRIX_ARTIFACTS_DIR");
   const targets = found.map(target => existingCase(knownNamespace(target, artifacts), artifacts));
-  if (options.command === "status") {
-    const entries = targets.map(target => status(target, artifacts));
-    if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));
-    else
-      for (const entry of entries) {
-        const lock = entry.lock ? `; capture running in ${entry.lock.checkout} (pid ${entry.lock.pid})` : "";
-        print(
-          `${entry.name} [${entry.project}] ${entry.link.state}: ${entry.foreign ? `NOT THIS REPOSITORY'S: ${entry.foreign}` : describeCapture(entry)}${lock}`,
-        );
-      }
-    return entries.every(entry => entry.link.state === "linked" && !entry.foreign) ? 0 : 1;
-  }
-  if (options.command === "link") {
-    const results = targets.map(target => link(target, artifacts, options.apply, options.supersede));
-    if (options.json) print(JSON.stringify({ artifacts, apply: options.apply, results }, null, 2));
-    else
-      for (const result of results) {
-        const outcome = result.blocked
-          ? `blocked: ${result.blocked}`
-          : !result.action
-            ? "already linked"
-            : `${result.applied ? "done" : "would"} ${result.action} -> ${result.store}${result.superseded ? `; its own capture to ${result.superseded}` : ""}`;
-        print(`${result.name} [${result.project}] ${outcome}`);
-      }
-    if (!options.json && !options.apply && results.some(result => result.action && !result.blocked)) print("Dry run; rerun with --apply.");
-    return results.some(result => result.blocked) ? 1 : 0;
-  }
+  if (options.command === "status") return statusCommand(targets, artifacts, options, print);
+  if (options.command === "link") return linkCommand(targets, artifacts, options, print);
   if (targets.length !== 1) throw new Error("capture runs one repository at a time; name it");
-  const plan = await capture(targets[0]!, artifacts, { apply: options.apply, allowDirty: options.allowDirty, args: options.captureArgs }, runner, timing);
+  return captureCommand(targets[0]!, artifacts, options, runner, print, timing);
+}
+
+function statusCommand(targets: Target[], artifacts: string, options: Options, print: (text: string) => void): number {
+  const entries = targets.map(target => status(target, artifacts));
+  if (options.json) print(JSON.stringify({ artifacts, entries }, null, 2));
+  else
+    for (const entry of entries) {
+      const lock = entry.lock ? `; capture running in ${entry.lock.checkout} (pid ${entry.lock.pid})` : "";
+      print(
+        `${entry.name} [${entry.project}] ${entry.link.state}: ${entry.foreign ? `NOT THIS REPOSITORY'S: ${entry.foreign}` : describeCapture(entry)}${lock}`,
+      );
+    }
+  return entries.every(entry => entry.link.state === "linked" && !entry.foreign) ? 0 : 1;
+}
+
+function linkCommand(targets: Target[], artifacts: string, options: Options, print: (text: string) => void): number {
+  const results = targets.map(target => link(target, artifacts, options.apply, options.supersede));
+  if (options.json) print(JSON.stringify({ artifacts, apply: options.apply, results }, null, 2));
+  else for (const result of results) print(`${result.name} [${result.project}] ${linkOutcome(result)}`);
+  if (!options.json && !options.apply && results.some(result => result.action && !result.blocked)) print("Dry run; rerun with --apply.");
+  return results.some(result => result.blocked) ? 1 : 0;
+}
+
+function linkOutcome(result: LinkResult): string {
+  if (result.blocked) return `blocked: ${result.blocked}`;
+  if (!result.action) return "already linked";
+  return `${result.applied ? "done" : "would"} ${result.action} -> ${result.store}${result.superseded ? `; its own capture to ${result.superseded}` : ""}`;
+}
+
+async function captureCommand(
+  target: Target,
+  artifacts: string,
+  options: Options,
+  runner: Runner,
+  print: (text: string) => void,
+  timing: Timing,
+): Promise<number> {
+  const plan = await capture(target, artifacts, { apply: options.apply, allowDirty: options.allowDirty, args: options.captureArgs }, runner, timing);
   if (options.json) print(JSON.stringify(plan, null, 2));
   else if (!plan.applied) {
     print(
-      `Would run \`${plan.command}\` in ${targets[0]!.root} at ${plan.commit.slice(0, 10)}${plan.merged === false ? " (not on origin's default branch)" : ""}, writing ${plan.store}.`,
+      `Would run \`${plan.command}\` in ${target.root} at ${plan.commit.slice(0, 10)}${plan.merged === false ? " (not on origin's default branch)" : ""}, writing ${plan.store}.`,
     );
     if (plan.previous) print(`Replaces the ${plan.previous.status} capture of ${plan.previous.commit.slice(0, 10)} from ${plan.previous.checkout}.`);
     print("Dry run; rerun with --apply.");
