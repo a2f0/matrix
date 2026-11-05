@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explicit State Machines"
+  short_description: "Find implicit state machines and make them explicit"
+  default_prompt: "Use $explicit-state-machines to find the implicit state machines here and convert the worthwhile ones into explicit states, events, and one transition function, without changing behavior."
