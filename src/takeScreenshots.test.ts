@@ -9,7 +9,15 @@ import { drainGroup, type Runner } from "../skills/take-screenshots/scripts/capt
 import { link, linkState } from "../skills/take-screenshots/scripts/link";
 import { acquireLock } from "../skills/take-screenshots/scripts/lock";
 import { claimNamespace, existingCase, githubRepo, targetFor, updateOwner } from "../skills/take-screenshots/scripts/namespace";
-import { readRecord, relation, validRecord } from "../skills/take-screenshots/scripts/record";
+import {
+  type CaptureRecord,
+  type RecordEvent,
+  type RecordFields,
+  readRecord,
+  relation,
+  transition,
+  validRecord,
+} from "../skills/take-screenshots/scripts/record";
 import { LINK, LOCK, storeDir } from "../skills/take-screenshots/scripts/store";
 import { artifactsRoot, resolveTargets } from "../skills/take-screenshots/scripts/targets";
 import { gitIn, gitInit, tempDir, write } from "./testFixtures";
@@ -809,5 +817,66 @@ console.log(error ? "lost" : "won");
     expect(() => parseOptions(["link", "--project"])).toThrow("--project needs a name");
     expect(() => parseOptions(["status", "--force"])).toThrow("unknown option --force\n\nUsage:");
     expect(() => parseOptions([])).toThrow("unknown command ''");
+  });
+});
+
+describe("capture record transitions", () => {
+  const fields: RecordFields = {
+    schemaVersion: 1,
+    project: "app",
+    commit: "a".repeat(40),
+    branch: "main",
+    dirty: false,
+    merged: true,
+    args: [],
+    checkout: "/clone",
+    host: "host",
+    startedAt: "2026-01-01T00:00:00.000Z",
+  };
+  const running: CaptureRecord = { ...fields, status: "running" };
+  const failed: CaptureRecord = { ...fields, status: "failed", finishedAt: "2026-01-01T00:01:00.000Z", exitCode: 1 };
+  const start: RecordEvent = { type: "start", fields: { ...fields, commit: "b".repeat(40) } };
+  const finish = (status: "complete" | "failed" | "incomplete"): RecordEvent => ({
+    type: "finish",
+    status,
+    finishedAt: "2026-01-01T00:02:00.000Z",
+    exitCode: 0,
+  });
+
+  test.each([
+    ["no record + start", undefined, start, { ...start.fields, status: "running" }],
+    ["a killed running record + start", running, start, { ...start.fields, status: "running" }],
+    ["a finished record + start", failed, start, { ...start.fields, status: "running" }],
+    ["running + finish complete", running, finish("complete"), { ...fields, status: "complete", finishedAt: "2026-01-01T00:02:00.000Z", exitCode: 0 }],
+    ["running + finish incomplete", running, finish("incomplete"), { ...fields, status: "incomplete", finishedAt: "2026-01-01T00:02:00.000Z", exitCode: 0 }],
+    ["running + finish failed", running, finish("failed"), { ...fields, status: "failed", finishedAt: "2026-01-01T00:02:00.000Z", exitCode: 0 }],
+    // finish settles only a running record.
+    ["no record + finish (ignored)", undefined, finish("complete"), undefined],
+    ["a finished record + finish (ignored)", failed, finish("complete"), failed],
+  ] as const)("%s", (_name, record, event, next) => {
+    expect(transition(record, event)).toEqual(next);
+  });
+
+  test("a finished record keeps the running record's key order, with its outcome last", () => {
+    const finished = transition(transition(undefined, { type: "start", fields }), finish("complete"));
+    expect(Object.keys(finished)).toEqual([...Object.keys(fields), "status", "finishedAt", "exitCode"]);
+  });
+
+  test("capture.json keeps its key order while running and once finished", async () => {
+    const { home, app } = workspace();
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const store = path.join(home, "matrix-artifacts/app/screenshots");
+    const keys = () => Object.keys(JSON.parse(readFileSync(path.join(store, "capture.json"), "utf8")));
+    const base = ["schemaVersion", "project", "repo", "commit", "branch", "dirty", "args", "merged", "checkout", "host", "startedAt", "status"];
+    let whileRunning: string[] = [];
+    const watching: Runner = {
+      async capture() {
+        whileRunning = keys();
+        return { code: 0 };
+      },
+    };
+    expect(await main(["capture", "--apply"], app, watching, print)).toBe(0);
+    expect(whileRunning).toEqual(base);
+    expect(keys()).toEqual([...base, "finishedAt", "exitCode"]);
   });
 });

@@ -6,7 +6,7 @@ import { git, gitValue } from "./git";
 import { linkState } from "./link";
 import { acquireLock, alive, type LockInfo, replaceLock } from "./lock";
 import { claimNamespace } from "./namespace";
-import { type CaptureRecord, readRecord, writeRecord } from "./record";
+import { type CaptureRecord, type FinishedStatus, type RecordFields, type RunningRecord, readRecord, transition, writeRecord } from "./record";
 import { LINK, LOCK, storeDir, type Target } from "./store";
 import { packageScripts } from "./targets";
 
@@ -169,7 +169,8 @@ async function runCapture(target: Target, artifacts: string, plan: CapturePlan, 
     const foreign = claimNamespace(target, artifacts, true);
     if (foreign) throw new Error(foreign);
     const { base, inheritsIncomplete } = runningRecord(target, plan, args, previous, startedAt);
-    writeRecord(store, { ...base, status: "running" });
+    const running = transition(previous, { type: "start", fields: base });
+    writeRecord(store, running);
     let exitCode: number | null = null;
     // Runners that honor SCREENSHOT_OUTPUT_DIR must write through the link, whatever the caller's shell exports.
     const env = { ...process.env, SCREENSHOT_OUTPUT_DIR: path.join(target.root, LINK) };
@@ -183,7 +184,7 @@ async function runCapture(target: Target, artifacts: string, plan: CapturePlan, 
       exitCode = result.code;
       if (result.pgid !== undefined) drained = await drainGroup(result.pgid, timing.graceMs, timing.killMs);
     } finally {
-      const finished = finishedRecord(target, artifacts, plan, base, { exitCode, signal, drained, inheritsIncomplete });
+      const finished = finishedRecord(target, artifacts, plan, running, { exitCode, signal, drained, inheritsIncomplete });
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
       Object.assign(plan, { applied: true, record: finished });
@@ -208,7 +209,7 @@ function runningRecord(
   args: string[],
   previous: CaptureRecord | undefined,
   startedAt: string,
-): { base: Omit<CaptureRecord, "status">; inheritsIncomplete: boolean } {
+): { base: RecordFields; inheritsIncomplete: boolean } {
   const { commit, branch, dirty, merged } = plan;
   // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
   const partial = args.length > 0;
@@ -241,14 +242,14 @@ interface RunOutcome {
 }
 
 /** The record of a finished capture, after checking that the clone still shows the planned commit through the link. */
-function finishedRecord(target: Target, artifacts: string, plan: CapturePlan, base: Omit<CaptureRecord, "status">, outcome: RunOutcome): CaptureRecord {
+function finishedRecord(target: Target, artifacts: string, plan: CapturePlan, running: RunningRecord, outcome: RunOutcome): CaptureRecord {
   const { exitCode, signal, drained, inheritsIncomplete } = outcome;
   const shows = showsPlannedCommit(target, artifacts, plan);
-  const finalStatus = (): CaptureRecord["status"] => {
+  const finalStatus = (): FinishedStatus => {
     if (exitCode !== 0 || signal || !shows || drained !== "exited") return "failed";
     return inheritsIncomplete ? "incomplete" : "complete";
   };
-  return { ...base, status: finalStatus(), finishedAt: new Date().toISOString(), exitCode };
+  return transition(running, { type: "finish", status: finalStatus(), finishedAt: new Date().toISOString(), exitCode });
 }
 
 /**
