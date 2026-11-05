@@ -160,7 +160,7 @@ export function applyMachine(items: MachineItem[], discover: () => Proc[]): numb
     if (item.guard) {
       try { item.skipped = item.guard(discover()); } catch (error) { item.skipped = (error as Error).message; }
     }
-    if (item.reportOnly || item.skipped || !item.apply) continue;
+    if (item.skipped) continue;
     try { item.result = item.apply(); } catch (error) { item.result = `failed: ${(error as Error).message}`; failures++; }
   }
   return failures;

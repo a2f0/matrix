@@ -76,6 +76,16 @@ function size(bytes: number | undefined): string {
   return `${value.toFixed(unit > 1 ? 1 : 0)} ${units[unit]}`;
 }
 
+/** Bytes one tier would free, counting a nested path once with its parent. */
+function tierBytes(candidates: Candidate[], tier: Tier): number {
+  return selected(candidates, new Set([tier])).reduce((sum, candidate) => sum + candidate.bytes, 0);
+}
+
+/** The busy processes reported for a repository; undefined when there are none. */
+function workersOf(procs: Proc[] | undefined): RepoReport["busy"] {
+  return procs?.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
+}
+
 function free(directory: string): number {
   const stats = statfsSync(directory);
   return stats.bavail * stats.bsize;
@@ -96,8 +106,7 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
 
   const repos: RepoReport[] = targets.map(target => {
     const report: RepoReport = { ...target, candidates: [] };
-    const workers = busy.get(target.root);
-    if (workers) report.busy = workers.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
+    report.busy = workersOf(busy.get(target.root));
     try { report.candidates = findCandidates(target.root); } catch (error) { report.error = (error as Error).message; }
     // du counts a directory once per call, so a nested cache measured alongside its parent
     // would read as empty: measure outer paths and nested ones in separate calls.
@@ -117,8 +126,7 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
       if (repo.error) continue;
       // Scans and earlier removals take a while; judge each repository from a fresh process list.
       if (!options.includeBusy) {
-        const workers = busyRoots(discover(), targets.map(target => target.root)).get(repo.root);
-        repo.busy = workers?.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
+        repo.busy = workersOf(busyRoots(discover(), targets.map(target => target.root)).get(repo.root));
         if (repo.busy) continue;
       }
       repo.removed = [];
@@ -137,8 +145,8 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
   }
   const after = options.apply ? free(volume) : undefined;
 
-  const tierTotal = (tier: Tier) => repos.reduce((sum, repo) => sum + selected(repo.candidates, new Set([tier])).reduce((total, candidate) => total + candidate.bytes, 0), 0);
-  const totals = Object.fromEntries(TIERS.map(tier => [tier, tierTotal(tier)])) as Record<Tier, number>;
+  const totals: Record<Tier, number> = { caches: 0, builds: 0, deps: 0 };
+  for (const tier of TIERS) for (const repo of repos) totals[tier] += tierBytes(repo.candidates, tier);
   if (options.json) {
     console.log(JSON.stringify({
       applied: options.apply, workspace: workspace ?? null, tiers: [...options.tiers], free: { before, ...(after !== undefined && { after }) }, totals,
@@ -154,7 +162,7 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
     const status = repo.error ? ` error: ${repo.error}`
       : repo.busy && !options.includeBusy ? ` skipped, busy: ${repo.busy.slice(0, 3).map(proc => `${proc.name} ${proc.pid}`).join(", ")}${repo.busy.length > 3 ? ", ..." : ""}`
       : "";
-    const perTier = TIERS.map(tier => `${tier} ${size(selected(repo.candidates, new Set([tier])).reduce((sum, candidate) => sum + candidate.bytes, 0))}`).join(", ");
+    const perTier = TIERS.map(tier => `${tier} ${size(tierBytes(repo.candidates, tier))}`).join(", ");
     lines.push(`\n${repo.name}${status}\n  ${perTier}`);
     for (const candidate of chosen.toSorted((a, b) => b.bytes - a.bytes).slice(0, 8)) lines.push(`  ${options.apply && repo.removed?.includes(candidate.path) ? "removed" : candidate.tier.padEnd(7)} ${size(candidate.bytes).padStart(10)}  ${candidate.path}`);
     if (chosen.length > 8) lines.push(`  ... and ${chosen.length - 8} more`);

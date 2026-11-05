@@ -67,16 +67,6 @@ export function parseProcesses(table: string, argsOutput: string, lsofOutput: st
   return rows.filter(row => !row.zombie).map(({ pid, ppid, pgid, name }) => ({ pid, ppid, pgid, name, args: args.get(pid) ?? "", cwd: cwds.get(pid) }));
 }
 
-/**
- * Processes working in each root, other than this script, its ancestors (the
- * agent or shell that ran it), its children, idle shells, and text filters
- * in its process group (`| head`, `| jq`: the rest of the caller's pipeline).
- * A process counts for the root holding its cwd and for every root a path in
- * its arguments points into.
- * A build or server in the same group still counts: non-interactive shells
- * put background jobs there too. A process in a
- * nested root counts only for the deepest root containing it.
- */
 /** Absolute paths that a command line's path-like arguments (`a/b`, `--flag=./x`, `-C dir`) resolve to. */
 export function argumentPaths(args: string, cwd: string): string[] {
   const paths: string[] = [];
@@ -88,6 +78,16 @@ export function argumentPaths(args: string, cwd: string): string[] {
   return paths;
 }
 
+/**
+ * Processes working in each root, other than this script, its ancestors (the
+ * agent or shell that ran it), its children, idle shells, and text filters
+ * in its process group (`| head`, `| jq`: the rest of the caller's pipeline).
+ * A process counts for the root holding its cwd and for every root a path in
+ * its arguments points into.
+ * A build or server in the same group still counts: non-interactive shells
+ * put background jobs there too. A process in a
+ * nested root counts only for the deepest root containing it.
+ */
 export function busyRoots(procs: Proc[], roots: string[], self = process.pid): Map<string, Proc[]> {
   const parent = new Map(procs.map(proc => [proc.pid, proc.ppid]));
   const ancestors = new Set<number>();
