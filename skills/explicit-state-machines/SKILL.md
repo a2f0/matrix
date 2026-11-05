@@ -22,8 +22,10 @@ impossible states or scattered transitions, and proves behavior did not change.
 
 `scripts/state-machines.ts` beside this file ranks tracked source files by two
 signals: lifecycle booleans toggled together (`isLoading`, `hasError`,
-`_running`), and status-like fields assigned three or more string values from
-three or more places. It is read-only and needs only Bun.
+`_running`, `busy.current`, `this.#rendered`), and status-like fields assigned
+three or more string values from three or more places (`step.status = ...`).
+It reads extensionless scripts by their shebang, is read-only, and needs only
+Bun.
 
 - From a matrix workspace: `bun run state-machines [checkout...]`. With no
   names it covers the workspace and every checkout.
@@ -40,14 +42,20 @@ hooks, workers, sync loops, connection handlers, upload and checkout flows,
 wizards, CLI subcommands that resume):
 
 - `loading`/`error`/`data` held as separate fields, or a nullable `error`
-  beside a non-null `data`.
+  beside a non-null `data`; any nullable value paired with a boolean or a
+  second nullable (`nowPlaying` with `interruptedNoise`, `reservation` with
+  `editing`). The scanner sees booleans only.
+- State split between a context and per-component state that an effect
+  re-syncs, and "already handled" dedupe fields that quietly mean "confirmed
+  started".
 - Fields that are set together and cleared together (`startedAt`, `jobId`,
   `abortController`) and so encode "running".
 - `useEffect` chains where one effect sets state that triggers the next.
 - Retry, polling, and reconnect loops guarded by counters and flags.
 - Status columns or enums whose transitions are enforced nowhere (any writer
   may set any value), in the database or in API handlers.
-- Shell or Python scripts that track progress with several variables.
+- Shell, Python, or Expect scripts that track progress with several
+  variables.
 
 ## Decide what to convert
 
@@ -65,8 +73,19 @@ Leave it alone when the flags are independent (a theme toggle and a sidebar
 toggle are a product of two machines, not one), when there is a single
 boolean, when a status is only read (an API response's field mirrored into
 UI), when it already is a discriminated union with one writer, or when the
-module is about to be deleted. Record each one you leave and why, so the next
-pass does not reread it.
+module is about to be deleted. Also leave alone:
+
+- Status columns where every write is a conditional update naming the state
+  it leaves (`UPDATE ... WHERE status = $from`), backed by a `CHECK`
+  constraint: that is already an explicit machine. A transition trigger only
+  restates it and breaks fixtures that simulate races by setting states.
+- Monotone flags with one writer each that move one way and are read only
+  by cleanup (lock held, applying, committed), and append-only accumulators.
+- Static records checked by one validator, and before/after comparisons that
+  validate rather than track progress.
+- Effect and promise guards (`cancelled`, `mounted`) on their own.
+
+Record each one you leave and why, so the next pass does not reread it.
 
 ## Convert
 
@@ -97,12 +116,22 @@ Follow `references/patterns.md` for the language at hand. In every language:
 6. Keep call sites small: derive old booleans from the state
    (`const isLoading = state.status === "loading"`) where many readers use
    them, rather than rewriting every consumer in the same change.
-7. Use no new dependency. Use a state-machine library (XState, Robot) only if
+7. Derive old booleans so they stay stable across intermediate states: an
+   effect keyed on `editing` must not refire when a replacement passes
+   through `reserving`. Keep effects tied to an event, not a state (resuming
+   audio on a press), in the handler.
+8. Use no new dependency. Use a state-machine library (XState, Robot) only if
    the repository already depends on it.
-8. Test the transition table directly: every legal transition, a sample of
+9. Test the transition table directly: every legal transition, a sample of
    ignored events per state, and the impossible combinations that the old
    code allowed. Keep the existing behavior tests passing unchanged; a test
    that must change shows a behavior change, which belongs in its own PR.
+   Run the new behavior tests against the old file (`git show <base>:<file>`
+   into a copy kept aside) to prove the refactor changed nothing and that a
+   bug's regression test fails before its fix. For output that is printed or
+   saved as JSON, assert key order too.
+10. Check every new guard against existing listeners: a guard that only acts
+    in `ready` breaks a listener reacting to an event fired mid-render.
 
 ## Ship
 
@@ -110,7 +139,9 @@ Follow `references/patterns.md` for the language at hand. In every language:
   bug) and ship with the repository's `ship-pr` skill: its validation, its
   independent review, its merge policy.
 - One PR per repository per pass, unless the diff passes about 600 lines or
-  spans unrelated areas; then one PR per area, each independently valid.
+  spans unrelated areas; then one PR per area, each independently valid. In
+  large repositories plan one PR per machine: formatted transition tables
+  and their tests grow fast.
 - The PR body lists each converted machine (file, states, events, the
   impossible combinations removed, any bug fixed) and each candidate left
   alone with its reason.
@@ -124,6 +155,9 @@ A pass over many checkouts is a sweep: follow matrix's `AGENTS.md` sweep
 rules (sync, status, ledger, one delegate per checkout, `ship-pr` each). Run
 `bun run state-machines --json` first, attach each checkout's slice to its
 delegate's brief, and remind delegates to read beyond the script's list.
+Repositories whose push hook or ship policy runs a full browser, simulator,
+or package gate need a heavy slot to ship: a delegate without one prepares a
+reviewed commit or open PR and hands off to a finisher that holds one.
 
 ## Ownership
 

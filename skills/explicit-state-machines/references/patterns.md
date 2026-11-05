@@ -112,6 +112,45 @@ test("a stale request cannot finish a newer one", () => {
 });
 ```
 
+### More React and class shapes
+
+- **A handler, not an effect, starts the work** (a sign-in button): take the
+  request number from a `useRef` counter, dispatch `start` with it, and have
+  the async handler dispatch `succeed`/`fail` with the same number.
+- **Synchronous re-entrance** (two clicks before a render): keep the current
+  state in a ref that one `send(event)` updates and that returns the next
+  state; the caller starts work only if its own request entered `loading`.
+- **A queue that spans effect runs** (read one page at a time, queue one
+  refresh): keep the machine in a ref with a `useState` copy for rendering,
+  written by one `send`. A superseded request that must still finish (to start
+  the queued refresh) carries `current: false` instead of being dropped.
+- **A handler that both changes state and decides an output** (open a menu now,
+  defer it, or ignore the press): make the step a Mealy function returning
+  `{ state, output }`, so every decision lives in one place.
+- **Long-lived controllers that log or notify on change**: have `send` return
+  the previous state too, so the caller acts only on the change that happened
+  (log on `starting -> playing`, not on every event).
+- **Classes holding resources** (sockets, timers, watchdogs): give each
+  resource to exactly one state and release it in one `leave(previous, next)`
+  step; guard `if (next === this.state) return` because leave callbacks can
+  re-enter (`onDisconnect` calling `stop()`).
+- **Testing async controllers**: move the React controller into its own hook
+  with the async work injected, so `renderHook` can drive stale, replacement
+  and Strict Mode sequences. In React Native Testing Library, start a press
+  without awaiting it to observe the pending state, then resolve inside
+  `await act(...)`.
+- **Dismissals name what they dismiss** (outside click, escape): otherwise the
+  listener of the menu that just closed can close the menu that replaced it.
+
+### Placement and lint
+
+- Put the reducer beside the code that runs it when a new module costs a
+  network request or a build allowlist entry (bundler-free static sites), and
+  in Swift in a file already compiled into the app target, to avoid an Xcode
+  project edit.
+- A reducer can exceed Biome's cognitive-complexity limit; one type guard such
+  as `inAttempt(state, attempt, ...statuses)` usually brings it back.
+
 ## Swift
 
 ```swift

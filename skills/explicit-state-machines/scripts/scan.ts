@@ -44,7 +44,14 @@ const LANGUAGES: Record<string, "c" | "hash"> = {
   ".sh": "hash",
   ".bash": "hash",
   ".zsh": "hash",
+  ".exp": "hash",
 };
+
+/** Interpreters whose extensionless scripts the scan reads, by their shebang. */
+const SHEBANG = /^#!\S*(?:\/env\s+(?:-\S+\s+)*)?\/?\S*?\b(?:sh|bash|zsh|dash|ksh|python3?|ruby|expect|tclsh)\b/;
+
+/** Largest file the scan reads; bigger tracked files are data or generated. */
+export const MAX_BYTES = 512 * 1024;
 
 /** Paths that are generated, vendored, tests, or agent skills rather than application code. */
 const SKIPPED = [
@@ -59,10 +66,19 @@ const SKIPPED = [
   /\.min\.[a-z]+$/,
 ];
 
-export function language(file: string): "c" | "hash" | undefined {
+/**
+ * The comment syntax of a source file, from its extension; an extensionless
+ * file (`bin/deploy`, `files/functions`) counts when its first line is a
+ * shell, Python, Ruby or Expect shebang. Without `firstLine`, extensionless
+ * files report "maybe" so a caller knows to read the first line.
+ */
+export function language(file: string, firstLine?: string): "c" | "hash" | "maybe" | undefined {
   if (SKIPPED.some(pattern => pattern.test(file))) return undefined;
-  const dot = file.lastIndexOf(".");
-  return dot < 0 ? undefined : LANGUAGES[file.slice(dot).toLowerCase()];
+  const base = file.slice(file.lastIndexOf("/") + 1);
+  const dot = base.lastIndexOf(".");
+  if (dot > 0) return LANGUAGES[base.slice(dot).toLowerCase()];
+  if (firstLine === undefined) return "maybe";
+  return SHEBANG.test(firstLine) ? "hash" : undefined;
 }
 
 /**
@@ -73,10 +89,20 @@ export function language(file: string): "c" | "hash" | undefined {
  * `settled`: effect cleanups and promise races set them once as guards.
  */
 const FLAG =
-  /^_*(?:(?:is|has|was|did|should|show|needs?|can)(?:[A-Z_].*)?|(?:loading|pending|running|started|starting|stopping|stopped|done|finished|complete|completed|ready|busy|saving|submitting|fetching|syncing|connecting|connected|reconnecting|initiali[sz]ed|initiali[sz]ing|cancell?ing|failed|retrying|paused|waiting|polling|uploading|downloading|refreshing|processing|in_?progress|inflight|in_?flight)(?:[A-Z_].*)?)$/;
+  /^_*(?:(?:is|has|was|did|should|show|needs?|can)(?:[A-Z_].*)?|(?:loading|pending|running|started|starting|stopping|stopped|done|finished|complete|completed|ready|busy|saving|submitting|fetching|syncing|connecting|connected|reconnecting|initiali[sz]ed|initiali[sz]ing|cancell?ing|failed|retrying|paused|waiting|polling|booting|editing|reserving|paging|rendered|rendering|unavailable|interrupted|dismissed|opened|published|uploading|downloading|refreshing|processing|in_?progress|inflight|in_?flight)(?:[A-Z_].*)?)$/;
 
 /** Field names that hold a mode as a string. */
 const STATUS = /^_*(?:status|state|phase|mode|stage|step|lifecycle|connectionState|syncState|loadState|[a-z]+(?:Status|State|Phase|Stage))$/;
+
+/**
+ * The flag or field an assignment target names: the last member of a chain
+ * (`record.steps[i]!.status` -> `status`, `this.#rendered` -> `rendered`), or a
+ * React ref's own name (`busy.current` -> `busy`).
+ */
+function targetName(owner: string | undefined, member: string): string {
+  const name = member.replace(/^#/, "");
+  return name === "current" && owner ? owner : name;
+}
 
 function isFlag(name: string): boolean {
   return FLAG.test(name) && !/^(?:is|has|was|did|should|show|needs?|can)$/.test(name);
@@ -130,8 +156,14 @@ export function codeLines(text: string, syntax: "c" | "hash"): string[] {
 }
 
 const BOOLEAN = String.raw`(true|false|True|False)\b`;
-/** `x = true`, `this.x = false`, `self._x = True`, `x: false` (object literal), but not `==`/`===`. */
-const ASSIGN = new RegExp(String.raw`(?:^|[^\w.$])(?:this\.|self\.|state\.|@)?([A-Za-z_$][\w$]*)\s*(?:=(?!=)|:)\s*` + BOOLEAN, "g");
+/** An assignment target's last two members: `(owner.)?member`, where the owner may follow any chain. */
+const TARGET = String.raw`(?<![\w$#])(?:([A-Za-z_$][\w$]*)[!?]?\.)?(#?[A-Za-z_$][\w$]*)`;
+/**
+ * `x = true`, `this.x = false`, `self._x = True`, `this.#x = true`,
+ * `busy.current = true`, `press.moved = true`, `x: false` (object literal),
+ * but not `==`/`===`.
+ */
+const ASSIGN = new RegExp(TARGET + String.raw`\s*(?:=(?!=)|:)\s*` + BOOLEAN, "g");
 /** `setIsOpen(true)`, `set_loading(False)`. */
 const SETTER = new RegExp(String.raw`\bset_?([A-Za-z_$][\w$]*)\(\s*` + BOOLEAN, "g");
 /** `const [isOpen, setIsOpen] = useState(false)` names the flag and its first value. */
@@ -141,7 +173,7 @@ const USE_STATE = /\[\s*([A-Za-z_$][\w$]*)\s*,\s*set[A-Za-z_$][\w$]*\s*\]\s*=\s*
  * `status: "idle"`: type members and returned object literals are how an
  * explicit machine names its states, not scattered writes.
  */
-const STATUS_ASSIGN = /(?:^|[^\w.$])(?:this\.|self\.|state\.|@)?([A-Za-z_$][\w$]*)\s*=(?!=)\s*(["'`])([\w-]+)\2/g;
+const STATUS_ASSIGN = new RegExp(TARGET + String.raw`\s*=(?!=)\s*(["'\`])([\w-]+)\3`, "g");
 const STATUS_SETTER = /\bset_?([A-Za-z_$][\w$]*)\(\s*(["'`])([\w-]+)\2\s*\)/g;
 
 /**
@@ -163,12 +195,18 @@ export function scanText(text: string, syntax: "c" | "hash"): Signal[] {
   codeLines(text, syntax).forEach((line, index) => {
     const at = index + 1;
     for (const match of line.matchAll(USE_STATE)) if (isFlag(match[1])) note(flags, match[1], match[2], at);
-    for (const match of line.matchAll(ASSIGN)) if (isFlag(match[1])) note(flags, match[1], match[2].toLowerCase(), at);
+    for (const match of line.matchAll(ASSIGN)) {
+      const name = targetName(match[1], match[2]);
+      if (isFlag(name)) note(flags, name, match[3].toLowerCase(), at);
+    }
     for (const match of line.matchAll(SETTER)) {
       const name = fromSetter(match[1]);
       if (isFlag(name)) note(flags, name, match[2].toLowerCase(), at);
     }
-    for (const match of line.matchAll(STATUS_ASSIGN)) if (STATUS.test(match[1])) note(statuses, match[1], match[3], at);
+    for (const match of line.matchAll(STATUS_ASSIGN)) {
+      const name = targetName(match[1], match[2]);
+      if (STATUS.test(name)) note(statuses, name, match[4], at);
+    }
     for (const match of line.matchAll(STATUS_SETTER)) {
       const name = fromSetter(match[1]);
       if (STATUS.test(name)) note(statuses, name, match[3], at);
@@ -197,8 +235,8 @@ function score(signals: Signal[]): number {
 }
 
 export function scanFile(file: string, text: string): FileReport | undefined {
-  const syntax = language(file);
-  if (!syntax || text.length > 512 * 1024 || text.includes("\u0000")) return undefined;
+  const syntax = language(file, text.split("\n", 1)[0]);
+  if (!syntax || syntax === "maybe" || text.length > MAX_BYTES || text.includes("\u0000")) return undefined;
   const signals = scanText(text, syntax);
   return signals.length ? { path: file, score: score(signals), signals } : undefined;
 }
