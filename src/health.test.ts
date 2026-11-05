@@ -3,6 +3,7 @@ import type { Audit } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
 import { assessHealth, markdownHealth } from "./health";
 import type { Retro } from "./sweepRetro";
+import type { Teardown } from "./teardown";
 
 function status(repo: string, overrides: Partial<CheckoutStatus> = {}): CheckoutStatus {
   return {
@@ -110,4 +111,87 @@ test("orders suggestions from disk and checkout state to standards to friction",
   expect(markdown).toContain("- Sweeps: 1 ledger read; retry `enospc` in 3 (1 resolved); 1 unfinished.");
   expect(markdown).toContain("5. Fix `agent-tool-latest`");
   expect(health.sweeps.resolved).toEqual([{ kind: "retry", cause: "website-teardown" }]);
+});
+
+test("reports leftover processes, Git transport, unaudited checkouts, and lost repositories", () => {
+  const running: Teardown = {
+    ok: false,
+    applied: false,
+    repos: [
+      { repo: "a2f0/one", path: "checkouts/one", ok: false, leftover: ["dev server"], listeners: [], kept: [], stopped: [], worktrees: [], problems: [] },
+    ],
+  };
+  const health = assessHealth({
+    statuses: [status("a2f0/one"), status("a2f0/two", { agentTool: { pinned: "0.1.21", installed: "0.1.19", current: false } })],
+    unmanaged: ["checkouts/old"],
+    audit: {
+      ...cleanAudit,
+      ok: false,
+      failures: { "agents-md": ["a2f0/one"] },
+      checkouts: [{ repo: "a2f0/two", path: "checkouts/two", error: "unreadable", failed: [], skipped: [] }],
+    },
+    retro: { ...quietRetro, unfinished: [{ branch: "docs/links", repo: "a2f0/two", status: "blocked", reason: "waits on a release" }] },
+    discovery: { added: [], notDiscovered: ["a2f0/gone"] },
+    running,
+    git: { ghProtocol: "https", credentialHelpers: [], ssh: { error: "no" }, problems: ["gh uses https"] },
+  });
+  expect(health.suggestions).toEqual([
+    "Stop what earlier work left running in a2f0/one: `bun run teardown` lists it, `--apply` stops recorded processes, and untracked ones need stopping by hand.",
+    "Keep Git on SSH: gh uses https; see docs/health.md#github-over-ssh.",
+    "Reinstall dependencies in a2f0/two; their node_modules hold a different agent-tool than they pin.",
+    "Check a2f0/gone: it is managed, but discovery no longer finds it (renamed, archived, or no longer public?).",
+    "Fix `agents-md` in 1 checkout (a2f0/one); `bun run audit --rule agents-md` has the details.",
+    "Finish a2f0/two in sweep `docs/links`: blocked, waits on a release.",
+    "Remove or manage checkouts/old; matrix leaves unmanaged entries alone.",
+  ]);
+  expect(markdownHealth(health, new Date("2026-10-28T12:00:00Z"))).toBe(
+    [
+      "# Matrix health",
+      "",
+      "Checked 2026-10-28T12:00:00.000Z, including GitHub discovery and the npm registry.",
+      "",
+      "- Checkouts: 2 of 2 ready; stale installs in a2f0/two; unmanaged checkouts/old.",
+      "- Audit (1 rule): `agents-md` fails in 1; a2f0/two not audited.",
+      "- Git: 1 way to leave SSH for GitHub.",
+      "- Running: teardown fails in a2f0/one.",
+      "- Discovery: 0 new repositories, 1 no longer found.",
+      "- Sweeps: 0 ledgers read; no unresolved recurring friction; 1 unfinished.",
+      "",
+      "## Next steps",
+      "",
+      ...health.suggestions.map((suggestion, index) => `${index + 1}. ${suggestion}`),
+      "",
+    ].join("\n"),
+  );
+});
+
+test("renders a clean remote report with Git on SSH and nothing running", () => {
+  const health = assessHealth({
+    statuses: [status("a2f0/one")],
+    unmanaged: [],
+    audit: { ...cleanAudit, checkouts: [{ repo: "a2f0/one", path: "checkouts/one", error: "unreadable", failed: [], skipped: [] }] },
+    retro: quietRetro,
+    discovery: { added: [], notDiscovered: [] },
+    running: { ok: true, applied: false, repos: [] },
+    git: { ghProtocol: "ssh", credentialHelpers: [], ssh: { hostname: "ssh.github.com", port: 443 }, problems: [] },
+  });
+  expect(markdownHealth(health, new Date("2026-10-28T12:00:00Z"))).toBe(
+    [
+      "# Matrix health",
+      "",
+      "Checked 2026-10-28T12:00:00.000Z, including GitHub discovery and the npm registry.",
+      "",
+      "- Checkouts: 1 of 1 ready; no stale installs; no unmanaged entries.",
+      "- Audit (1 rule): every audited checkout passes; a2f0/one not audited.",
+      "- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.",
+      "- Running: nothing left running.",
+      "- Discovery: matrix.json matches the owner's repositories.",
+      "- Sweeps: 0 ledgers read; no unresolved recurring friction; nothing unfinished.",
+      "",
+      "## Next steps",
+      "",
+      "Nothing to do.",
+      "",
+    ].join("\n"),
+  );
 });
