@@ -1,43 +1,17 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
 import path from "node:path";
 import { AGENT_TOOL_GRACE_DAYS, AGENTS_MD_MAX_CHARS, type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
+import { checkoutFixture, GUIDANCE, gitIn, README, tempDir } from "./testFixtures";
 
 let root: string;
 const RELEASES = { "0.1.9": "2026-10-01T00:00:00.000Z", [MINIMUM_AGENT_TOOL]: "2026-10-10T00:00:00.000Z", "0.1.22": "2026-10-20T00:00:00.000Z", "0.1.23": "2026-10-27T00:00:00.000Z" };
 const context: AuditContext = { releases: () => RELEASES, now: new Date("2026-10-28T12:00:00.000Z") };
 
-const GUIDANCE = "# Repository guidance\n\n## Output capture\n\nRun `bun run agent:run` and read `bun run agent:logs <log>`.\n";
-const README = "# demo\n\nA demo project.\n\n## Quick start\n\n```sh\nbun install\n```\n";
-
 /** A checkout that meets every standard, with overrides; a null value deletes the file. */
 function checkout(name: string, files: Record<string, string | null> = {}): string {
-  const directory = path.join(root, "checkouts", name);
-  mkdirSync(directory, { recursive: true });
-  const all: Record<string, string | null> = {
-    "AGENTS.md": GUIDANCE,
-    "README.md": README,
-    ".gitignore": "node_modules/\n.DS_Store\n",
-    "package.json": JSON.stringify({ name, scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", "agents:check": "agent-tool skills check && agent-tool permissions check" }, devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }),
-    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }),
-    ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
-    ".codex/rules/agent-tool.rules": "prefix_rule(pattern=[\"agent-tool\", \"doctor\"], decision=\"allow\")\n",
-    "agent-tool.json": JSON.stringify({ schemaVersion: 1 }),
-    ".agent-tool-skills.json": JSON.stringify({ schemaVersion: 1, files: { ".agents/skills/ship-pr/SKILL.md": "x" } }),
-    ".agents/skills/ship-pr/SKILL.md": "Reply via POST /repos/o/r/pulls/1/comments/2/replies.\n",
-    ...files,
-  };
-  execFileSync("git", ["init", "-q"], { cwd: directory });
-  for (const [file, content] of Object.entries(all)) {
-    if (content === null) continue;
-    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
-    writeFileSync(path.join(directory, file), content);
-  }
-  execFileSync("git", ["add", "-A"], { cwd: directory });
-  execFileSync("git", ["remote", "add", "origin", `git@github.com:a2f0/${name}.git`], { cwd: directory });
+  checkoutFixture(path.join(root, "checkouts", name), MINIMUM_AGENT_TOOL, files);
   return `a2f0/${name}`;
 }
 
@@ -53,8 +27,7 @@ function failures(repo: string, ids: string[] = [], remote = false) {
   return Object.fromEntries(result.checkouts[0]!.failed.map(({ rule, detail }) => [rule, detail]));
 }
 
-beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), "matrix-audit-")); });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+beforeEach(() => { root = tempDir("matrix-audit"); });
 
 describe("audit", () => {
   test("passes a conforming checkout and ignores superseded text in managed skills", () => {
@@ -154,29 +127,40 @@ describe("audit", () => {
     expect(failures(checkout("capture", {
       "package.json": JSON.stringify({ scripts: { "agent:run": "agent-tool run" }, devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }),
       "AGENTS.md": "# Guidance\n\n## Validation\n\nRun `bun run agent:run`.\n",
-    }))["output-capture"]).toBe("no agent:logs script; AGENTS.md has no Output capture section");
+    }), ["output-capture"])["output-capture"]).toBe("no agent:logs script; AGENTS.md has no Output capture section");
     expect(failures(checkout("empty-section", {
       "AGENTS.md": "# Guidance\n\n## Output capture\n\nTBD.\n\n## Validation\n\nRun `bun run agent:run` and `bun run agent:logs`.\n",
-    }))["output-capture"]).toBe("Output capture guidance does not mention agent:run; Output capture guidance does not mention agent:logs");
+    }), ["output-capture"])["output-capture"]).toBe("Output capture guidance does not mention agent:run; Output capture guidance does not mention agent:logs");
     expect(failures(checkout("subsection", {
       "AGENTS.md": "# Guidance\n\n## Output capture\n\nUse `agent:run`.\n\n### Logs\n\nRead with `agent:logs`.\n",
-    }))).toEqual({});
-    expect(failures(checkout("paragraph", { "AGENTS.md": "# Guidance\n\nRun `bun run agent:run` and `bun run agent:logs <log>`.\n" }))).toEqual({});
+    }), ["output-capture"])).toEqual({});
+    expect(failures(checkout("paragraph", { "AGENTS.md": "# Guidance\n\nRun `bun run agent:run` and `bun run agent:logs <log>`.\n" }), ["output-capture"])).toEqual({});
   });
 
-  test("checks README titles, quick starts outside code fences, and agent instructions", () => {
-    expect(failures(checkout("linked", { "README.md": "# [demo](https://demo.example)\n\n## Quick start\n" }))["readme-title"]).toBe("H1 '# [demo](https://demo.example)' contains a link");
-    expect(failures(checkout("link-line", { "README.md": "# demo\n<https://demo.example>\n\n## Quick start\n" }))["readme-title"]).toBe("a standalone link line follows the H1: '<https://demo.example>'");
-    expect(failures(checkout("no-start", { "README.md": "# demo\n\n```md\n## Quick start\n```\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
-    expect(failures(checkout("nested", { "README.md": "# demo\n\n````md\n```sh\nbun install\n```\n## Quick start\n````\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
-    expect(failures(checkout("tilde", { "README.md": "# demo\n\n~~~\n```\n~~~\n\n## Quick start\n" }))).toEqual({});
-    expect(failures(checkout("closed", { "README.md": "# demo #\n\n## Quick start ##\n", "AGENTS.md": "# Guidance\n\n## Output capture ##\n\n`agent:run`, `agent:logs`\n" }))).toEqual({});
-    expect(failures(checkout("reference", { "README.md": "# [demo][site]\n\n## Quick start\n\n[site]: https://demo.example\n" }))["readme-title"]).toBe("H1 '# [demo][site]' contains a link");
-    expect(failures(checkout("shortcut", { "README.md": "# [demo]\n\n## Quick start\n\n[demo]: https://demo.example\n" }))["readme-title"]).toBe("H1 '# [demo]' contains a link");
-    expect(failures(checkout("brackets", { "README.md": "# [demo]\n[beta]\n\n## Quick start\n" }))).toEqual({});
-    expect(failures(checkout("setext", { "README.md": "# demo\n\nQuick start\n-----------\n\n```sh\nbun install\n```\n" }))).toEqual({});
-    expect(failures(checkout("rule", { "README.md": "# demo\n\nOne\nparagraph\nQuick start\n---\n" }))["readme-quick-start"]).toBe("README.md has no Quick start section");
-    expect(failures(checkout("agentic", { "README.md": `${README}\n## Output capture\n\nUse agent:run.\n` }))["readme-agent-free"]).toBe("README.md mentions Output capture, agent:run");
+  // README cases run only the README rules: a whole audit per fixture made
+  // this one test take over 5 s on a loaded machine.
+  const README_RULES = ["readme-title", "readme-quick-start", "readme-agent-free"];
+  const readme = (name: string, files: Record<string, string>) => failures(checkout(name, files), README_RULES);
+
+  test("rejects README titles that link or carry a link line", () => {
+    expect(readme("linked", { "README.md": "# [demo](https://demo.example)\n\n## Quick start\n" })["readme-title"]).toBe("H1 '# [demo](https://demo.example)' contains a link");
+    expect(readme("link-line", { "README.md": "# demo\n<https://demo.example>\n\n## Quick start\n" })["readme-title"]).toBe("a standalone link line follows the H1: '<https://demo.example>'");
+    expect(readme("reference", { "README.md": "# [demo][site]\n\n## Quick start\n\n[site]: https://demo.example\n" })["readme-title"]).toBe("H1 '# [demo][site]' contains a link");
+    expect(readme("shortcut", { "README.md": "# [demo]\n\n## Quick start\n\n[demo]: https://demo.example\n" })["readme-title"]).toBe("H1 '# [demo]' contains a link");
+    expect(readme("brackets", { "README.md": "# [demo]\n[beta]\n\n## Quick start\n" })).toEqual({});
+  });
+
+  test("finds the Quick start heading only outside code fences", () => {
+    expect(readme("no-start", { "README.md": "# demo\n\n```md\n## Quick start\n```\n" })["readme-quick-start"]).toBe("README.md has no Quick start section");
+    expect(readme("nested", { "README.md": "# demo\n\n````md\n```sh\nbun install\n```\n## Quick start\n````\n" })["readme-quick-start"]).toBe("README.md has no Quick start section");
+    expect(readme("tilde", { "README.md": "# demo\n\n~~~\n```\n~~~\n\n## Quick start\n" })).toEqual({});
+    expect(readme("setext", { "README.md": "# demo\n\nQuick start\n-----------\n\n```sh\nbun install\n```\n" })).toEqual({});
+    expect(readme("rule", { "README.md": "# demo\n\nOne\nparagraph\nQuick start\n---\n" })["readme-quick-start"]).toBe("README.md has no Quick start section");
+  });
+
+  test("accepts closed ATX headings and rejects agent instructions in a README", () => {
+    expect(failures(checkout("closed", { "README.md": "# demo #\n\n## Quick start ##\n", "AGENTS.md": "# Guidance\n\n## Output capture ##\n\n`agent:run`, `agent:logs`\n" }), [...README_RULES, "output-capture"])).toEqual({});
+    expect(readme("agentic", { "README.md": `${README}\n## Output capture\n\nUse agent:run.\n` })["readme-agent-free"]).toBe("README.md mentions Output capture, agent:run");
   });
 
   test("checks brand sources and committed rasters", () => {
@@ -221,19 +205,26 @@ describe("audit", () => {
     })).toBeUndefined();
   });
 
-  test("requires an import-cycle guard that counts type-only imports wherever TypeScript or a Python package exists", () => {
-    const guard = (name: string, files: Record<string, string>) => failures(checkout(name, { "src/a.ts": "export const a = 1;\n", ...files }), ["import-cycle-guard"])["import-cycle-guard"];
-    const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test";
+  // Each cycle-guard fixture is a checkout of its own, so the cases are split by guard kind.
+  const guard = (name: string, files: Record<string, string>) => failures(checkout(name, { "src/a.ts": "export const a = 1;\n", ...files }), ["import-cycle-guard"])["import-cycle-guard"];
+  const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test";
+
+  test("requires an import-cycle guard: Biome noImportCycles that counts type-only imports, or a module-graph test", () => {
     expect(guard("unguarded", {})).toBe(missing);
     expect(guard("biome-default", { "biome.json": '{ "linter": { "rules": { "suspicious": { "noImportCycles": "error" } } } }' })).toBe(missing);
     expect(guard("biome", { "packages/web/biome.jsonc": '{ "suspicious": { "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } } }' })).toBeUndefined();
-    expect(guard("cruiser", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "error", from: {}, to: { circular: true } }], options: { tsPreCompilationDeps: "specify" } };' })).toBeUndefined();
-    expect(guard("cruiser-policy", { "scripts/checks/architecturePolicy.ts": 'import type { IForbiddenRuleType } from "dependency-cruiser";\nexport const rules = [{ name: "no-circular", severity: "error", to: {\n  circular: true,\n} }];\nexport const options = { parser: "swc" };' })).toBeUndefined();
-    expect(guard("cruiser-multiline", { ".dependency-cruiser.cjs": 'require("dependency-cruiser");\nmodule.exports = { forbidden: [{\n  name: "no-circular",\n  severity: "error",\n  to: { circular:\n    true },\n}], options: { tsPreCompilationDeps: true } };' })).toBeUndefined();
-    // Disabled rules, test fixtures, and unrelated data are not guards.
+    // A commented-out or disabled rule is not a guard.
     expect(guard("biome-commented", { "biome.jsonc": '{\n  // "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } }\n  /* "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } */\n}' })).toBe(missing);
     expect(guard("biome-url", { "biome.jsonc": '{ "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json", "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } } }' })).toBeUndefined();
     expect(guard("biome-off", { "biome.json": '{ "suspicious": { "noImportCycles": { "level": "off", "options": { "ignoreTypes": false } } } }' })).toBe(missing);
+    expect(guard("graph-test", { "tests/module-graph.test.ts": "test('acyclic', () => {});\n" })).toBeUndefined();
+  });
+
+  test("accepts a dependency-cruiser no-circular rule only as a type-aware error", () => {
+    expect(guard("cruiser", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "error", from: {}, to: { circular: true } }], options: { tsPreCompilationDeps: "specify" } };' })).toBeUndefined();
+    expect(guard("cruiser-policy", { "scripts/checks/architecturePolicy.ts": 'import type { IForbiddenRuleType } from "dependency-cruiser";\nexport const rules = [{ name: "no-circular", severity: "error", to: {\n  circular: true,\n} }];\nexport const options = { parser: "swc" };' })).toBeUndefined();
+    expect(guard("cruiser-multiline", { ".dependency-cruiser.cjs": 'require("dependency-cruiser");\nmodule.exports = { forbidden: [{\n  name: "no-circular",\n  severity: "error",\n  to: { circular:\n    true },\n}], options: { tsPreCompilationDeps: true } };' })).toBeUndefined();
+    // Test fixtures and unrelated data are not guards.
     expect(guard("cruiser-fixture", { "tests/fixtures/depcruise.ts": 'import "dependency-cruiser";\nconst rule = { name: "no-circular", severity: "error", to: { circular: true } };\nconst options = { tsPreCompilationDeps: true };' })).toBe(missing);
     expect(guard("cruiser-test", { "src/policy.test.ts": 'import "dependency-cruiser";\nconst rule = { name: "no-circular", severity: "error", to: { circular: true } };\nconst options = { tsPreCompilationDeps: true };' })).toBe(missing);
     expect(guard("circular-data", { "data/graph.json": '{ "name": "no-circular", "circular": true }' })).toBe(missing);
@@ -242,12 +233,9 @@ describe("audit", () => {
     expect(guard("cruiser-untyped", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "error", to: { circular: true } }] };' })).toBe(missing);
     expect(guard("cruiser-ignored", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", severity: "ignore", to: { circular: true } }], options: { tsPreCompilationDeps: true } };' })).toBe(missing);
     expect(guard("cruiser-default", { "dependency-cruiser.config.ts": 'export default { forbidden: [{ name: "no-circular", to: { circular: true } }], options: { tsPreCompilationDeps: true } };' })).toBe(missing);
-    expect(guard("graph-test", { "tests/module-graph.test.ts": "test('acyclic', () => {});\n" })).toBeUndefined();
   });
 
   test("accepts agent-tool's graph check only where a script, run group, workflow, or runner runs it", () => {
-    const guard = (name: string, files: Record<string, string>) => failures(checkout(name, { "src/a.ts": "export const a = 1;\n", ...files }), ["import-cycle-guard"])["import-cycle-guard"];
-    const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test";
     const graphConfig = JSON.stringify({ schemaVersion: 1, graph: { include: ["src/**"] } });
     expect(guard("graph-command", { "agent-tool.json": graphConfig, "scripts/testing/verify.json": '{ "steps": [{ "label": "graph", "command": ["bun", "run", "agent-tool", "graph", "check"] }] }' })).toBeUndefined();
     expect(guard("graph-workflow", { "agent-tool.json": graphConfig, ".github/workflows/ci.yml": "steps:\n  - run: bun run agent-tool graph check\n" })).toBeUndefined();
@@ -268,8 +256,6 @@ describe("audit", () => {
   });
 
   test("requires a guard per language and skips declaration-only checkouts", () => {
-    const guard = (name: string, files: Record<string, string>) => failures(checkout(name, { "src/a.ts": "export const a = 1;\n", ...files }), ["import-cycle-guard"])["import-cycle-guard"];
-    const missing = "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test";
     const pythonMissing = "the Python package has no test_module_graph.py";
     expect(failures(checkout("python", { "plugin/__init__.py": "", "tests/test_module_graph.py": "" }), ["import-cycle-guard"])).toEqual({});
     expect(failures(checkout("python-bare", { "plugin/__init__.py": "" }), ["import-cycle-guard"])["import-cycle-guard"]).toBe(pythonMissing);
@@ -303,17 +289,17 @@ describe("audit", () => {
   test("requires origin to fetch and push over SSH", () => {
     const repo = checkout("https");
     const directory = path.join(root, "checkouts", "https");
-    execFileSync("git", ["remote", "set-url", "origin", "https://token@github.com/a2f0/https.git"], { cwd: directory });
+    gitIn(directory, "remote", "set-url", "origin", "https://token@github.com/a2f0/https.git");
     expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin fetches over https://github.com/a2f0/https.git; use git@github.com:a2f0/https.git; origin pushes over https://github.com/a2f0/https.git; use git@github.com:a2f0/https.git" });
-    execFileSync("git", ["remote", "set-url", "origin", "git@github.com:a2f0/https.git"], { cwd: directory });
-    execFileSync("git", ["remote", "set-url", "--push", "origin", "https://github.com/a2f0/https.git"], { cwd: directory });
+    gitIn(directory, "remote", "set-url", "origin", "git@github.com:a2f0/https.git");
+    gitIn(directory, "remote", "set-url", "--push", "origin", "https://github.com/a2f0/https.git");
     expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin pushes over https://github.com/a2f0/https.git; use git@github.com:a2f0/https.git" });
-    execFileSync("git", ["remote", "set-url", "--push", "origin", "ssh://git@ssh.github.com:443/a2f0/https.git"], { cwd: directory });
+    gitIn(directory, "remote", "set-url", "--push", "origin", "ssh://git@ssh.github.com:443/a2f0/https.git");
     expect(failures(repo, ["origin-ssh"])).toEqual({});
     // Git pushes to every push URL, so a second HTTPS one fails too.
-    execFileSync("git", ["remote", "set-url", "--add", "--push", "origin", "https://github.com/a2f0/mirror.git"], { cwd: directory });
+    gitIn(directory, "remote", "set-url", "--add", "--push", "origin", "https://github.com/a2f0/mirror.git");
     expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "origin pushes over https://github.com/a2f0/mirror.git; use git@github.com:a2f0/https.git" });
-    execFileSync("git", ["remote", "remove", "origin"], { cwd: directory });
+    gitIn(directory, "remote", "remove", "origin");
     expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "no origin fetch URL; no origin push URL" });
   });
 

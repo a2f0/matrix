@@ -47,6 +47,7 @@
           "src/options.ts",
           "src/packageJson.ts",
           "src/teardown.ts",
+          "src/testFixtures.ts",
           "src/testSetup.ts",
           "src/text.ts"
         ]
