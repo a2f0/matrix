@@ -8,11 +8,13 @@ export interface Target {
   readonly root: string;
 }
 
+// Kept in sync with take-screenshots/scripts/git.ts toplevel.
 export function toplevel(directory: string): string | undefined {
   const result = git(directory, ["rev-parse", "--show-toplevel"]);
   return result.ok ? result.stdout.trim() : undefined;
 }
 
+// Kept in sync with take-screenshots/scripts/targets.ts isMatrixWorkspace.
 export function isMatrixWorkspace(root: string): boolean {
   return existsSync(path.join(root, "matrix.json")) && existsSync(path.join(root, "checkouts"));
 }
@@ -20,7 +22,9 @@ export function isMatrixWorkspace(root: string): boolean {
 /**
  * Repositories to clean. From a matrix workspace: the workspace and every
  * checkout, or the named checkouts. From anywhere else: the repository
- * containing the working directory, or the named paths.
+ * containing the working directory, or the named paths. Checkout listing and
+ * names are kept in sync with take-screenshots/scripts/targets.ts
+ * resolveTargets; src/takeScreenshots.test.ts compares the two.
  */
 export function resolveTargets(cwd: string, names: string[]): { workspace?: string; targets: Target[] } {
   // Real paths, so they compare equal to the cwd paths lsof reports.

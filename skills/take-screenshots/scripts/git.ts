@@ -1,6 +1,7 @@
 /** Git for the take-screenshots scripts, bound to the repository it is asked about. Node built-ins only, like artifacts.ts. */
 import { spawnSync } from "node:child_process";
 
+// Kept in sync with space-cleanup/scripts/git.ts REPOSITORY_VARIABLES.
 // From `git rev-parse --local-env-vars`: variables that bind Git to one repository,
 // such as those a hook sets, and that would override `cwd`.
 const REPOSITORY_VARIABLES = [
@@ -10,7 +11,10 @@ const REPOSITORY_VARIABLES = [
   "GIT_COMMON_DIR",
 ];
 
-/** Git without hooks, prompts, or variables that bind it to another repository. */
+/**
+ * Git without hooks, prompts, or variables that bind it to another repository.
+ * Kept in sync with space-cleanup/scripts/git.ts git, which also clears them.
+ */
 export function git(cwd: string, ...args: string[]): { status: number | null; stdout: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
   for (const name of REPOSITORY_VARIABLES) delete env[name];
@@ -24,4 +28,5 @@ export function gitValue(cwd: string, ...args: string[]): string | undefined {
   return result.status === 0 && result.stdout ? result.stdout : undefined;
 }
 
+// Kept in sync with space-cleanup/scripts/targets.ts toplevel.
 export function toplevel(cwd: string): string | undefined { return gitValue(cwd, "rev-parse", "--show-toplevel"); }

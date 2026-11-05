@@ -1,6 +1,7 @@
 /** Git bound to the repository it is asked about, whatever the caller's environment. Node built-ins only, like space-cleanup.ts. */
 import { spawnSync } from "node:child_process";
 
+// Kept in sync with take-screenshots/scripts/git.ts REPOSITORY_VARIABLES.
 // From `git rev-parse --local-env-vars`: variables that bind Git to one repository,
 // such as those a hook sets, and that would override `-C`.
 const REPOSITORY_VARIABLES = [
@@ -16,6 +17,7 @@ export function gitEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.Pro
   return clean;
 }
 
+/** Kept in sync with take-screenshots/scripts/git.ts git, which also clears REPOSITORY_VARIABLES. */
 export function git(root: string, args: string[]): { ok: boolean; stdout: string } {
   const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, env: gitEnvironment() });
   return { ok: result.status === 0, stdout: result.stdout ?? "" };

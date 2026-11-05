@@ -11,6 +11,7 @@ import { claimNamespace, existingCase, githubRepo, targetFor, updateOwner } from
 import { readRecord, relation, validRecord } from "../skills/take-screenshots/scripts/record";
 import { LINK, LOCK, storeDir } from "../skills/take-screenshots/scripts/store";
 import { artifactsRoot, resolveTargets } from "../skills/take-screenshots/scripts/targets";
+import { resolveTargets as cleanupTargets } from "../skills/space-cleanup/scripts/targets";
 
 // Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
 process.env.MATRIX_ARTIFACTS_NO_GH = "1";
@@ -81,6 +82,31 @@ describe("take-screenshots artifacts", () => {
     expect(targetFor(app)).toMatchObject({ project: "app", repo: "a2f0/app" });
     // Only checkouts that capture are selected by default.
     expect(resolveTargets(root, []).targets.map(target => target.name)).toEqual(["app"]);
+  });
+
+  test("resolves named repositories exactly as space-cleanup does", () => {
+    const { home, root, app } = workspace();
+    const lib = path.join(root, "checkouts", "lib");
+    const outside = repo(path.join(home, "outside"), ".screenshots\n");
+    symlinkSync(outside, path.join(home, "outside-link"));
+    const rows: Array<{ cwd: string; names: string[]; roots?: string[]; error?: string }> = [
+      { cwd: root, names: ["app"], roots: [app] },
+      { cwd: root, names: ["a2f0/app"], roots: [app] },
+      { cwd: root, names: ["lib", "app", "lib"], roots: [lib, app] },
+      { cwd: root, names: ["checkouts/app"], roots: [app] },
+      { cwd: root, names: [outside], roots: [outside] },
+      { cwd: home, names: ["outside-link"], roots: [outside] },
+      { cwd: outside, names: [], roots: [outside] },
+      { cwd: outside, names: ["app"], error: "app is neither a checkout name nor a path inside a git repository" },
+      { cwd: root, names: ["missing"], error: "missing is neither a checkout name nor a path inside a git repository" },
+      { cwd: home, names: [], error: "is not inside a git repository; name one" },
+    ];
+    for (const { cwd, names, roots, error } of rows) {
+      for (const resolve of [resolveTargets, cleanupTargets]) {
+        if (error) expect(() => resolve(cwd, names)).toThrow(error);
+        else expect(resolve(cwd, names).targets.map(target => target.root)).toEqual(roots!);
+      }
+    }
   });
 
   test("links a clone with a relative, ignored symlink, and only when a plain pattern ignores it", async () => {

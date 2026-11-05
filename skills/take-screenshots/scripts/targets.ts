@@ -5,6 +5,7 @@ import { toplevel } from "./git";
 import { targetFor } from "./namespace";
 import { lexists, LINK, type Target } from "./store";
 
+// Kept in sync with space-cleanup/scripts/targets.ts isMatrixWorkspace.
 export function isMatrixWorkspace(root: string): boolean {
   return existsSync(path.join(root, "matrix.json")) && existsSync(path.join(root, "checkouts"));
 }
@@ -33,6 +34,12 @@ export function captures(root: string): boolean {
   return typeof packageScripts(root).screenshots === "string" || lexists(path.join(root, LINK));
 }
 
+/**
+ * Repositories to act on: named checkouts or paths, else every checkout that
+ * captures, else the current repository. Checkout listing and names are kept
+ * in sync with space-cleanup/scripts/targets.ts resolveTargets;
+ * src/takeScreenshots.test.ts compares the two.
+ */
 export function resolveTargets(cwd: string, names: string[], project?: string): { workspace?: string; targets: Target[] } {
   const here = toplevel(cwd);
   const workspace = here && isMatrixWorkspace(realpathSync(here)) ? realpathSync(here) : undefined;
