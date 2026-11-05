@@ -108,8 +108,22 @@ test("reports each way Git or gh can leave SSH", () => {
 test("skips gh when it is not installed and reports an SSH command that cannot resolve", () => {
   const result = inspectGitTransport(root, (command, args) => (command === "gh" ? fakeRunner(null, "")(command, args) : { status: 255, stdout: "", stderr: "ssh: Could not resolve" }));
   expect(result.ghProtocol).toBeNull();
-  expect(result.ssh).toEqual({ error: "ssh: Could not resolve" });
-  expect(result.problems).toEqual(["Could not resolve Git's SSH endpoint for github.com: ssh: Could not resolve"]);
+  expect(result.ssh).toEqual({ error: "`-G` through Git's ssh exited 255" });
+  expect(result.problems).toEqual(["Could not resolve Git's SSH endpoint for github.com: `-G` through Git's ssh exited 255"]);
+});
+
+test("never reports the SSH command or its output, which can carry credentials", () => {
+  config(["core.sshCommand", "ssh -o ProxyCommand='connect -H user:proxy_secret@proxy %h %p'"]);
+  const result = inspectGitTransport(root, (command, args) => {
+    if (command === "gh") return { status: 0, stdout: "ssh\n", stderr: "" };
+    const run = Bun.spawnSync(["sh", "-c", "echo 'proxy_secret rejected' >&2; exit 255"]);
+    void args;
+    return { status: run.exitCode, stdout: run.stdout.toString(), stderr: run.stderr.toString() };
+  });
+  expect(result.ssh).toEqual({ error: "`-G` through Git's configured core.sshCommand exited 255" });
+  expect(JSON.stringify(result)).not.toContain("proxy_secret");
+  const missing = inspectGitTransport(root, command => (command === "gh" ? { status: 0, stdout: "ssh\n", stderr: "" } : { status: null, stdout: "", stderr: "", error: Object.assign(new Error("spawn sh ENOENT with proxy_secret"), { code: "ENOENT" }) }));
+  expect(missing.ssh).toEqual({ error: "`-G` through Git's configured core.sshCommand could not start (ENOENT)" });
 });
 
 test("runs the real ssh -G against a Git-only SSH config", () => {

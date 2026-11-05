@@ -11,7 +11,7 @@ export interface GitTransport {
   readonly ghProtocol: string | null;
   /** Credential helpers Git would ask for https://github.com, in order, by program name only (see `helperName`). */
   readonly credentialHelpers: string[];
-  /** Where Git's SSH command connects for github.com, or why that is unknown. */
+  /** Where Git's SSH command connects for github.com, or why that is unknown (never the command or its output). */
   readonly ssh: { readonly hostname: string; readonly port: number } | { readonly error: string };
   /** Each way the setup can still leave SSH; empty when it cannot. */
   readonly problems: string[];
@@ -125,7 +125,10 @@ export function inspectGitTransport(root: string, run: Runner = runner): GitTran
   // Git runs a configured command through the shell with its arguments appended; `-G` prints the resolved config without connecting.
   const resolved = shell ? run("sh", ["-c", `${command} "$@"`, command, "-G", `git@${GITHUB}`]) : run(command, ["-G", `git@${GITHUB}`]);
   const endpoint = resolved.status === 0 ? sshEndpoint(resolved.stdout) : undefined;
-  const ssh = endpoint ?? { error: (resolved.error?.message ?? resolved.stderr.trim()) || `\`${command} -G\` printed no host and port` };
+  // The command and its stderr can carry credentials (a proxy password, a wrapper token), so neither is reported.
+  const failure = resolved.error ? `could not start (${(resolved.error as NodeJS.ErrnoException).code ?? "error"})`
+    : resolved.status !== 0 ? `exited ${resolved.status ?? "on a signal"}` : "printed no host and port";
+  const ssh = endpoint ?? { error: `\`-G\` through Git's ${shell ? "configured core.sshCommand" : "ssh"} ${failure}` };
   if (!endpoint) problems.push(`Could not resolve Git's SSH endpoint for ${GITHUB}: ${"error" in ssh ? ssh.error : ""}`);
   else if (endpoint.hostname !== SSH_OVER_HTTPS.hostname || endpoint.port !== SSH_OVER_HTTPS.port) {
     problems.push(`Git's SSH reaches ${GITHUB} at ${endpoint.hostname}:${endpoint.port}, which fails where port 22 is blocked; send it to ${SSH_OVER_HTTPS.hostname}:${SSH_OVER_HTTPS.port}, as dotfiles' Git SSH config does`);
