@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type CheckoutStatus, notReady } from "./checkouts";
-import { listSweeps, sweepsDirectory } from "./sweepLedger";
+import { applyUpdate, listSweeps, PHASE, type RepoEntry, STATUSES, type StoredUpdate, sweepsDirectory } from "./sweepLedger";
 import { retro } from "./sweepRetro";
 import { markdownReport, parseEvent, parseUpdate, recordEntry, startSweep, sweepReport } from "./sweeps";
 import { gitIn, gitInit, tempDir } from "./testFixtures";
@@ -250,6 +250,72 @@ describe("recordEntry", () => {
     expect(entry.notes.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `writer ${index}`));
     expect(entry.events.map(event => event.cause).toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `writer-${index}`));
   }, 30_000);
+});
+
+describe("applyUpdate", () => {
+  const base: RepoEntry = { repo: "a2f0/one", status: "pending", notes: [], events: [], updatedAt: "" };
+  const t = (minute: number) => at(minute).toISOString();
+  const replay = (...updates: StoredUpdate[]) => updates.reduce(applyUpdate, base);
+
+  test("allows every status to follow every other, since a later record corrects an earlier one", () => {
+    for (const from of STATUSES) for (const to of STATUSES) expect(replay({ at: t(0), status: from }, { at: t(1), status: to }).status).toBe(to);
+  });
+
+  test("clears the reason only when the status changes without a new one", () => {
+    const blocked = replay({ at: t(0), status: "blocked", reason: "waits" });
+    const cases: Array<[StoredUpdate, string | undefined]> = [
+      [{ at: t(1), status: "in-progress" }, undefined],
+      [{ at: t(1), status: "blocked" }, "waits"],
+      [{ at: t(1), status: "failed", reason: "broke" }, "broke"],
+      [{ at: t(1), status: "blocked", reason: "other" }, "other"],
+      [{ at: t(1), notes: ["n"] }, "waits"],
+      [{ at: t(1), reason: "reworded" }, "reworded"],
+    ];
+    for (const [update, reason] of cases) expect(applyUpdate(blocked, update).reason).toBe(reason);
+  });
+
+  test("keeps merge and PR fields when leaving merged, and a reason recorded without a status", () => {
+    const entry = replay(
+      { at: t(0), status: "merged", pr: "https://github.com/a2f0/one/pull/1", merge: HEAD },
+      { at: t(1), status: "in-progress" },
+      { at: t(2), reason: "round two" },
+    );
+    expect(entry).toMatchObject({ status: "in-progress", pr: "https://github.com/a2f0/one/pull/1", merge: HEAD, reason: "round two" });
+  });
+
+  test("appends notes and events stamped with their update, and never mutates the entry", () => {
+    const first = replay({ at: t(0), notes: ["a"], events: [{ kind: "retry", cause: "enospc" }] });
+    const second = applyUpdate(first, { at: t(1), notes: ["b"], events: [{ kind: "manual", cause: "login" }] });
+    expect(second.notes).toEqual(["a", "b"]);
+    expect(second.events).toEqual([
+      { kind: "retry", cause: "enospc", at: t(0) },
+      { kind: "manual", cause: "login", at: t(1) },
+    ]);
+    expect(first.notes).toEqual(["a"]);
+    expect(second.updatedAt).toBe(t(1));
+  });
+
+  test("keeps the entry's JSON key order: identity, then fields in the order first recorded", () => {
+    const entry = replay(
+      { at: t(0), status: "blocked", reason: "waits", base: HEAD },
+      { at: t(1), status: "merged", pr: "https://github.com/a2f0/one/pull/1", verdict: "CLEAN" },
+      { at: t(2), reason: "late" },
+    );
+    expect(Object.keys(entry)).toEqual(["repo", "status", "notes", "events", "updatedAt", "base", "pr", "verdict", "reason"]);
+  });
+
+  test("classifies every status into one phase that report and retro share", () => {
+    expect(STATUSES.map(status => [status, PHASE[status]])).toEqual([
+      ["pending", "remaining"],
+      ["skipped", "done"],
+      ["unchanged", "done"],
+      ["in-progress", "remaining"],
+      ["open", "waiting"],
+      ["merged", "done"],
+      ["blocked", "remaining"],
+      ["failed", "done"],
+    ]);
+  });
 });
 
 describe("reports", () => {

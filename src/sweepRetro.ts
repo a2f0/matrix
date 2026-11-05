@@ -6,7 +6,7 @@ import {
   EVENT_KINDS,
   type EventKind,
   listSweeps,
-  REMAINING,
+  PHASE,
   type RepoEntry,
   readJson,
   type SweepEvent,
@@ -150,7 +150,7 @@ function tallyReview(reviews: Retro["reviews"], entry: RepoEntry): void {
 
 /** An entry left pending, in progress, blocked, or with an open PR; undefined once it is done. */
 function unfinishedEntry(branch: string, entry: RepoEntry): Retro["unfinished"][number] | undefined {
-  if (!REMAINING.includes(entry.status) && entry.status !== "open") return undefined;
+  if (PHASE[entry.status] === "done") return undefined;
   return {
     branch,
     repo: entry.repo,

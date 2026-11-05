@@ -10,8 +10,21 @@ import { errorMessage } from "./text";
 
 export const STATUSES = ["pending", "skipped", "unchanged", "in-progress", "open", "merged", "blocked", "failed"] as const;
 export type SweepStatus = (typeof STATUSES)[number];
-/** Statuses that still need work. `open` is final when a request stops at open PRs, so retro lists it separately. */
-export const REMAINING: readonly SweepStatus[] = ["pending", "in-progress", "blocked"];
+/**
+ * Where each status leaves a repository: still needing work, waiting on others, or done. `open` is
+ * final when a request stops at open PRs, so reports count it done while retro still lists it.
+ * A new status must be classified here.
+ */
+export const PHASE: Readonly<Record<SweepStatus, "remaining" | "waiting" | "done">> = {
+  pending: "remaining",
+  skipped: "done",
+  unchanged: "done",
+  "in-progress": "remaining",
+  open: "waiting",
+  merged: "done",
+  blocked: "remaining",
+  failed: "done",
+};
 
 /** Friction worth learning from: a step rerun, a substitute tool or reviewer, a declined finding, or a person's help. */
 export const EVENT_KINDS = ["retry", "fallback", "declined", "manual"] as const;
@@ -183,23 +196,28 @@ export function appendUpdate(directory: string, repo: string, update: StoredUpda
   }
 }
 
-/** Replay a repository's updates in append order. A different status without a reason clears the old reason. */
+/**
+ * Apply one stored update to an entry: set the fields it names, append its notes and events, and
+ * clear the reason when the status changes without a new one. Every transition between statuses is
+ * allowed, since a later record corrects an earlier one.
+ */
+export function applyUpdate(entry: RepoEntry, { at, notes = [], events = [], ...fields }: StoredUpdate): RepoEntry {
+  const next: { -readonly [Field in keyof RepoEntry]: RepoEntry[Field] } = {
+    ...entry,
+    ...fields,
+    notes: [...entry.notes, ...notes],
+    events: [...entry.events, ...events.map(event => ({ ...event, at }))],
+    updatedAt: at,
+  };
+  if (fields.status !== undefined && fields.status !== entry.status && fields.reason === undefined) delete next.reason;
+  return next;
+}
+
+/** Replay a repository's updates in append order. */
 export function loadEntry(directory: string, repo: string): RepoEntry {
   const folder = entryDirectory(directory, repo);
   const updates = updateFiles(folder).map(name => readJson(path.join(folder, name), isStoredUpdate));
-  let entry: RepoEntry = { repo, status: "pending", notes: [], events: [], updatedAt: "" };
-  for (const { at, notes = [], events = [], ...fields } of updates) {
-    const next: { -readonly [Field in keyof RepoEntry]: RepoEntry[Field] } = {
-      ...entry,
-      ...fields,
-      notes: [...entry.notes, ...notes],
-      events: [...entry.events, ...events.map(event => ({ ...event, at }))],
-      updatedAt: at,
-    };
-    if (fields.status !== undefined && fields.status !== entry.status && fields.reason === undefined) delete next.reason;
-    entry = next;
-  }
-  return entry;
+  return updates.reduce(applyUpdate, { repo, status: "pending", notes: [], events: [], updatedAt: "" });
 }
 
 /**
@@ -289,7 +307,7 @@ export function report(sweep: Sweep, entries: RepoEntry[]): SweepReport {
     sweep,
     updatedAt,
     counts,
-    remaining: entries.filter(entry => REMAINING.includes(entry.status)).map(entry => entry.repo),
+    remaining: entries.filter(entry => PHASE[entry.status] === "remaining").map(entry => entry.repo),
     events: entries.reduce((total, entry) => total + entry.events.length, 0),
     repos: entries,
   };
