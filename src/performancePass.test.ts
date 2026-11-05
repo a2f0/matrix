@@ -25,6 +25,49 @@ function tree(files: Record<string, string>): string {
   return root;
 }
 
+type Pixel = (x: number, y: number) => number[];
+type PngHeader = Partial<{ depth: number; interlace: number }>;
+interface PngImage {
+  width: number;
+  height: number;
+  channels: 3 | 4;
+  pixel: Pixel;
+}
+
+function pngChunk(type: string, body: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(body.length);
+  return Buffer.concat([length, Buffer.from(type, "latin1"), body, Buffer.alloc(4)]);
+}
+
+/** The filtered scanlines of an image, row `y` using `filters[y % filters.length]`. */
+function filteredRows({ width, height, channels, pixel }: PngImage, filters: number[]): number[] {
+  const stride = width * channels,
+    rows: number[] = [];
+  const raw = (x: number, y: number) => (x < 0 || y < 0 ? 0 : pixel(Math.floor(x / channels), y)[x % channels]!);
+  for (let y = 0; y < height; y += 1) {
+    const filter = filters[y % filters.length]!;
+    rows.push(filter);
+    for (let x = 0; x < stride; x += 1) rows.push((raw(x, y) - predict(filter, raw(x - channels, y), raw(x, y - 1), raw(x - channels, y - 1))) & 255);
+  }
+  return rows;
+}
+
+/** An 8-bit PNG of the image, with a header that may claim another bit depth or interlacing. */
+function encodePng(image: PngImage, filters: number[], header: PngHeader): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(image.width, 0);
+  ihdr.writeUInt32BE(image.height, 4);
+  ihdr.set([header.depth ?? 8, image.channels === 4 ? 6 : 2, 0, 0, header.interlace ?? 0], 8);
+  return Buffer.concat([
+    Buffer.from("89504e470d0a1a0a", "hex"),
+    pngChunk("IHDR", ihdr),
+    pngChunk("tEXt", Buffer.from("ignored")),
+    pngChunk("IDAT", deflateSync(Buffer.from(filteredRows(image, filters)))),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
 /** The PNG filter predictor, written independently of perf.ts's so the decoder test can encode with it. */
 function predict(filter: number, left: number, up: number, corner: number): number {
   if (filter === 1) return left;
@@ -90,32 +133,7 @@ describe("performance-pass perf.ts", () => {
     const width = 5,
       height = 6;
     const rgba = (x: number, y: number) => [(x * 53 + y * 17) & 255, (x * 7 + y * 91) & 255, (x * y * 29 + 3) & 255, 255];
-    const chunk = (type: string, body: Buffer) => {
-      const length = Buffer.alloc(4);
-      length.writeUInt32BE(body.length);
-      return Buffer.concat([length, Buffer.from(type, "latin1"), body, Buffer.alloc(4)]);
-    };
-    const png = (channels: 3 | 4, pixel: typeof rgba, filters: number[], header: Partial<{ depth: number; interlace: number }> = {}) => {
-      const stride = width * channels,
-        rows: number[] = [];
-      const raw = (x: number, y: number) => (x < 0 || y < 0 ? 0 : pixel(Math.floor(x / channels), y)[x % channels]!);
-      for (let y = 0; y < height; y += 1) {
-        const filter = filters[y % filters.length]!;
-        rows.push(filter);
-        for (let x = 0; x < stride; x += 1) rows.push((raw(x, y) - predict(filter, raw(x - channels, y), raw(x, y - 1), raw(x - channels, y - 1))) & 255);
-      }
-      const ihdr = Buffer.alloc(13);
-      ihdr.writeUInt32BE(width, 0);
-      ihdr.writeUInt32BE(height, 4);
-      ihdr.set([header.depth ?? 8, channels === 4 ? 6 : 2, 0, 0, header.interlace ?? 0], 8);
-      return Buffer.concat([
-        Buffer.from("89504e470d0a1a0a", "hex"),
-        chunk("IHDR", ihdr),
-        chunk("tEXt", Buffer.from("ignored")),
-        chunk("IDAT", deflateSync(Buffer.from(rows))),
-        chunk("IEND", Buffer.alloc(0)),
-      ]);
-    };
+    const png = (channels: 3 | 4, pixel: Pixel, filters: number[], header: PngHeader = {}) => encodePng({ width, height, channels, pixel }, filters, header);
     const file = (name: string, bytes: Buffer) => {
       const target = path.join(root, `${name}.png`);
       writeFileSync(target, bytes);
