@@ -647,6 +647,99 @@ console.log(error ? "lost" : "won");
     expect(existsSync(`${file}.lock`)).toBe(true);
   });
 
+  test("prints status, link and capture reports as text", async () => {
+    const { home, root, app } = workspace();
+    const artifacts = path.join(home, "matrix-artifacts");
+    const lines: string[] = [];
+    const say = (text: string) => {
+      lines.push(text);
+    };
+    /** The lines one command prints, with commits, times and the fixture's home replaced by placeholders. */
+    const run = async (argv: string[], cwd: string, runner?: Runner) => {
+      lines.length = 0;
+      const code = await main(argv, cwd, runner, say);
+      const text = lines
+        .join("\n")
+        .replaceAll(home, "<home>")
+        .replace(/\b[0-9a-f]{40}\b/g, "<commit>")
+        .replace(/\b[0-9a-f]{10}\b/g, "<short>")
+        .replace(/\d{4}-\d\d-\d\dT[\d:.-]+Z/g, "<time>");
+      return { code, text };
+    };
+    const ok: Runner = { capture: async () => ({ code: 0 }) };
+    expect(await run(["status"], app)).toEqual({ code: 1, text: "app [app] missing: no capture recorded" });
+    expect(await run(["link"], app)).toEqual({
+      code: 0,
+      text: "app [app] would link -> <home>/matrix-artifacts/app/screenshots\nDry run; rerun with --apply.",
+    });
+    expect(await run(["link", "--apply"], app)).toEqual({ code: 0, text: "app [app] done link -> <home>/matrix-artifacts/app/screenshots" });
+    expect(await run(["link", "--apply"], root)).toEqual({ code: 0, text: "app [app] already linked" });
+    expect(await run(["capture"], app)).toEqual({
+      code: 0,
+      text: "Would run `bun run screenshots` in <home>/matrix/checkouts/app at <short>, writing <home>/matrix-artifacts/app/screenshots.\nDry run; rerun with --apply.",
+    });
+    expect(await run(["capture", "--apply"], app, ok)).toEqual({
+      code: 0,
+      text: "Capture complete (exit 0); recorded in <home>/matrix-artifacts/app/screenshots/capture.json.",
+    });
+    expect(await run(["status"], app)).toEqual({ code: 0, text: "app [app] linked: complete <time> at <short> (main), at HEAD" });
+    // A later commit that origin's default branch does not hold: the next capture is unmerged.
+    gitIn(app, "update-ref", "refs/remotes/origin/HEAD", "HEAD");
+    write(app, { "src/next.ts": "x" });
+    gitIn(app, "add", ".");
+    gitIn(app, "commit", "-qm", "next");
+    expect(await run(["status"], app)).toEqual({ code: 0, text: "app [app] linked: complete <time> at <short> (main), 1 commit(s) behind HEAD" });
+    expect(await run(["capture"], app)).toEqual({
+      code: 0,
+      text: [
+        "Would run `bun run screenshots` in <home>/matrix/checkouts/app at <short> (not on origin's default branch), writing <home>/matrix-artifacts/app/screenshots.",
+        "Replaces the complete capture of <short> from <home>/matrix/checkouts/app.",
+        "Dry run; rerun with --apply.",
+      ].join("\n"),
+    });
+    expect(await run(["capture", "--apply", "--", "--project=web"], app, ok)).toEqual({
+      code: 0,
+      text: "Capture complete (exit 0); recorded in <home>/matrix-artifacts/app/screenshots/capture.json.",
+    });
+    write(app, { "src/dirty.ts": "x" });
+    expect(await run(["capture", "--apply", "--allow-dirty"], app, { capture: async () => ({ code: 3 }) })).toEqual({
+      code: 1,
+      text: "Capture failed (exit 3); recorded in <home>/matrix-artifacts/app/screenshots/capture.json.",
+    });
+    rmSync(path.join(app, "src/dirty.ts"));
+    writeFileSync(path.join(artifacts, "app", LOCK), JSON.stringify({ pid: 4242, host: "h", checkout: "/elsewhere/app", startedAt: "now" }));
+    expect(await run(["status"], app)).toEqual({
+      code: 0,
+      text: "app [app] linked: failed <time> at <short> (main), at HEAD; dirty, unmerged; capture running in /elsewhere/app (pid 4242)",
+    });
+    rmSync(path.join(artifacts, "app", LOCK));
+    // Another owner's clone of the same name: blocked links, a foreign status, and a superseded capture.
+    const fork = repo(path.join(home, "app-fork"), ".screenshots\n");
+    gitIn(fork, "remote", "set-url", "origin", "git@github.com:someone/app.git");
+    const notOurs = "the store holds captures of a2f0/app, not someone/app; pass --project to use another namespace";
+    expect(await run(["link", "--apply"], fork)).toEqual({ code: 1, text: `app-fork [app] blocked: ${notOurs}` });
+    expect(await run(["status"], fork)).toEqual({ code: 1, text: `app-fork [app] missing: NOT THIS REPOSITORY'S: ${notOurs}` });
+    const second = repo(path.join(home, "app2"), ".screenshots\n");
+    write(second, { ".screenshots/web/home.png": "other" });
+    expect(await run(["link", "--supersede"], second)).toEqual({
+      code: 0,
+      text: "app2 [app] would supersede-and-link -> <home>/matrix-artifacts/app/screenshots; its own capture to <home>/matrix-artifacts/app/superseded/app2-<time>\nDry run; rerun with --apply.",
+    });
+    expect(await run(["link", "--apply", "--supersede"], second)).toEqual({
+      code: 0,
+      text: "app2 [app] done supersede-and-link -> <home>/matrix-artifacts/app/screenshots; its own capture to <home>/matrix-artifacts/app/superseded/app2-<time>",
+    });
+    // JSON, and a selection with nothing that captures.
+    const json = await run(["link", "--json"], second);
+    expect(JSON.parse(json.text)).toMatchObject({ artifacts: "<home>/matrix-artifacts", apply: false, results: [{ name: "app2", before: "linked" }] });
+    rmSync(path.join(app, LINK));
+    rmSync(path.join(app, "package.json"));
+    gitIn(app, "rm", "-q", "--cached", "package.json");
+    expect(await run(["status"], root)).toEqual({ code: 0, text: "No repository here captures screenshots." });
+    expect(await run(["status", "--json"], root)).toEqual({ code: 0, text: "[]" });
+    await expect(main(["capture", "app", "lib"], root, ok, say)).rejects.toThrow("capture runs one repository at a time; name it");
+  });
+
   test("parses commands and rejects options that do not apply", async () => {
     expect(parseOptions(["capture", "app", "--apply", "--", "--project", "x"])).toMatchObject({ names: ["app"], apply: true, captureArgs: ["--project", "x"] });
     expect(() => parseOptions(["status", "--apply"])).toThrow("changes nothing");
@@ -654,5 +747,20 @@ console.log(error ? "lost" : "won");
     expect(() => parseOptions(["link", "--allow-dirty"])).toThrow("only to capture");
     expect(() => parseOptions(["capture", "--supersede"])).toThrow("only to link");
     expect(() => parseOptions(["delete"])).toThrow("unknown command");
+    expect(parseOptions(["link", "a", "--project", "p", "--json", "--supersede", "b"])).toEqual({
+      command: "link",
+      names: ["a", "b"],
+      apply: false,
+      json: true,
+      allowDirty: false,
+      supersede: true,
+      captureArgs: [],
+      project: "p",
+    });
+    expect(parseOptions(["status"])).toEqual({ command: "status", names: [], apply: false, json: false, allowDirty: false, supersede: false, captureArgs: [] });
+    expect(parseOptions(["capture", "--allow-dirty", "--"])).toMatchObject({ allowDirty: true, captureArgs: [] });
+    expect(() => parseOptions(["link", "--project"])).toThrow("--project needs a name");
+    expect(() => parseOptions(["status", "--force"])).toThrow("unknown option --force\n\nUsage:");
+    expect(() => parseOptions([])).toThrow("unknown command ''");
   });
 });
