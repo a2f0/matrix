@@ -75,10 +75,13 @@ boolean, when a status is only read (an API response's field mirrored into
 UI), when it already is a discriminated union with one writer, or when the
 module is about to be deleted. Also leave alone:
 
-- Status columns where every write is a conditional update naming the state
-  it leaves (`UPDATE ... WHERE status = $from`), backed by a `CHECK`
-  constraint: that is already an explicit machine. A transition trigger only
-  restates it and breaks fixtures that simulate races by setting states.
+- Status columns whose writes all live in one module, each a conditional
+  update naming the states it may leave (`UPDATE ... WHERE status = $from`),
+  so that module reads as the transition table. Where writers are spread out
+  or name no from-state, add one `ALLOWED` table and check it in the update
+  instead; a value `CHECK` alone does not enforce transitions. A database
+  transition trigger only restates a guarded module and breaks fixtures that
+  simulate races by setting states.
 - Monotone flags with one writer each that move one way and are read only
   by cleanup (lock held, applying, committed), and append-only accumulators.
 - Static records checked by one validator, and before/after comparisons that

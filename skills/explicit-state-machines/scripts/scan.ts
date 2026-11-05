@@ -174,6 +174,10 @@ const USE_STATE = /\[\s*([A-Za-z_$][\w$]*)\s*,\s*set[A-Za-z_$][\w$]*\s*\]\s*=\s*
  * explicit machine names its states, not scattered writes.
  */
 const STATUS_ASSIGN = new RegExp(TARGET + String.raw`\s*=(?!=)\s*(["'\`])([\w-]+)\3`, "g");
+/** Tcl and Expect: `set busy true`, `set ::done 0`, `set status running`, `set status "done"`. */
+const TCL_FLAG = /^\s*set\s+(?:::)?([A-Za-z_][\w]*)\s+(true|false|1|0|yes|no)\s*$/;
+const TCL_STATUS = /^\s*set\s+(?:::)?([A-Za-z_][\w]*)\s+"?([A-Za-z][\w-]*)"?\s*$/;
+const TCL_TRUE = new Set(["true", "1", "yes"]);
 const STATUS_SETTER = /\bset_?([A-Za-z_$][\w$]*)\(\s*(["'`])([\w-]+)\2\s*\)/g;
 
 /**
@@ -206,6 +210,12 @@ export function scanText(text: string, syntax: "c" | "hash"): Signal[] {
     for (const match of line.matchAll(STATUS_ASSIGN)) {
       const name = targetName(match[1], match[2]);
       if (STATUS.test(name)) note(statuses, name, match[4], at);
+    }
+    if (syntax === "hash") {
+      const flag = TCL_FLAG.exec(line);
+      if (flag && isFlag(flag[1])) note(flags, flag[1], String(TCL_TRUE.has(flag[2])), at);
+      const status = flag ? undefined : TCL_STATUS.exec(line);
+      if (status && STATUS.test(status[1])) note(statuses, status[1], status[2], at);
     }
     for (const match of line.matchAll(STATUS_SETTER)) {
       const name = fromSetter(match[1]);

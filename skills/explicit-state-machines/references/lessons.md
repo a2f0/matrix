@@ -16,9 +16,9 @@ findings in that repository's guidance.
   paired with flags. The first five are now signals; read for the last by hand.
 - A ref mirroring a state (`isSubmitting` with `isSubmittingRef`) now shows as
   two flags; it is worth reading, since the pair can disagree.
-- Server status columns where every write is a conditional update naming the
-  state it leaves were already explicit in balebase and devopsrockstars; the
-  scanner still lists them, and the skill now says to leave them.
+- Server status columns in balebase and devopsrockstars were already guarded:
+  every write, in one module, is a conditional update naming the states it
+  may leave. The scanner still lists them; the skill says when that suffices.
 - Repositories with no runtime state (seed data, one-shot CLIs, dotfiles)
   closed as `unchanged` within minutes; let them, and record what was read.
 - Converting found real bugs: a step that stayed `running` forever after its

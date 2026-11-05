@@ -84,6 +84,29 @@ describe("explicit-state-machines scan", () => {
     expect(language("bin/run", "#!/usr/bin/env -S python3 -u")).toBe("hash");
     expect(language("LICENSE", "MIT License")).toBeUndefined();
     expect(language("qemu.exp")).toBe("hash");
+    expect(language("bin/boot", "#!/usr/bin/expect -f")).toBe("hash");
+    // A real Expect script: flags and a status set with Tcl's `set`.
+    const expect_ = [
+      "#!/usr/bin/expect -f",
+      "set is_booted 0",
+      "set ::is_installing false",
+      "set phase fetch",
+      "proc install {} {",
+      "    set is_installing true",
+      "    set phase \"install\"",
+      "}",
+      "set is_booted 1",
+      "set is_installing false",
+      "set phase verify",
+      "set timeout 30",
+    ].join("\n");
+    const report = scanFile("qemu.exp", expect_);
+    expect(report?.signals).toEqual([
+      { kind: "flags", names: ["is_booted", "is_installing"], lines: [2, 3, 6, 9, 10] },
+      { kind: "status", names: ["phase"], values: ["fetch", "install", "verify"], lines: [4, 7, 11] },
+    ]);
+    // Shell `set` options are not assignments.
+    expect(scanText("set -euo pipefail\nset -x\nset +e", "hash")).toEqual([]);
     expect(scanFile("bin/deploy", script)).toBeUndefined();
     const flagged = "#!/usr/bin/env bash\nisLocked=false\nisApplying=false\nisLocked=true\nisApplying=true\n";
     expect(scanFile("bin/deploy", flagged)?.signals[0]?.names).toEqual(["isApplying", "isLocked"]);
