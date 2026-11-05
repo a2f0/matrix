@@ -8,9 +8,11 @@ without touching in-progress work.
 ```text
 matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
-src/                 The matrix CLI: sync, status, discover, audit, deploy-secrets, sweep
+src/                 The matrix CLI: sync, status, discover, audit, health, teardown, deploy-secrets, sweep
+skills/              Shared skills for every repository: space-cleanup, take-screenshots, performance-pass
 scripts/secrets/     Backup entrypoint for ../matrix-secrets
 scripts/sentry/      Sentry MCP launcher for every harness
+scripts/testing/     The steps bun run check runs
 AGENTS.md            Coordinator rules for sweeps
 ```
 
