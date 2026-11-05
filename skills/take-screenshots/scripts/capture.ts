@@ -106,6 +106,13 @@ export async function capture(
   runner: Runner = RUNNER,
   timing: Timing = {},
 ): Promise<CapturePlan> {
+  const plan = planCapture(target, artifacts, options);
+  if (!options.apply) return plan;
+  return runCapture(target, artifacts, plan, options.args, runner, timing);
+}
+
+/** Checks the repository can be captured and describes the capture, changing nothing. */
+function planCapture(target: Target, artifacts: string, options: { allowDirty: boolean; args: string[] }): CapturePlan {
   if (typeof packageScripts(target.root).screenshots !== "string") {
     throw new Error(`${target.name} has no \`screenshots\` package script; see the take-screenshots skill's repository contract`);
   }
@@ -122,7 +129,7 @@ export async function capture(
   const merged = upstream ? git(target.root, "merge-base", "--is-ancestor", commit, upstream).status === 0 : null;
   const store = storeDir(target, artifacts);
   const planned = readRecord(store);
-  const plan: CapturePlan = {
+  return {
     name: target.name,
     project: target.project,
     store,
@@ -133,7 +140,11 @@ export async function capture(
     merged,
     ...(planned ? { previous: planned } : {}),
   };
-  if (!options.apply) return plan;
+}
+
+/** Runs a planned capture under the project's lock and records how it finished. */
+async function runCapture(target: Target, artifacts: string, plan: CapturePlan, args: string[], runner: Runner, timing: Timing): Promise<CapturePlan> {
+  const { store } = plan;
   const startedAt = new Date().toISOString();
   const lockFile = path.join(artifacts, target.project, LOCK);
   const holder: LockInfo = { pid: process.pid, host: os.hostname(), checkout: target.root, startedAt };
@@ -157,32 +168,14 @@ export async function capture(
     const previous = readRecord(store);
     const foreign = claimNamespace(target, artifacts, true);
     if (foreign) throw new Error(foreign);
-    // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
-    const partial = options.args.length > 0;
-    const inheritsDirty = partial && previous?.dirty === true;
-    const inheritsIncomplete = partial && (previous === undefined || previous.status !== "complete");
-    const base = {
-      schemaVersion: 1 as const,
-      project: target.project,
-      ...(target.repo ? { repo: target.repo } : {}),
-      commit,
-      branch,
-      dirty: dirty || inheritsDirty,
-      args: options.args,
-      // Kept images are only as merged as the capture that made them.
-      merged: partial && previous && previous.merged !== true && merged !== false ? previous.merged : merged,
-      ...(partial && previous ? { over: { commit: previous.commit, status: previous.status, dirty: previous.dirty } } : {}),
-      checkout: target.root,
-      host: os.hostname(),
-      startedAt,
-    };
+    const { base, inheritsIncomplete } = runningRecord(target, plan, args, previous, startedAt);
     writeRecord(store, { ...base, status: "running" });
     let exitCode: number | null = null;
     // Runners that honor SCREENSHOT_OUTPUT_DIR must write through the link, whatever the caller's shell exports.
     const env = { ...process.env, SCREENSHOT_OUTPUT_DIR: path.join(target.root, LINK) };
     let drained: Awaited<ReturnType<typeof drainGroup>> = "exited";
     try {
-      const result = await runner.capture(target.root, options.args, env, pgid => {
+      const result = await runner.capture(target.root, args, env, pgid => {
         group = pgid;
         // Record the capture's own group in the lock, so a person can find leftovers if this process is killed.
         replaceLock(lockFile, { ...holder, pgid });
@@ -190,23 +183,7 @@ export async function capture(
       exitCode = result.code;
       if (result.pgid !== undefined) drained = await drainGroup(result.pgid, timing.graceMs, timing.killMs);
     } finally {
-      // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
-      const kept = linkState(target, artifacts).state === "linked";
-      // The record names one commit: a branch switch or new edit mid-capture makes that untrue.
-      const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
-      if (moved)
-        process.stderr.write(
-          `${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`,
-        );
-      if (!kept)
-        process.stderr.write(
-          `${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`,
-        );
-      const finalStatus = (): CaptureRecord["status"] => {
-        if (exitCode !== 0 || signal || !kept || moved || drained !== "exited") return "failed";
-        return inheritsIncomplete ? "incomplete" : "complete";
-      };
-      const finished: CaptureRecord = { ...base, status: finalStatus(), finishedAt: new Date().toISOString(), exitCode };
+      const finished = finishedRecord(target, artifacts, plan, base, { exitCode, signal, drained, inheritsIncomplete });
       // The capture may have replaced the shared directory's contents; the record goes back in either way.
       writeRecord(store, finished);
       Object.assign(plan, { applied: true, record: finished });
@@ -222,4 +199,66 @@ export async function capture(
     process.off("SIGINT", hold);
     process.off("SIGTERM", hold);
   }
+}
+
+/** The record's fields while the capture runs, and whether a complete one still counts as incomplete. */
+function runningRecord(
+  target: Target,
+  plan: CapturePlan,
+  args: string[],
+  previous: CaptureRecord | undefined,
+  startedAt: string,
+): { base: Omit<CaptureRecord, "status">; inheritsIncomplete: boolean } {
+  const { commit, branch, dirty, merged } = plan;
+  // A partial capture keeps whatever else the store holds; with no record, that is of unknown provenance.
+  const partial = args.length > 0;
+  const inheritsDirty = partial && previous?.dirty === true;
+  const inheritsIncomplete = partial && (previous === undefined || previous.status !== "complete");
+  const base = {
+    schemaVersion: 1 as const,
+    project: target.project,
+    ...(target.repo ? { repo: target.repo } : {}),
+    commit,
+    branch,
+    dirty: dirty || inheritsDirty,
+    args,
+    // Kept images are only as merged as the capture that made them.
+    merged: partial && previous && previous.merged !== true && merged !== false ? previous.merged : merged,
+    ...(partial && previous ? { over: { commit: previous.commit, status: previous.status, dirty: previous.dirty } } : {}),
+    checkout: target.root,
+    host: os.hostname(),
+    startedAt,
+  };
+  return { base, inheritsIncomplete };
+}
+
+/** How a capture's run ended, as the finished record judges it. */
+interface RunOutcome {
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | undefined;
+  readonly drained: Awaited<ReturnType<typeof drainGroup>>;
+  readonly inheritsIncomplete: boolean;
+}
+
+/** The record of a finished capture, after checking that the clone still shows the planned commit through the link. */
+function finishedRecord(target: Target, artifacts: string, plan: CapturePlan, base: Omit<CaptureRecord, "status">, outcome: RunOutcome): CaptureRecord {
+  const { commit, dirty } = plan;
+  const { exitCode, signal, drained, inheritsIncomplete } = outcome;
+  // A capture that deleted and recreated .screenshots wrote into the clone, not the store.
+  const kept = linkState(target, artifacts).state === "linked";
+  // The record names one commit: a branch switch or new edit mid-capture makes that untrue.
+  const moved = gitValue(target.root, "rev-parse", "HEAD") !== commit || (!dirty && isDirty(target.root));
+  if (moved)
+    process.stderr.write(
+      `${target.name} changed commit or gained local changes during the capture, so it does not show ${commit.slice(0, 10)}; capture again.\n`,
+    );
+  if (!kept)
+    process.stderr.write(
+      `${target.name}/${LINK} is no longer linked: the capture replaced it, so the store did not receive it. Never remove ${LINK} itself; clear its contents.\n`,
+    );
+  const finalStatus = (): CaptureRecord["status"] => {
+    if (exitCode !== 0 || signal || !kept || moved || drained !== "exited") return "failed";
+    return inheritsIncomplete ? "incomplete" : "complete";
+  };
+  return { ...base, status: finalStatus(), finishedAt: new Date().toISOString(), exitCode };
 }
