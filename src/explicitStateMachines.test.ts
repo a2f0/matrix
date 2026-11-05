@@ -85,6 +85,11 @@ describe("explicit-state-machines scan", () => {
   test("keeps line numbers through block comments and URLs", () => {
     expect(codeLines("a /* x */ b\n/* start\nmiddle\nend */ c\nurl = \"https://x\" // note", "c")).toEqual(["a  b", "", "", " c", "url = \"https://x\" "]);
     expect(codeLines("  # comment\nx = 1", "hash")).toEqual(["", "x = 1"]);
+    // Comment markers inside strings are text, not comments.
+    expect(codeLines("const glob = \"src/*\"; isLoading = true;\nconst u = 'a//b'; hasError = false; // c\nconst e = \"\\\"/*\";", "c"))
+      .toEqual(["const glob = \"src/*\"; isLoading = true;", "const u = 'a//b'; hasError = false; ", "const e = \"\\\"/*\";"]);
+    const glob = "const glob = \"src/*.ts\";\nsetIsLoading(true);\nsetIsLoading(false);\nsetHasError(true);\nsetHasError(false);";
+    expect(scanText(glob, "c").map(signal => signal.names)).toEqual([["hasError", "isLoading"]]);
   });
 
   test("reads application source only", () => {

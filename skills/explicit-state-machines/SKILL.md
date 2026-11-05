@@ -83,15 +83,20 @@ Follow `references/patterns.md` for the language at hand. In every language:
    Say explicitly what an event does in a state where it does not apply:
    ignore it (return the same state) or throw in development; never fall
    through silently.
-4. Move side effects out of the transition: effects run on entering a state
+4. Keep every guard the old code had. A `cancelled` flag or an unmount check
+   that drops a stale response must become a request tag carried by the
+   state and its events (only the current request may finish), never a bare
+   "is it loading?" check, which accepts `start(A) -> reset -> start(B) ->
+   succeed(A)`. Test that sequence.
+5. Move side effects out of the transition: effects run on entering a state
    (an effect keyed on `state.status`, a worker loop that switches on it), not
    inside the reducer.
-5. Keep call sites small: derive old booleans from the state
+6. Keep call sites small: derive old booleans from the state
    (`const isLoading = state.status === "loading"`) where many readers use
    them, rather than rewriting every consumer in the same change.
-6. Use no new dependency. Use a state-machine library (XState, Robot) only if
+7. Use no new dependency. Use a state-machine library (XState, Robot) only if
    the repository already depends on it.
-7. Test the transition table directly: every legal transition, a sample of
+8. Test the transition table directly: every legal transition, a sample of
    ignored events per state, and the impossible combinations that the old
    code allowed. Keep the existing behavior tests passing unchanged; a test
    that must change shows a behavior change, which belongs in its own PR.

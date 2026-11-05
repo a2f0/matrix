@@ -69,25 +69,31 @@ function fromSetter(name: string): string {
 /** Blanks comments, which often quote code, keeping line numbers. */
 export function codeLines(text: string, syntax: "c" | "hash"): string[] {
   const lines = text.split("\n");
+  if (syntax === "hash") return lines.map(line => line.trimStart().startsWith("#") ? "" : line);
+  // String-aware, so "/*" or "//" inside a string literal never hides code.
+  // Strings are tracked per line; a template literal spanning lines is rare
+  // enough in state code that a lead missed there is acceptable.
   let inBlock = false;
-  return lines.map(raw => {
-    let line = raw;
-    if (syntax === "c") {
+  return lines.map(line => {
+    let out = "";
+    let quote: string | undefined;
+    for (let index = 0; index < line.length; index++) {
+      const char = line[index], next = line[index + 1];
       if (inBlock) {
-        const end = line.indexOf("*/");
-        if (end < 0) return "";
-        line = line.slice(end + 2);
-        inBlock = false;
+        if (char === "*" && next === "/") { inBlock = false; index++; }
+        continue;
       }
-      line = line.replace(/\/\*.*?\*\//g, "");
-      const open = line.indexOf("/*");
-      if (open >= 0) { inBlock = true; line = line.slice(0, open); }
-      const trimmed = line.trimStart();
-      if (trimmed.startsWith("//") || trimmed.startsWith("*")) return "";
-      return line.replace(/(^|[^:"'`])\/\/.*$/, "$1");
+      if (quote) {
+        out += char;
+        if (char === "\\") { out += next ?? ""; index++; } else if (char === quote) quote = undefined;
+        continue;
+      }
+      if (char === "/" && next === "*") { inBlock = true; index++; continue; }
+      if (char === "/" && next === "/") break;
+      if (char === "\"" || char === "'" || char === "`") quote = char;
+      out += char;
     }
-    const trimmed = line.trimStart();
-    return trimmed.startsWith("#") ? "" : line;
+    return out;
   });
 }
 

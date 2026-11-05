@@ -18,24 +18,28 @@ After: one union, one reducer, booleans derived for readers.
 ```ts
 export type LoadState =
   | { status: "idle" }
-  | { status: "loading" }
+  | { status: "loading"; request: number }
   | { status: "failed"; error: Error }
   | { status: "loaded"; items: Item[] };
 
 export type LoadEvent =
-  | { type: "start" }
-  | { type: "succeed"; items: Item[] }
-  | { type: "fail"; error: Error }
+  | { type: "start"; request: number }
+  | { type: "succeed"; request: number; items: Item[] }
+  | { type: "fail"; request: number; error: Error }
   | { type: "reset" };
+
+/** Only the request that is still current may finish the load. */
+const current = (state: LoadState, request: number) =>
+  state.status === "loading" && state.request === request;
 
 export function transition(state: LoadState, event: LoadEvent): LoadState {
   switch (event.type) {
     case "start":
-      return state.status === "loading" ? state : { status: "loading" };
+      return { status: "loading", request: event.request };
     case "succeed":
-      return state.status === "loading" ? { status: "loaded", items: event.items } : state;
+      return current(state, event.request) ? { status: "loaded", items: event.items } : state;
     case "fail":
-      return state.status === "loading" ? { status: "failed", error: event.error } : state;
+      return current(state, event.request) ? { status: "failed", error: event.error } : state;
     case "reset":
       return { status: "idle" };
     default:
@@ -52,8 +56,11 @@ const [state, dispatch] = useReducer(transition, { status: "idle" });
 const isLoading = state.status === "loading";
 ```
 
-- A late response after `reset` is now ignored by the reducer instead of
-  needing a `cancelled` flag; keep an `AbortController` for the network work.
+- Never drop a cancellation guard without replacing it. A bare
+  `status === "loading"` check accepts a stale result in
+  `start(A) -> reset -> start(B) -> succeed(A)`; tag each request (a counter
+  or the `AbortController` itself) and let only the current one finish, as
+  above, with that sequence as a test. Keep aborting the network work too.
 - Stores (Zustand, Redux, signals): keep the union as the store's state and
   the reducer as its only writer; actions dispatch events.
 - Classes and long-lived loops (sync workers, socket connections): a private
@@ -68,11 +75,20 @@ Test with a table:
 
 ```ts
 test.each([
-  [{ status: "idle" }, { type: "succeed", items: [] }, { status: "idle" }],
-  [{ status: "loading" }, { type: "succeed", items: [] }, { status: "loaded", items: [] }],
-  [{ status: "loaded", items: [] }, { type: "fail", error }, { status: "loaded", items: [] }],
+  [{ status: "idle" }, { type: "succeed", request: 1, items: [] }, { status: "idle" }],
+  [{ status: "loading", request: 1 }, { type: "succeed", request: 1, items: [] }, { status: "loaded", items: [] }],
+  [{ status: "loading", request: 2 }, { type: "succeed", request: 1, items: [] }, { status: "loading", request: 2 }],
+  [{ status: "loaded", items: [] }, { type: "fail", request: 1, error }, { status: "loaded", items: [] }],
 ] as const)("%o + %o", (state, event, next) => {
   expect(transition(state, event)).toEqual(next);
+});
+
+test("a stale request cannot finish a newer one", () => {
+  const events: LoadEvent[] = [
+    { type: "start", request: 1 }, { type: "reset" }, { type: "start", request: 2 },
+    { type: "succeed", request: 1, items: stale },
+  ];
+  expect(events.reduce(transition, { status: "idle" })).toEqual({ status: "loading", request: 2 });
 });
 ```
 
