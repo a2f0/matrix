@@ -23,7 +23,7 @@ import { type CaptureRecord, readRecord, RECORD, relation } from "./record";
 import { LOCK, storeDir, type Target } from "./store";
 import { artifactsRoot, resolveTargets } from "./targets";
 
-export const USAGE = `Usage: artifacts.ts <command> [repo...] [options]
+const USAGE = `Usage: artifacts.ts <command> [repo...] [options]
 
   status [repo...]          Link state and newest capture of each repository
   link [repo...] [--apply] [--supersede]
@@ -40,7 +40,7 @@ overrides the store, which defaults to matrix-artifacts beside the workspace
 (or beside the repository outside one). --json prints the report as JSON.
 `;
 
-export interface StatusEntry {
+interface StatusEntry {
   readonly name: string;
   /** Set when the namespace belongs to another repository than this clone's origin. */
   readonly foreign?: string;
@@ -52,7 +52,7 @@ export interface StatusEntry {
   readonly lock?: LockInfo;
 }
 
-export function status(target: Target, artifacts: string): StatusEntry {
+function status(target: Target, artifacts: string): StatusEntry {
   const store = storeDir(target, artifacts);
   const capture = readRecord(store);
   const lock = readLock(path.join(artifacts, target.project, LOCK));

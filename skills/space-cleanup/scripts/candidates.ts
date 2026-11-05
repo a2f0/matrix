@@ -27,7 +27,7 @@ const NESTED: Record<string, Array<[string, Tier]>> = {
 };
 
 /** The tier a git-ignored path belongs to, or undefined when it is not known to be regenerable. */
-export function classify(rel: string, root: string): Tier | undefined {
+function classify(rel: string, root: string): Tier | undefined {
   const name = path.posix.basename(rel);
   const parent = path.join(root, path.posix.dirname(rel));
   if (CACHE_NAMES.has(name)) return "caches";
@@ -70,7 +70,7 @@ export function isRepository(directory: string): boolean {
 }
 
 /** The first repository at or under `directory`, undefined when there is none; throws when it cannot search. */
-export function findRepository(directory: string): string | undefined {
+function findRepository(directory: string): string | undefined {
   if (isRepository(directory)) return directory;
   const result = spawnSync("find", [directory, "(", "-name", ".git", "-o", "-name", "HEAD", ")", "-print"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (result.status !== 0) throw new Error(`could not search ${directory} for repositories`);

@@ -53,7 +53,7 @@ export function targetFor(root: string, project?: string, resolve: (root: string
 }
 
 /** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
-export const OWNER = "repository.json";
+const OWNER = "repository.json";
 
 /** A namespace's owner file: its repository and the remote names GitHub confirmed for it. */
 interface Owner { repo: string; aliases: string[]; id?: string | undefined; explicit?: boolean | undefined }

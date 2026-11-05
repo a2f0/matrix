@@ -29,7 +29,7 @@ export interface Host {
   run(command: string, args: string[]): string;
 }
 
-export const HOST: Host = {
+const HOST: Host = {
   home: os.homedir(),
   has: command => spawnSync("sh", ["-c", 'command -v "$1"', "sh", command], { encoding: "utf8" }).status === 0,
   output: (command, args) => {

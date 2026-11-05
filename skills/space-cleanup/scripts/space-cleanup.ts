@@ -37,7 +37,7 @@ export interface Options {
   readonly includeBusy: boolean;
 }
 
-export const USAGE = `Usage: space-cleanup [checkout-or-path...] [--builds] [--deps] [--machine] [--include-busy] [--apply] [--json]
+const USAGE = `Usage: space-cleanup [checkout-or-path...] [--builds] [--deps] [--machine] [--include-busy] [--apply] [--json]
 
 Reports regenerable, git-ignored, untracked paths and removes them with --apply.
 From a matrix workspace it covers the workspace and every checkout, or the

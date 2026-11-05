@@ -9,13 +9,13 @@ export interface Target {
 }
 
 // Kept in sync with take-screenshots/scripts/git.ts toplevel.
-export function toplevel(directory: string): string | undefined {
+function toplevel(directory: string): string | undefined {
   const result = git(directory, ["rev-parse", "--show-toplevel"]);
   return result.ok ? result.stdout.trim() : undefined;
 }
 
 // Kept in sync with take-screenshots/scripts/targets.ts isMatrixWorkspace.
-export function isMatrixWorkspace(root: string): boolean {
+function isMatrixWorkspace(root: string): boolean {
   return existsSync(path.join(root, "matrix.json")) && existsSync(path.join(root, "checkouts"));
 }
 

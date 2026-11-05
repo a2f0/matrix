@@ -390,7 +390,7 @@ export async function shot(options: Options): Promise<void> {
 }
 
 /** An 8-bit RGB or RGBA, non-interlaced PNG, as Chrome writes screenshots, decoded to RGBA. */
-export function decodePng(file: Buffer): { width: number; height: number; data: Uint8Array } {
+function decodePng(file: Buffer): { width: number; height: number; data: Uint8Array } {
   if (file.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("Not a PNG.");
   let width = 0, height = 0, channels = 0;
   const chunks: Buffer[] = [];
@@ -460,7 +460,7 @@ function diff(options: Options) {
   if (result.differing !== 0) process.exitCode = 1;
 }
 
-export async function main(argv = process.argv.slice(2)): Promise<void> {
+async function main(argv = process.argv.slice(2)): Promise<void> {
   const options = parseOptions(argv);
   switch (options.command) {
     case "serve": {

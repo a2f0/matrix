@@ -6,12 +6,12 @@ import { targetFor } from "./namespace";
 import { lexists, LINK, type Target } from "./store";
 
 // Kept in sync with space-cleanup/scripts/targets.ts isMatrixWorkspace.
-export function isMatrixWorkspace(root: string): boolean {
+function isMatrixWorkspace(root: string): boolean {
   return existsSync(path.join(root, "matrix.json")) && existsSync(path.join(root, "checkouts"));
 }
 
 /** The matrix workspace a repository is, or is a checkout of. */
-export function workspaceOf(root: string): string | undefined {
+function workspaceOf(root: string): string | undefined {
   if (isMatrixWorkspace(root)) return root;
   const parent = path.dirname(root);
   return path.basename(parent) === "checkouts" && isMatrixWorkspace(path.dirname(parent)) ? path.dirname(parent) : undefined;
@@ -30,7 +30,7 @@ export function packageScripts(root: string): Record<string, unknown> {
 }
 
 /** Whether a repository captures screenshots: a `screenshots` script, or a capture left in .screenshots. */
-export function captures(root: string): boolean {
+function captures(root: string): boolean {
   return typeof packageScripts(root).screenshots === "string" || lexists(path.join(root, LINK));
 }
 

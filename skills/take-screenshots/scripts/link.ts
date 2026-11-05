@@ -37,7 +37,7 @@ export function linkState(target: Target, artifacts: string): LinkState {
  * trailing slash (`.screenshots/`) matches only a directory, so the link would
  * show up as untracked and hold back `matrix sync`.
  */
-export function ignorePatternMatchesFile(root: string): boolean {
+function ignorePatternMatchesFile(root: string): boolean {
   let text = "";
   try { text = readFileSync(path.join(root, ".gitignore"), "utf8"); } catch { return false; }
   return text.split("\n").map(line => line.trim()).some(line => [LINK, `/${LINK}`, `**/${LINK}`].includes(line));

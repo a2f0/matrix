@@ -15,7 +15,7 @@ export interface Proc {
 const PIPELINE_FILTERS = new Set(["head", "tail", "less", "more", "cat", "tee", "grep", "rg", "sed", "awk", "jq", "sort", "uniq", "wc", "cut", "tr", "column"]);
 /** An interactive shell waiting at a prompt; `bash build.sh` and `sh -c ...` are working. */
 const IDLE_SHELL = /^-?(?:\S*\/)?(?:zsh|bash|sh|fish|dash|tmux)(?:\s+-[il]+)*$/;
-export function idleShell(proc: Proc): boolean { return IDLE_SHELL.test(proc.args.trim()); }
+function idleShell(proc: Proc): boolean { return IDLE_SHELL.test(proc.args.trim()); }
 
 /** Every process's cwd; throws when it cannot list them, so busy repositories are never mistaken for idle ones. */
 export function processes(): Proc[] {
@@ -68,7 +68,7 @@ export function parseProcesses(table: string, argsOutput: string, lsofOutput: st
 }
 
 /** Absolute paths that a command line's path-like arguments (`a/b`, `--flag=./x`, `-C dir`) resolve to. */
-export function argumentPaths(args: string, cwd: string): string[] {
+function argumentPaths(args: string, cwd: string): string[] {
   const paths: string[] = [];
   for (const token of args.split(/\s+/).slice(1)) {
     const value = token.startsWith("-") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
