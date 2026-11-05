@@ -151,92 +151,129 @@ const RECORD_FLAGS = {
   manual: "list",
 } as const;
 
-function sweepCommand(args: string[], root: string, manifest: Manifest, services: Services): number {
-  const output = (value: unknown) => json(services, value);
-  const [action, ...rest] = args;
-  if (action === "start") {
-    const { positional, values } = parseOptions(rest, { topic: "value", issue: "value" }, "sweep start");
-    const [branch, ...names] = positional;
-    usage(branch !== undefined, "Usage: matrix sweep start <branch> [--topic text] [--issue owner/repo#n] [repo...]");
-    const repos = selectRepos(manifest, names);
-    output(startSweep(root, branch!, repos, statusReader(root, manifest), { topic: values.topic, issue: values.issue }));
-    return 0;
-  }
-  if (action === "record") {
-    const { positional, values, lists } = parseOptions(rest, RECORD_FLAGS, "sweep record");
-    usage(positional.length === 2, "Usage: matrix sweep record <branch> <repo> [options]; see matrix --help.");
-    const update = parseUpdate(values, lists);
-    usage(Object.keys(update).length > 0, "sweep record needs at least one field to record.");
-    const known = update.events ? knownCauses(root) : new Map();
-    output(recordEntry(root, positional[0]!, positional[1]!, update));
-    // Retro groups friction by exact cause, so a new spelling of an old cause hides a recurrence.
-    for (const event of update.events ?? []) {
-      const earlier = [...(known.get(event.kind) ?? [])].sort();
-      if (earlier.length > 0 && !earlier.includes(event.cause)) {
-        services.warn(
-          `Note: '${event.cause}' is a new ${event.kind} cause; earlier ledgers use ${earlier.join(", ")}. Reuse one when it names the same cause, so retro can group them.\n`,
-        );
-      }
-    }
-    return 0;
-  }
-  if (action === "report") {
-    const { positional, booleans } = parseOptions(rest, { markdown: "boolean" }, "sweep report");
-    usage(positional.length === 1, "Usage: matrix sweep report <branch> [--markdown]");
-    const result = sweepReport(root, positional[0]!);
-    if (booleans.has("markdown")) services.write(markdownReport(result));
-    else output(result);
-    return 0;
-  }
-  if (action === "list") {
-    usage(rest.length === 0, "Usage: matrix sweep list");
-    output(
-      listSweeps(root).map(({ sweep, updatedAt, counts, remaining, events }) => ({
-        branch: sweep.branch,
-        topic: sweep.topic,
-        startedAt: sweep.startedAt,
-        updatedAt,
-        counts,
-        remaining,
-        events,
-      })),
-    );
-    return 0;
-  }
-  if (action === "retro") {
-    const { positional, values } = parseOptions(rest, { last: "value", "min-repos": "value", "min-sweeps": "value" }, "sweep retro");
-    usage(positional.length === 0 || values.last === undefined, "sweep retro takes branches or --last, not both.");
-    output(
-      retro(root, {
-        branches: positional,
-        last: count(values.last, "last"),
-        minRepos: count(values["min-repos"], "min-repos"),
-        minSweeps: count(values["min-sweeps"], "min-sweeps"),
-      }),
-    );
-    return 0;
-  }
-  if (action === "resolve") {
-    const { positional, values } = parseOptions(rest, { resolution: "value", pr: "value" }, "sweep resolve");
-    usage(positional.length === 2 && values.resolution !== undefined, "Usage: matrix sweep resolve <kind> <cause> --resolution text [--pr url]");
-    output(recordResolution(root, positional[0]!, positional[1]!, values.resolution!, values.pr));
-    return 0;
-  }
-  throw new Error("Usage: matrix sweep <start|record|report|list|retro|resolve>; see matrix --help.");
+/** What every command handler reads: the workspace, its manifest, and the services that reach outside it. */
+interface CommandContext {
+  readonly root: string;
+  readonly manifest: Manifest;
+  readonly gh: Gh;
+  readonly services: Services;
+  readonly output: (value: unknown) => void;
 }
 
-export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, services: Services = SERVICES): number {
-  const output = (value: unknown) => json(services, value);
-  const [command, ...args] = argv;
-  if (!command || command === "--help" || command === "-h") {
-    services.write(HELP);
-    return 0;
+type Handler = (args: string[], context: CommandContext) => number;
+
+/** Retro groups friction by exact cause, so a new spelling of an old cause hides a recurrence. */
+function warnNewCauses(services: Services, known: Map<string, Set<string>>, events: Array<{ kind: string; cause: string }>): void {
+  for (const event of events) {
+    const earlier = [...(known.get(event.kind) ?? [])].sort();
+    if (earlier.length > 0 && !earlier.includes(event.cause)) {
+      services.warn(
+        `Note: '${event.cause}' is a new ${event.kind} cause; earlier ledgers use ${earlier.join(", ")}. Reuse one when it names the same cause, so retro can group them.\n`,
+      );
+    }
   }
-  const manifest = loadManifest(root);
-  if (command === "sync" || command === "status") {
-    const repos = selectRepos(manifest, parseOptions(args, {}, command).positional);
-    if (command === "status") {
-      const checkouts = repos.map(statusReader(root, manifest));
+}
+
+const SWEEP_ACTIONS = new Map<string, Handler>([
+  [
+    "start",
+    (rest, { root, manifest, output }) => {
+      const { positional, values } = parseOptions(rest, { topic: "value", issue: "value" }, "sweep start");
+      const [branch, ...names] = positional;
+      usage(branch !== undefined, "Usage: matrix sweep start <branch> [--topic text] [--issue owner/repo#n] [repo...]");
+      const repos = selectRepos(manifest, names);
+      output(startSweep(root, branch!, repos, statusReader(root, manifest), { topic: values.topic, issue: values.issue }));
+      return 0;
+    },
+  ],
+  [
+    "record",
+    (rest, { root, services, output }) => {
+      const { positional, values, lists } = parseOptions(rest, RECORD_FLAGS, "sweep record");
+      usage(positional.length === 2, "Usage: matrix sweep record <branch> <repo> [options]; see matrix --help.");
+      const update = parseUpdate(values, lists);
+      usage(Object.keys(update).length > 0, "sweep record needs at least one field to record.");
+      const known = update.events ? knownCauses(root) : new Map();
+      output(recordEntry(root, positional[0]!, positional[1]!, update));
+      warnNewCauses(services, known, update.events ?? []);
+      return 0;
+    },
+  ],
+  [
+    "report",
+    (rest, { root, services, output }) => {
+      const { positional, booleans } = parseOptions(rest, { markdown: "boolean" }, "sweep report");
+      usage(positional.length === 1, "Usage: matrix sweep report <branch> [--markdown]");
+      const result = sweepReport(root, positional[0]!);
+      if (booleans.has("markdown")) services.write(markdownReport(result));
+      else output(result);
+      return 0;
+    },
+  ],
+  [
+    "list",
+    (rest, { root, output }) => {
+      usage(rest.length === 0, "Usage: matrix sweep list");
+      output(
+        listSweeps(root).map(({ sweep, updatedAt, counts, remaining, events }) => ({
+          branch: sweep.branch,
+          topic: sweep.topic,
+          startedAt: sweep.startedAt,
+          updatedAt,
+          counts,
+          remaining,
+          events,
+        })),
+      );
+      return 0;
+    },
+  ],
+  [
+    "retro",
+    (rest, { root, output }) => {
+      const { positional, values } = parseOptions(rest, { last: "value", "min-repos": "value", "min-sweeps": "value" }, "sweep retro");
+      usage(positional.length === 0 || values.last === undefined, "sweep retro takes branches or --last, not both.");
+      output(
+        retro(root, {
+          branches: positional,
+          last: count(values.last, "last"),
+          minRepos: count(values["min-repos"], "min-repos"),
+          minSweeps: count(values["min-sweeps"], "min-sweeps"),
+        }),
+      );
+      return 0;
+    },
+  ],
+  [
+    "resolve",
+    (rest, { root, output }) => {
+      const { positional, values } = parseOptions(rest, { resolution: "value", pr: "value" }, "sweep resolve");
+      usage(positional.length === 2 && values.resolution !== undefined, "Usage: matrix sweep resolve <kind> <cause> --resolution text [--pr url]");
+      output(recordResolution(root, positional[0]!, positional[1]!, values.resolution!, values.pr));
+      return 0;
+    },
+  ],
+]);
+
+const COMMANDS = new Map<string, Handler>([
+  [
+    "sync",
+    (args, { root, manifest, services, output }) => {
+      const repos = selectRepos(manifest, parseOptions(args, {}, "sync").positional);
+      const results = repos.map(repo => {
+        const result = syncRepo(root, repo, cloneUrl(repo, manifest.protocol));
+        services.warn(`${repo}: ${result.action}${result.reason ? ` (${result.reason})` : ""}\n`);
+        return result;
+      });
+      const ok = results.every(result => result.action !== "error");
+      output({ ok, results, unmanaged: unmanagedCheckouts(root, manifest.repos) });
+      return ok ? 0 : 1;
+    },
+  ],
+  [
+    "status",
+    (args, { root, manifest, output }) => {
+      const checkouts = selectRepos(manifest, parseOptions(args, {}, "status").positional).map(statusReader(root, manifest));
       output({
         ready: checkouts.every(checkout => checkout.ready),
         checkouts,
@@ -244,73 +281,98 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
         unmanaged: unmanagedCheckouts(root, manifest.repos),
       });
       return 0;
-    }
-    const results = repos.map(repo => {
-      const result = syncRepo(root, repo, cloneUrl(repo, manifest.protocol));
-      services.warn(`${repo}: ${result.action}${result.reason ? ` (${result.reason})` : ""}\n`);
-      return result;
-    });
-    const ok = results.every(result => result.action !== "error");
-    output({ ok, results, unmanaged: unmanagedCheckouts(root, manifest.repos) });
-    return ok ? 0 : 1;
-  }
-  if (command === "discover") {
-    const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "discover");
-    usage(positional.length === 0, "Usage: matrix discover [--apply]");
-    const apply = booleans.has("apply");
-    const plan = planDiscovery(manifest, services.listOwnerRepos(manifest.discover));
-    if (apply && plan.added.length > 0) {
-      // Round-trip through validation so a discovered name collision fails before writing.
-      saveManifest(root, parseManifest(JSON.stringify({ ...manifest, repos: [...manifest.repos, ...plan.added].sort(byName) })));
-    }
-    output({ applied: apply, ...plan });
+    },
+  ],
+  [
+    "discover",
+    (args, { root, manifest, services, output }) => {
+      const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "discover");
+      usage(positional.length === 0, "Usage: matrix discover [--apply]");
+      const apply = booleans.has("apply");
+      const plan = planDiscovery(manifest, services.listOwnerRepos(manifest.discover));
+      if (apply && plan.added.length > 0) {
+        // Round-trip through validation so a discovered name collision fails before writing.
+        saveManifest(root, parseManifest(JSON.stringify({ ...manifest, repos: [...manifest.repos, ...plan.added].sort(byName) })));
+      }
+      output({ applied: apply, ...plan });
+      return 0;
+    },
+  ],
+  [
+    "deploy-secrets",
+    (args, { root, manifest, gh, output }) => {
+      const { positional: names, booleans } = parseOptions(args, { apply: "boolean" }, "deploy-secrets");
+      const apply = booleans.has("apply");
+      const secrets = secretsRoot(root);
+      usage(existsSync(secrets), `Secrets folder ${secrets} does not exist; set MATRIX_SECRETS_DIR.`);
+      const { ok, results } = deployAll(secrets, selectRepos(manifest, names), apply, gh);
+      output({ ok, apply, secrets, results });
+      return ok ? 0 : 1;
+    },
+  ],
+  [
+    "audit",
+    (args, { root, manifest, services, output }) => {
+      const { positional, lists, booleans } = parseOptions(args, { rule: "list", remote: "boolean" }, "audit");
+      const rules = selectRules(lists.rule ?? [], booleans.has("remote"));
+      const result = audit(root, selectRepos(manifest, positional), rules, statusReader(root, manifest), registry(services));
+      output(result);
+      return result.ok ? 0 : 1;
+    },
+  ],
+  [
+    "health",
+    (args, { root, manifest, services, output }) => {
+      const { positional, booleans } = parseOptions(args, { remote: "boolean", markdown: "boolean" }, "health");
+      usage(positional.length === 0, "Usage: matrix health [--remote] [--markdown]");
+      const remote = booleans.has("remote");
+      const statusOf = statusReader(root, manifest);
+      const health = assessHealth({
+        statuses: manifest.repos.map(statusOf),
+        unmanaged: unmanagedCheckouts(root, manifest.repos),
+        audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry(services)),
+        retro: retro(root),
+        disk: services.diskSpace(root),
+        git: services.gitTransport(root),
+        running: teardownAll(teardownTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
+        ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
+      });
+      if (booleans.has("markdown")) services.write(markdownHealth(health));
+      else output(health);
+      return 0;
+    },
+  ],
+  [
+    "sweep",
+    ([action, ...rest], context) => {
+      const handler = action === undefined ? undefined : SWEEP_ACTIONS.get(action);
+      if (!handler) throw new Error("Usage: matrix sweep <start|record|report|list|retro|resolve>; see matrix --help.");
+      return handler(rest, context);
+    },
+  ],
+  [
+    "teardown",
+    (args, { root, manifest, services, output }) => {
+      const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "teardown");
+      const result = teardownAll(
+        teardownTargets(root, manifest, positional),
+        (directory, apply) => services.teardown(root, directory, apply),
+        booleans.has("apply"),
+      );
+      output(result);
+      return result.ok ? 0 : 1;
+    },
+  ],
+]);
+
+export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, services: Services = SERVICES): number {
+  const [command, ...args] = argv;
+  if (!command || command === "--help" || command === "-h") {
+    services.write(HELP);
     return 0;
   }
-  if (command === "deploy-secrets") {
-    const { positional: names, booleans } = parseOptions(args, { apply: "boolean" }, "deploy-secrets");
-    const apply = booleans.has("apply");
-    const secrets = secretsRoot(root);
-    usage(existsSync(secrets), `Secrets folder ${secrets} does not exist; set MATRIX_SECRETS_DIR.`);
-    const { ok, results } = deployAll(secrets, selectRepos(manifest, names), apply, gh);
-    output({ ok, apply, secrets, results });
-    return ok ? 0 : 1;
-  }
-  if (command === "audit") {
-    const { positional, lists, booleans } = parseOptions(args, { rule: "list", remote: "boolean" }, "audit");
-    const rules = selectRules(lists.rule ?? [], booleans.has("remote"));
-    const result = audit(root, selectRepos(manifest, positional), rules, statusReader(root, manifest), registry(services));
-    output(result);
-    return result.ok ? 0 : 1;
-  }
-  if (command === "health") {
-    const { positional, booleans } = parseOptions(args, { remote: "boolean", markdown: "boolean" }, "health");
-    usage(positional.length === 0, "Usage: matrix health [--remote] [--markdown]");
-    const remote = booleans.has("remote");
-    const statusOf = statusReader(root, manifest);
-    const health = assessHealth({
-      statuses: manifest.repos.map(statusOf),
-      unmanaged: unmanagedCheckouts(root, manifest.repos),
-      audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry(services)),
-      retro: retro(root),
-      disk: services.diskSpace(root),
-      git: services.gitTransport(root),
-      running: teardownAll(teardownTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
-      ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
-    });
-    if (booleans.has("markdown")) services.write(markdownHealth(health));
-    else output(health);
-    return 0;
-  }
-  if (command === "sweep") return sweepCommand(args, root, manifest, services);
-  if (command === "teardown") {
-    const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "teardown");
-    const result = teardownAll(
-      teardownTargets(root, manifest, positional),
-      (directory, apply) => services.teardown(root, directory, apply),
-      booleans.has("apply"),
-    );
-    output(result);
-    return result.ok ? 0 : 1;
-  }
-  throw new Error(`Unknown command '${command}'. Run matrix --help.`);
+  const manifest = loadManifest(root);
+  const handler = COMMANDS.get(command);
+  if (!handler) throw new Error(`Unknown command '${command}'. Run matrix --help.`);
+  return handler(args, { root, manifest, gh, services, output: value => json(services, value) });
 }
