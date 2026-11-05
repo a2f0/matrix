@@ -95,7 +95,9 @@ describe("explicit-state-machines scan", () => {
   test("reads application source only", () => {
     expect(language("src/app.tsx")).toBe("c");
     expect(language("scripts/run.sh")).toBe("hash");
-    for (const skipped of ["src/app.test.ts", "node_modules/x/index.js", "dist/app.js", "types.d.ts", ".agents/skills/x/run.ts", "src/__tests__/a.ts", "vendor/lib.go", "README.md", "app.min.js"]) {
+    expect(language("pkg/sync.go")).toBe("c");
+    expect(language("app/testing_tools.py")).toBe("hash");
+    for (const skipped of ["src/app.test.ts", "node_modules/x/index.js", "dist/app.js", "types.d.ts", ".agents/skills/x/run.ts", "src/__tests__/a.ts", "vendor/lib.go", "README.md", "app.min.js", "pkg/sync_test.go", "app/test_worker.py", "app/worker_test.py", "conftest.py", "AppTests.swift", "SyncSpec.kt"]) {
       expect(language(skipped)).toBeUndefined();
     }
     expect(scanFile("src/app.test.tsx", FETCHER)).toBeUndefined();

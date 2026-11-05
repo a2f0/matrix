@@ -35,6 +35,9 @@ const SKIPPED = [
   /(^|\/)\.(agents|claude|codex|opencode)\//,
   /(^|\/)(__tests__|__mocks__|e2e|fixtures?|test|tests)\//,
   /\.(test|spec|stories|e2e)\.[a-z]+$/,
+  /_test\.(go|py)$/,
+  /(^|\/)(test_[^/]*|conftest)\.py$/,
+  /(Tests?|Spec)\.(swift|kt|java)$/,
   /\.d\.ts$/,
   /\.min\.[a-z]+$/,
 ];

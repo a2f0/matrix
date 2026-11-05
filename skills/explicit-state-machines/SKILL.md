@@ -87,7 +87,8 @@ Follow `references/patterns.md` for the language at hand. In every language:
    that drops a stale response must become a request tag carried by the
    state and its events (only the current request may finish), never a bare
    "is it loading?" check, which accepts `start(A) -> reset -> start(B) ->
-   succeed(A)`. Test that sequence.
+   succeed(A)`. Test that sequence. A cleaned-up effect's callbacks (its own
+   abort's rejection included) must not dispatch either; see `patterns.md`.
 5. Move side effects out of the transition: effects run on entering a state
    (a worker loop that switches on it, or an effect keyed on the state's whole
    identity: `status` plus its request tag), not inside the reducer. An

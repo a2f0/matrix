@@ -59,13 +59,22 @@ const request = state.status === "loading" ? state.request : undefined;
 useEffect(() => {
   if (request === undefined) return;
   const abort = new AbortController();
+  // The cleanup's own abort rejects the fetch; that rejection must not
+  // dispatch, or a re-run of this effect for the same request (Strict Mode,
+  // a dependency change) records a failure the user never had.
+  let active = true;
   fetchItems(abort.signal).then(
-    items => dispatch({ type: "succeed", request, items }),
-    error => dispatch({ type: "fail", request, error }),
+    items => { if (active) dispatch({ type: "succeed", request, items }); },
+    error => { if (active) dispatch({ type: "fail", request, error }); },
   );
-  return () => abort.abort();
+  return () => { active = false; abort.abort(); };
 }, [request]);
 ```
+
+The request tag rejects results from a superseded request; the `active` flag
+rejects callbacks from a cleaned-up effect for the same request. Keep both, and
+test the replay: mount, unmount, mount again (Strict Mode), then resolve, and
+expect `loaded`, not `failed`.
 
 - Never drop a cancellation guard without replacing it. A bare
   `status === "loading"` check accepts a stale result in
