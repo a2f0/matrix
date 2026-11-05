@@ -61,7 +61,7 @@ export async function drainGroup(pgid: number, graceMs = 30_000, killMs = 10_000
 }
 
 /** A capture as planned: what it would run and record. */
-export interface PlannedCapture {
+interface PlannedCapture {
   readonly name: string;
   readonly project: string;
   readonly store: string;
@@ -76,7 +76,7 @@ export interface PlannedCapture {
 }
 
 /** A planned capture that ran, with the record it left; `--json` prints `applied` before `record`. */
-export interface AppliedCapture extends Omit<PlannedCapture, "applied" | "record"> {
+interface AppliedCapture extends Omit<PlannedCapture, "applied" | "record"> {
   readonly applied: true;
   readonly record: CaptureRecord;
 }

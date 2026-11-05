@@ -42,7 +42,7 @@ export interface RunningRecord extends RecordFields {
   readonly exitCode?: never;
 }
 
-export interface FinishedRecord extends RecordFields {
+interface FinishedRecord extends RecordFields {
   readonly status: FinishedStatus;
   readonly finishedAt: string;
   readonly exitCode: number | null;
