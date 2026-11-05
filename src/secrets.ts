@@ -67,17 +67,22 @@ export function dotenvNames(source: string, file: string): string[] {
     if (seen.has(name.toUpperCase())) throw new Error(`${file}:${index + 1}: ${name} is assigned twice.`);
     seen.add(name.toUpperCase());
     names.push(name);
-    const quote = value[0];
-    if (quote !== '"' && quote !== "'") continue;
-    const closing = closingQuote(lines, index, line.length - value.length, quote);
-    if (!closing) throw new Error(`${file}:${index + 1}: ${name} has an unterminated quoted value.`);
-    // gh keeps parsing after a closing quote, so anything but a comment there could be another setting.
-    if (!/^\s*(?:#.*)?$/.test(lines[closing.line]!.slice(closing.position + 1))) {
-      throw new Error(`${file}:${closing.line + 1}: ${name} has text after its closing quote.`);
-    }
-    index = closing.line;
+    index = valueEnd(lines, index, name, value, file);
   }
   return names;
+}
+
+/** The line where the value assigned on line `index` ends: a quoted value can span lines. */
+function valueEnd(lines: string[], index: number, name: string, value: string, file: string): number {
+  const quote = value[0];
+  if (quote !== '"' && quote !== "'") return index;
+  const closing = closingQuote(lines, index, lines[index]!.length - value.length, quote);
+  if (!closing) throw new Error(`${file}:${index + 1}: ${name} has an unterminated quoted value.`);
+  // gh keeps parsing after a closing quote, so anything but a comment there could be another setting.
+  if (!/^\s*(?:#.*)?$/.test(lines[closing.line]!.slice(closing.position + 1))) {
+    throw new Error(`${file}:${closing.line + 1}: ${name} has text after its closing quote.`);
+  }
+  return closing.line;
 }
 
 function remoteNames(gh: Gh, kind: Kind, repo: string): string[] {

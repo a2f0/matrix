@@ -1,6 +1,6 @@
 /** Developer caches outside any repository, for `--machine`. Node built-ins only, like space-cleanup.ts. */
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { type Dirent, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { holdsProtected, isRepository, measure, protectedName } from "./candidates";
@@ -61,53 +61,94 @@ export const INSTALLING = new RegExp(
  */
 export function derivedDataRemovals(derived: string): string[] {
   if (lstatSync(derived).isSymbolicLink() || isRepository(derived)) throw new Error(`${derived} is a symlink or a repository; clean it by hand`);
-  const removals: string[] = [];
   const keep = (entry: string, name: string) => name === "SourcePackages" || protectedName(name) || holdsProtected(entry, derived) !== undefined;
-  for (const entry of readdirSync(derived, { withFileTypes: true })) {
-    const project = path.join(derived, entry.name);
-    if (!entry.isDirectory()) {
-      if (!keep(project, entry.name)) removals.push(project);
-      continue;
-    }
-    // A shared SourcePackages, a clone made straight into DerivedData, or a protected directory stays whole.
-    if (entry.name === "SourcePackages" || protectedName(entry.name) || isRepository(project)) continue;
-    for (const child of readdirSync(project)) {
-      const entryPath = path.join(project, child);
-      // A package directory moved with -clonedSourcePackagesDirPath still holds clones.
-      if (!keep(entryPath, child)) removals.push(entryPath);
-    }
+  return readdirSync(derived, { withFileTypes: true }).flatMap(entry => projectRemovals(path.join(derived, entry.name), entry, keep));
+}
+
+/** What one DerivedData entry contributes: itself when it is a file, else its removable children. */
+function projectRemovals(project: string, entry: Dirent, keep: (entry: string, name: string) => boolean): string[] {
+  if (!entry.isDirectory()) return keep(project, entry.name) ? [] : [project];
+  // A shared SourcePackages, a clone made straight into DerivedData, or a protected directory stays whole.
+  if (entry.name === "SourcePackages" || protectedName(entry.name) || isRepository(project)) return [];
+  const removals: string[] = [];
+  for (const child of readdirSync(project)) {
+    const entryPath = path.join(project, child);
+    // A package directory moved with -clonedSourcePackagesDirPath still holds clones.
+    if (!keep(entryPath, child)) removals.push(entryPath);
   }
   return removals;
 }
 
+type Guard = NonNullable<MachineItem["guard"]>;
+
+/** Package caches wait for any running install. */
+const installing: Guard = list => {
+  const proc = list.find(candidate => INSTALLING.test(candidate.args));
+  return proc ? `an install is running (pid ${proc.pid})` : undefined;
+};
+
+/** DerivedData waits for Xcode builds. */
+const building: Guard = list => {
+  const proc = list.find(candidate => candidate.name === "xcodebuild" || candidate.name === "Xcode");
+  return proc ? `${proc.name} is running (pid ${proc.pid})` : undefined;
+};
+
+/** A directory sized as a whole, when it exists. */
+function dirItem(home: string, id: string, description: string, location: string, reportOnly: boolean, apply?: () => string, guard?: Guard): MachineItem[] {
+  if (!existsSync(location)) return [];
+  return [{ id, description: `${description} (${location.replace(home, "~")})`, reportOnly, bytes: measure([location]).get(location), apply, guard }];
+}
+
 /** Developer caches outside any repository, for `--machine`. */
 export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
-  const { home, has, run } = host;
-  const items: MachineItem[] = [];
-  const installing: MachineItem["guard"] = list => {
-    const proc = list.find(candidate => INSTALLING.test(candidate.args));
-    return proc ? `an install is running (pid ${proc.pid})` : undefined;
-  };
-  const building: MachineItem["guard"] = list => {
-    const proc = list.find(candidate => candidate.name === "xcodebuild" || candidate.name === "Xcode");
-    return proc ? `${proc.name} is running (pid ${proc.pid})` : undefined;
-  };
-  const dir = (id: string, description: string, location: string, reportOnly: boolean, apply?: () => string, guard?: MachineItem["guard"]) => {
-    if (existsSync(location))
-      items.push({ id, description: `${description} (${location.replace(home, "~")})`, reportOnly, bytes: measure([location]).get(location), apply, guard });
-  };
+  const { home } = host;
+  const items: MachineItem[] = [
+    ...derivedDataItem(home),
+    ...simulatorsItem(host),
+    ...homebrewItem(host),
+    ...packageCacheItems(host),
+    ...dirItem(
+      home,
+      "gradle-caches",
+      "Gradle caches; delete with Gradle stopped if Android builds can wait for a re-download",
+      path.join(home, ".gradle/caches"),
+      true,
+    ),
+    ...dirItem(home, "playwright-browsers", "Playwright browsers; old versions no project pins can go", path.join(home, "Library/Caches/ms-playwright"), true),
+    ...dirItem(
+      home,
+      "ios-device-support",
+      "iOS DeviceSupport; versions for devices no longer used can go",
+      path.join(home, "Library/Developer/Xcode/iOS DeviceSupport"),
+      true,
+    ),
+    ...dirItem(
+      home,
+      "simulator-devices",
+      "Simulator devices; `xcrun simctl erase` or delete ones no project uses",
+      path.join(home, "Library/Developer/CoreSimulator/Devices"),
+      true,
+    ),
+    ...snapshotsItem(host),
+    ...dockerItem(host),
+  ];
+  for (const item of items) item.skipped = item.guard?.(procs);
+  return items;
+}
 
+function derivedDataItem(home: string): MachineItem[] {
   const derived = path.join(home, "Library/Developer/Xcode/DerivedData");
-  if (existsSync(derived)) {
-    // A DerivedData that must not be touched sizes as nothing; applying it reports why.
-    let removable: string[] = [];
-    try {
-      removable = derivedDataRemovals(derived);
-    } catch {
-      /* reported by apply */
-    }
-    const sizes = measure(removable);
-    items.push({
+  if (!existsSync(derived)) return [];
+  // A DerivedData that must not be touched sizes as nothing; applying it reports why.
+  let removable: string[] = [];
+  try {
+    removable = derivedDataRemovals(derived);
+  } catch {
+    /* reported by apply */
+  }
+  const sizes = measure(removable);
+  return [
+    {
       id: "xcode-derived-data",
       description: `Xcode DerivedData builds and indexes, keeping SourcePackages, repositories, and data files (${derived.replace(home, "~")})`,
       reportOnly: false,
@@ -118,51 +159,69 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
         return "cleaned";
       },
       guard: building,
-    });
-  }
-  if (has("xcrun")) {
-    const listing = host.output("xcrun", ["simctl", "list", "devices", "unavailable"]);
-    const count = listing.split("\n").filter(line => /\(unavailable/.test(line)).length;
-    // Their app data returns if the runtime is reinstalled, so deleting them is the owner's call.
-    if (count > 0)
-      items.push({
-        id: "unavailable-simulators",
-        description: `${count} simulators whose runtime is no longer installed; \`xcrun simctl delete unavailable\` removes them and their app data`,
-        reportOnly: true,
-      });
-  }
-  if (has("brew")) {
-    const match = /free approximately ([\d.]+)([KMGT]?B)/.exec(host.output("brew", ["cleanup", "-n"]));
-    const unit: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
-    // brew cleanup removes downloads an install in progress is using.
-    if (match)
-      items.push({
-        id: "homebrew-cleanup",
-        description: "Old Homebrew versions and downloads (`brew cleanup`)",
-        reportOnly: false,
-        bytes: Number(match[1]) * unit[match[2]!]!,
-        apply: () => {
-          run("brew", ["cleanup"]);
-          return "cleaned";
-        },
-        guard: installing,
-      });
-  }
-  if (has("bun")) {
-    const cache = host.output("bun", ["pm", "cache"]).trim().split("\n")[0];
-    if (cache) dir("bun-cache", "Bun install cache", cache, false, () => run("bun", ["pm", "cache", "rm"]) || "removed", installing);
-  }
-  if (has("npm")) {
-    dir(
-      "npm-cache",
-      "npm cache",
-      path.join(home, ".npm/_cacache"),
-      false,
-      () => {
-        run("npm", ["cache", "clean", "--force"]);
+    },
+  ];
+}
+
+function simulatorsItem(host: Host): MachineItem[] {
+  if (!host.has("xcrun")) return [];
+  const listing = host.output("xcrun", ["simctl", "list", "devices", "unavailable"]);
+  const count = listing.split("\n").filter(line => /\(unavailable/.test(line)).length;
+  // Their app data returns if the runtime is reinstalled, so deleting them is the owner's call.
+  if (count === 0) return [];
+  return [
+    {
+      id: "unavailable-simulators",
+      description: `${count} simulators whose runtime is no longer installed; \`xcrun simctl delete unavailable\` removes them and their app data`,
+      reportOnly: true,
+    },
+  ];
+}
+
+function homebrewItem(host: Host): MachineItem[] {
+  const { has, run } = host;
+  if (!has("brew")) return [];
+  const match = /free approximately ([\d.]+)([KMGT]?B)/.exec(host.output("brew", ["cleanup", "-n"]));
+  const unit: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
+  // brew cleanup removes downloads an install in progress is using.
+  if (!match) return [];
+  return [
+    {
+      id: "homebrew-cleanup",
+      description: "Old Homebrew versions and downloads (`brew cleanup`)",
+      reportOnly: false,
+      bytes: Number(match[1]) * unit[match[2]!]!,
+      apply: () => {
+        run("brew", ["cleanup"]);
         return "cleaned";
       },
-      installing,
+      guard: installing,
+    },
+  ];
+}
+
+/** The Bun, npm and pnpm caches, in that order. */
+function packageCacheItems(host: Host): MachineItem[] {
+  const { home, has, run } = host;
+  const items: MachineItem[] = [];
+  if (has("bun")) {
+    const cache = host.output("bun", ["pm", "cache"]).trim().split("\n")[0];
+    if (cache) items.push(...dirItem(home, "bun-cache", "Bun install cache", cache, false, () => run("bun", ["pm", "cache", "rm"]) || "removed", installing));
+  }
+  if (has("npm")) {
+    items.push(
+      ...dirItem(
+        home,
+        "npm-cache",
+        "npm cache",
+        path.join(home, ".npm/_cacache"),
+        false,
+        () => {
+          run("npm", ["cache", "clean", "--force"]);
+          return "cleaned";
+        },
+        installing,
+      ),
     );
   }
   if (has("pnpm")) {
@@ -177,40 +236,34 @@ export function machineItems(procs: Proc[], host: Host = HOST): MachineItem[] {
       guard: installing,
     });
   }
-  dir("gradle-caches", "Gradle caches; delete with Gradle stopped if Android builds can wait for a re-download", path.join(home, ".gradle/caches"), true);
-  dir("playwright-browsers", "Playwright browsers; old versions no project pins can go", path.join(home, "Library/Caches/ms-playwright"), true);
-  dir(
-    "ios-device-support",
-    "iOS DeviceSupport; versions for devices no longer used can go",
-    path.join(home, "Library/Developer/Xcode/iOS DeviceSupport"),
-    true,
-  );
-  dir(
-    "simulator-devices",
-    "Simulator devices; `xcrun simctl erase` or delete ones no project uses",
-    path.join(home, "Library/Developer/CoreSimulator/Devices"),
-    true,
-  );
-  if (has("tmutil")) {
-    const snapshots = host
-      .output("tmutil", ["listlocalsnapshots", "/"])
-      .split("\n")
-      .filter(line => line.includes("com.apple")).length;
-    if (snapshots > 0)
-      items.push({
-        id: "local-snapshots",
-        description: `${snapshots} Time Machine local snapshots hold deleted files' space until macOS thins them`,
-        reportOnly: true,
-      });
-  }
-  if (has("docker"))
-    items.push({
+  return items;
+}
+
+function snapshotsItem(host: Host): MachineItem[] {
+  if (!host.has("tmutil")) return [];
+  const snapshots = host
+    .output("tmutil", ["listlocalsnapshots", "/"])
+    .split("\n")
+    .filter(line => line.includes("com.apple")).length;
+  if (snapshots === 0) return [];
+  return [
+    {
+      id: "local-snapshots",
+      description: `${snapshots} Time Machine local snapshots hold deleted files' space until macOS thins them`,
+      reportOnly: true,
+    },
+  ];
+}
+
+function dockerItem(host: Host): MachineItem[] {
+  if (!host.has("docker")) return [];
+  return [
+    {
       id: "docker",
       description: "Docker images, containers, and volumes; `docker system df` sizes them, and pruning is the owner's call",
       reportOnly: true,
-    });
-  for (const item of items) item.skipped = item.guard?.(procs);
-  return items;
+    },
+  ];
 }
 
 /**

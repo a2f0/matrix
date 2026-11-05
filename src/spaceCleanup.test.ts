@@ -251,6 +251,82 @@ describe("space cleanup", () => {
       expect(existsSync(path.join(home, ".gradle/caches/x"))).toBe(true);
     });
 
+    test("lists every machine item in a fixed order, with its kind and guard", () => {
+      const { home, fake } = host(["bun", "xcrun", "brew", "npm", "pnpm", "tmutil", "docker"]);
+      write(home, {
+        ".npm/_cacache/x": "x",
+        "Library/Caches/ms-playwright/x": "x",
+        "Library/Developer/Xcode/iOS DeviceSupport/x": "x",
+        "Library/Developer/CoreSimulator/Devices/x": "x",
+      });
+      const output = fake.output;
+      fake.output = (command, args) => (command === "tmutil" ? "com.apple.TimeMachine.1.local\ncom.apple.TimeMachine.2.local\n" : output(command, args));
+      const procs: Proc[] = [{ pid: 5, ppid: 1, name: "bun", args: "bun install", cwd: "/x" }];
+      const items = machineItems(procs, fake).map(({ id, description, reportOnly, bytes, skipped, apply, guard }) => ({
+        id,
+        description,
+        reportOnly,
+        bytes: String(typeof bytes),
+        skipped,
+        apply: String(typeof apply),
+        guard: String(typeof guard),
+      }));
+      const item = (id: string, description: string, reportOnly: boolean, bytes: string, apply: boolean, skipped?: string) => ({
+        id,
+        description,
+        reportOnly,
+        bytes,
+        skipped,
+        apply: apply ? "function" : "undefined",
+        guard: skipped !== undefined || id === "xcode-derived-data" ? "function" : "undefined",
+      });
+      const installing = "an install is running (pid 5)";
+      expect(items).toEqual([
+        item(
+          "xcode-derived-data",
+          "Xcode DerivedData builds and indexes, keeping SourcePackages, repositories, and data files (~/Library/Developer/Xcode/DerivedData)",
+          false,
+          "number",
+          true,
+        ),
+        item(
+          "unavailable-simulators",
+          "1 simulators whose runtime is no longer installed; `xcrun simctl delete unavailable` removes them and their app data",
+          true,
+          "undefined",
+          false,
+        ),
+        item("homebrew-cleanup", "Old Homebrew versions and downloads (`brew cleanup`)", false, "number", true, installing),
+        item("bun-cache", "Bun install cache (~/.bun/install/cache)", false, "number", true, installing),
+        item("npm-cache", "npm cache (~/.npm/_cacache)", false, "number", true, installing),
+        item("pnpm-store", "Packages no project references in the pnpm store (`pnpm store prune`)", false, "undefined", true, installing),
+        item(
+          "gradle-caches",
+          "Gradle caches; delete with Gradle stopped if Android builds can wait for a re-download (~/.gradle/caches)",
+          true,
+          "number",
+          false,
+        ),
+        item("playwright-browsers", "Playwright browsers; old versions no project pins can go (~/Library/Caches/ms-playwright)", true, "number", false),
+        item(
+          "ios-device-support",
+          "iOS DeviceSupport; versions for devices no longer used can go (~/Library/Developer/Xcode/iOS DeviceSupport)",
+          true,
+          "number",
+          false,
+        ),
+        item(
+          "simulator-devices",
+          "Simulator devices; `xcrun simctl erase` or delete ones no project uses (~/Library/Developer/CoreSimulator/Devices)",
+          true,
+          "number",
+          false,
+        ),
+        item("local-snapshots", "2 Time Machine local snapshots hold deleted files' space until macOS thins them", true, "undefined", false),
+        item("docker", "Docker images, containers, and volumes; `docker system df` sizes them, and pruning is the owner's call", true, "undefined", false),
+      ]);
+    });
+
     test("waits for running installs and Xcode builds", () => {
       const { home, ran, fake } = host(["bun", "brew"]);
       const procs: Proc[] = [
@@ -623,5 +699,20 @@ describe("space cleanup", () => {
   test("rejects unknown options", () => {
     expect(() => parseOptions(["--force"])).toThrow("unknown option --force");
     expect(parseOptions(["--builds", "--deps", "tearleads"]).tiers).toEqual(new Set(["caches", "builds", "deps"]));
+  });
+
+  test("parses every option into its field", () => {
+    const none = parseOptions([]);
+    expect(Object.keys(none)).toEqual(["names", "tiers", "apply", "json", "machine", "includeBusy"]);
+    expect(none).toEqual({ names: [], tiers: new Set(["caches"]), apply: false, json: false, machine: false, includeBusy: false });
+    expect(parseOptions(["a", "--apply", "--json", "--machine", "--include-busy", "--builds", "b"])).toEqual({
+      names: ["a", "b"],
+      tiers: new Set(["caches", "builds"]),
+      apply: true,
+      json: true,
+      machine: true,
+      includeBusy: true,
+    });
+    expect(() => parseOptions(["-x"])).toThrow("unknown option -x\n\nUsage: space-cleanup");
   });
 });

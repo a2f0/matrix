@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type CheckoutStatus, notReady } from "./checkouts";
-import { listSweeps, sweepsDirectory } from "./sweepLedger";
+import { applyUpdate, listSweeps, PHASE, type RepoEntry, STATUSES, type StoredUpdate, sweepsDirectory } from "./sweepLedger";
 import { retro } from "./sweepRetro";
 import { markdownReport, parseEvent, parseUpdate, recordEntry, startSweep, sweepReport } from "./sweeps";
 import { gitIn, gitInit, tempDir } from "./testFixtures";
@@ -86,6 +86,66 @@ describe("startSweep", () => {
     expect(start("chore/demo", ["a2f0/one"]).counts).toEqual({ pending: 1 });
   });
 
+  test("names a ledger directory that an interrupted start left without sweep.json", () => {
+    const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
+    mkdirSync(path.join(directory, "repos", "one"), { recursive: true });
+    writeFileSync(path.join(directory, "repos", "one", "000001.json"), `${JSON.stringify({ at: at(0).toISOString(), status: "pending" })}\n`);
+    const interrupted = `The sweep ledger at ${directory} has no sweep.json because an earlier sweep start was interrupted; remove that directory and run sweep start again.`;
+    expect(() => start("chore/demo", ["a2f0/one"])).toThrow(interrupted);
+    expect(() => recordEntry(root, "chore/demo", "one", { status: "merged" })).toThrow(interrupted);
+    expect(() => sweepReport(root, "chore/demo")).toThrow(interrupted);
+    expect(readdirSync(sweepsDirectory(root))).toEqual([encodeURIComponent("chore/demo")]);
+    rmSync(directory, { recursive: true });
+    expect(start("chore/demo", ["a2f0/one"]).counts).toEqual({ pending: 1 });
+  });
+
+  test("builds the ledger aside, so a start killed midway neither blocks nor lists a sweep", () => {
+    const staging = path.join(sweepsDirectory(root), ".start-killed");
+    mkdirSync(path.join(staging, "repos"), { recursive: true });
+    writeFileSync(
+      path.join(staging, "sweep.json"),
+      `${JSON.stringify({ schemaVersion: 1, branch: "chore/demo", startedAt: at(0).toISOString(), repos: [] })}\n`,
+    );
+    expect(listSweeps(root)).toEqual([]);
+    expect(start("chore/demo", ["a2f0/one"], 1).counts).toEqual({ pending: 1 });
+    expect(listSweeps(root).map(result => result.sweep.branch)).toEqual(["chore/demo"]);
+  });
+
+  test("lets exactly one of several concurrent starts create the ledger", async () => {
+    const module = path.join(import.meta.dir, "sweeps.ts");
+    const starters = Array.from(
+      { length: 4 },
+      (_, index) =>
+        new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
+          const status = {
+            repo: "a2f0/one",
+            path: "checkouts/one",
+            present: true,
+            ready: true,
+            branch: "main",
+            defaultBranch: "main",
+            head: HEAD,
+            changes: 0,
+            ahead: 0,
+            behind: 0,
+          };
+          const script = `import { startSweep } from ${JSON.stringify(module)}; startSweep(${JSON.stringify(root)}, "chore/demo", ["a2f0/one"], () => (${JSON.stringify(status)}), { topic: "starter ${index}" });`;
+          const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "pipe"] });
+          let stderr = "";
+          child.stderr.on("data", chunk => {
+            stderr += chunk;
+          });
+          child.on("error", reject);
+          child.on("exit", code => resolve({ code, stderr }));
+        }),
+    );
+    const results = await Promise.all(starters);
+    expect(results.filter(result => result.code === 0)).toHaveLength(1);
+    for (const result of results.filter(result => result.code !== 0)) expect(result.stderr).toContain("A sweep ledger already exists");
+    expect(readdirSync(sweepsDirectory(root))).toEqual([encodeURIComponent("chore/demo")]);
+    expect(sweepReport(root, "chore/demo").counts).toEqual({ pending: 1 });
+  }, 30_000);
+
   test("records a repository named twice once", () => {
     expect(start("chore/demo", ["a2f0/one", "a2f0/two", "A2F0/one"]).sweep.repos).toEqual(["a2f0/one", "a2f0/two"]);
   });
@@ -141,6 +201,14 @@ describe("recordEntry", () => {
     expect(recordEntry(root, "chore/demo", "one", { notes: ["second"] }).notes).toEqual(["deploy is manual", "second"]);
   });
 
+  test("keeps the reason when the same status is recorded again without one", () => {
+    start("chore/demo", ["a2f0/one"]);
+    recordEntry(root, "chore/demo", "one", parseUpdate({ status: "blocked", reason: "waits for producer release" }, {}), at(1));
+    const entry = recordEntry(root, "chore/demo", "one", parseUpdate({ status: "blocked" }, { retry: ["enospc"] }), at(2));
+    expect(entry).toMatchObject({ status: "blocked", reason: "waits for producer release" });
+    expect(retro(root).unfinished).toEqual([{ branch: "chore/demo", repo: "a2f0/one", status: "blocked", reason: "waits for producer release" }]);
+  });
+
   test("rejects unknown repositories, sweeps, and malformed values", () => {
     start("chore/demo", ["a2f0/one"]);
     expect(() => recordEntry(root, "chore/demo", "a2f0/two", { status: "merged" })).toThrow("not part of sweep");
@@ -182,6 +250,72 @@ describe("recordEntry", () => {
     expect(entry.notes.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `writer ${index}`));
     expect(entry.events.map(event => event.cause).toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `writer-${index}`));
   }, 30_000);
+});
+
+describe("applyUpdate", () => {
+  const base: RepoEntry = { repo: "a2f0/one", status: "pending", notes: [], events: [], updatedAt: "" };
+  const t = (minute: number) => at(minute).toISOString();
+  const replay = (...updates: StoredUpdate[]) => updates.reduce(applyUpdate, base);
+
+  test("allows every status to follow every other, since a later record corrects an earlier one", () => {
+    for (const from of STATUSES) for (const to of STATUSES) expect(replay({ at: t(0), status: from }, { at: t(1), status: to }).status).toBe(to);
+  });
+
+  test("clears the reason only when the status changes without a new one", () => {
+    const blocked = replay({ at: t(0), status: "blocked", reason: "waits" });
+    const cases: Array<[StoredUpdate, string | undefined]> = [
+      [{ at: t(1), status: "in-progress" }, undefined],
+      [{ at: t(1), status: "blocked" }, "waits"],
+      [{ at: t(1), status: "failed", reason: "broke" }, "broke"],
+      [{ at: t(1), status: "blocked", reason: "other" }, "other"],
+      [{ at: t(1), notes: ["n"] }, "waits"],
+      [{ at: t(1), reason: "reworded" }, "reworded"],
+    ];
+    for (const [update, reason] of cases) expect(applyUpdate(blocked, update).reason).toBe(reason);
+  });
+
+  test("keeps merge and PR fields when leaving merged, and a reason recorded without a status", () => {
+    const entry = replay(
+      { at: t(0), status: "merged", pr: "https://github.com/a2f0/one/pull/1", merge: HEAD },
+      { at: t(1), status: "in-progress" },
+      { at: t(2), reason: "round two" },
+    );
+    expect(entry).toMatchObject({ status: "in-progress", pr: "https://github.com/a2f0/one/pull/1", merge: HEAD, reason: "round two" });
+  });
+
+  test("appends notes and events stamped with their update, and never mutates the entry", () => {
+    const first = replay({ at: t(0), notes: ["a"], events: [{ kind: "retry", cause: "enospc" }] });
+    const second = applyUpdate(first, { at: t(1), notes: ["b"], events: [{ kind: "manual", cause: "login" }] });
+    expect(second.notes).toEqual(["a", "b"]);
+    expect(second.events).toEqual([
+      { kind: "retry", cause: "enospc", at: t(0) },
+      { kind: "manual", cause: "login", at: t(1) },
+    ]);
+    expect(first.notes).toEqual(["a"]);
+    expect(second.updatedAt).toBe(t(1));
+  });
+
+  test("keeps the entry's JSON key order: identity, then fields in the order first recorded", () => {
+    const entry = replay(
+      { at: t(0), status: "blocked", reason: "waits", base: HEAD },
+      { at: t(1), status: "merged", pr: "https://github.com/a2f0/one/pull/1", verdict: "CLEAN" },
+      { at: t(2), reason: "late" },
+    );
+    expect(Object.keys(entry)).toEqual(["repo", "status", "notes", "events", "updatedAt", "base", "pr", "verdict", "reason"]);
+  });
+
+  test("classifies every status into one phase that report and retro share", () => {
+    expect(STATUSES.map(status => [status, PHASE[status]])).toEqual([
+      ["pending", "remaining"],
+      ["skipped", "done"],
+      ["unchanged", "done"],
+      ["in-progress", "remaining"],
+      ["open", "waiting"],
+      ["merged", "done"],
+      ["blocked", "remaining"],
+      ["failed", "done"],
+    ]);
+  });
 });
 
 describe("reports", () => {
@@ -270,6 +404,14 @@ test("refuses ledger files without the fields that locate and order records", ()
   const directory = path.join(sweepsDirectory(root), encodeURIComponent("chore/demo"));
   writeFileSync(path.join(directory, "repos", "one", "000002.json"), '{"status": "open"}\n');
   expect(() => sweepReport(root, "chore/demo")).toThrow("000002.json: it is not a sweep ledger record.");
+  for (const [field, value] of [
+    ["status", "done"],
+    ["verdict", "OK"],
+    ["status", 1],
+  ] as const) {
+    writeFileSync(path.join(directory, "repos", "one", "000002.json"), `${JSON.stringify({ at: at(1).toISOString(), [field]: value })}\n`);
+    expect(() => sweepReport(root, "chore/demo")).toThrow("000002.json: it is not a sweep ledger record.");
+  }
   writeFileSync(path.join(directory, "sweep.json"), "[]\n");
   expect(() => sweepReport(root, "chore/demo")).toThrow("sweep.json: it is not a sweep ledger record.");
 });
