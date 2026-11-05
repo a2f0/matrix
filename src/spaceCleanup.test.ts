@@ -700,4 +700,19 @@ describe("space cleanup", () => {
     expect(() => parseOptions(["--force"])).toThrow("unknown option --force");
     expect(parseOptions(["--builds", "--deps", "tearleads"]).tiers).toEqual(new Set(["caches", "builds", "deps"]));
   });
+
+  test("parses every option into its field", () => {
+    const none = parseOptions([]);
+    expect(Object.keys(none)).toEqual(["names", "tiers", "apply", "json", "machine", "includeBusy"]);
+    expect(none).toEqual({ names: [], tiers: new Set(["caches"]), apply: false, json: false, machine: false, includeBusy: false });
+    expect(parseOptions(["a", "--apply", "--json", "--machine", "--include-busy", "--builds", "b"])).toEqual({
+      names: ["a", "b"],
+      tiers: new Set(["caches", "builds"]),
+      apply: true,
+      json: true,
+      machine: true,
+      includeBusy: true,
+    });
+    expect(() => parseOptions(["-x"])).toThrow("unknown option -x\n\nUsage: space-cleanup");
+  });
 });
