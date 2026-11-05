@@ -282,13 +282,7 @@ export function knownNamespace(target: Target, artifacts: string): Target {
     });
   // Prefer the namespace this clone already links to, then the one its current name owns (its own
   // directory first), then this project's directory, so an extra --project namespace never takes over.
-  let linked: string | undefined;
-  try {
-    const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
-    if (relative.length === 2 && relative[1] === "screenshots") linked = relative[0];
-  } catch {
-    /* not linked */
-  }
+  const linked = linkedNamespace(target, artifacts);
   // Namespaces made with --project are extras: used implicitly only by a clone already linked to one.
   const primary = matches.filter(match => !match.owner.explicit);
   const chosen =
@@ -299,4 +293,15 @@ export function knownNamespace(target: Target, artifacts: string): Target {
     primary[0];
   if (!chosen) return target;
   return { ...target, project: chosen.entry, repo: target.verified ? target.repo : chosen.owner.repo };
+}
+
+/** The namespace this clone's link points into, when it links to a namespace's screenshots in this store. */
+function linkedNamespace(target: Target, artifacts: string): string | undefined {
+  try {
+    const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
+    if (relative.length === 2 && relative[1] === "screenshots") return relative[0];
+  } catch {
+    /* not linked */
+  }
+  return undefined;
 }
