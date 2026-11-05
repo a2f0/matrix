@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { symlinkSync } from "node:fs";
+import { symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { connect } from "node:http2";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { gunzipSync } from "node:zlib";
+import { deflateSync, gunzipSync } from "node:zlib";
 import {
   compareImages,
   importsOf,
@@ -57,6 +57,96 @@ describe("performance-pass perf.ts", () => {
     expect(() => parseOptions(["measure", "--runs"])).toThrow("--runs needs a value.");
     expect(() => parseOptions(["measure", "--runs", "-1"])).toThrow("non-negative");
     expect(() => parseOptions(["measure", "--runs", "0"])).toThrow("at least 1");
+    expect(parseOptions(["serve", "--json", "dist", "--http1", "--port", "9000", "--out", "o.json", "extra", "--seed"])).toMatchObject({
+      command: "serve",
+      args: ["dist", "extra"],
+      json: true,
+      http1: true,
+      seed: true,
+      port: 9000,
+      out: "o.json",
+    });
+    expect(parseOptions([])).toMatchObject({ command: "help", args: [], runs: 5, seed: true, out: undefined });
+    expect(() => parseOptions(["shot", "--out"])).toThrow("--out needs a value.");
+    expect(() => parseOptions(["shot", "--width", "wide"])).toThrow("--width needs a non-negative number.");
+    expect(() => parseOptions(["shot", "--no-json"])).toThrow("Unknown option --no-json.");
+  });
+
+  test("decodes every PNG row filter, in RGB and RGBA", () => {
+    const root = tempDir("performance-pass-png");
+    const width = 5,
+      height = 6;
+    const rgba = (x: number, y: number) => [(x * 53 + y * 17) & 255, (x * 7 + y * 91) & 255, (x * y * 29 + 3) & 255, 255];
+    const predict = (filter: number, left: number, up: number, corner: number) => {
+      if (filter === 1) return left;
+      if (filter === 2) return up;
+      if (filter === 3) return (left + up) >> 1;
+      if (filter !== 4) return 0;
+      const estimate = left + up - corner,
+        a = Math.abs(estimate - left),
+        b = Math.abs(estimate - up),
+        c = Math.abs(estimate - corner);
+      return a <= b && a <= c ? left : b <= c ? up : corner;
+    };
+    const chunk = (type: string, body: Buffer) => {
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(body.length);
+      return Buffer.concat([length, Buffer.from(type, "latin1"), body, Buffer.alloc(4)]);
+    };
+    const png = (channels: 3 | 4, pixel: typeof rgba, filters: number[], header: Partial<{ depth: number; interlace: number }> = {}) => {
+      const stride = width * channels,
+        rows: number[] = [];
+      const raw = (x: number, y: number) => (x < 0 || y < 0 ? 0 : pixel(Math.floor(x / channels), y)[x % channels]!);
+      for (let y = 0; y < height; y += 1) {
+        const filter = filters[y % filters.length]!;
+        rows.push(filter);
+        for (let x = 0; x < stride; x += 1) rows.push((raw(x, y) - predict(filter, raw(x - channels, y), raw(x, y - 1), raw(x - channels, y - 1))) & 255);
+      }
+      const ihdr = Buffer.alloc(13);
+      ihdr.writeUInt32BE(width, 0);
+      ihdr.writeUInt32BE(height, 4);
+      ihdr.set([header.depth ?? 8, channels === 4 ? 6 : 2, 0, 0, header.interlace ?? 0], 8);
+      return Buffer.concat([
+        Buffer.from("89504e470d0a1a0a", "hex"),
+        chunk("IHDR", ihdr),
+        chunk("tEXt", Buffer.from("ignored")),
+        chunk("IDAT", deflateSync(Buffer.from(rows))),
+        chunk("IEND", Buffer.alloc(0)),
+      ]);
+    };
+    const file = (name: string, bytes: Buffer) => {
+      const target = path.join(root, `${name}.png`);
+      writeFileSync(target, bytes);
+      return target;
+    };
+    const compare = (a: string, b: string) => compareImages(parseOptions(["diff", a, b]));
+    const plain = file("plain", png(4, rgba, [0]));
+    for (const filter of [1, 2, 3, 4]) expect(compare(plain, file(`f${filter}`, png(4, rgba, [filter]))).differing, `filter ${filter}`).toBe(0);
+    expect(compare(plain, file("mixed-rgb", png(3, rgba, [4, 3, 2, 1, 0])))).toEqual({
+      sizeMismatch: false,
+      differing: 0,
+      total: 30,
+      maxChannelDelta: 0,
+      cells: [],
+    });
+    const changed = file(
+      "changed",
+      png(4, (x, y) => (x === 4 && y < 2 ? [0, 0, 0, 255] : rgba(x, y)), [4]),
+    );
+    expect(compare(plain, changed)).toMatchObject({ differing: 2, total: 30, cells: [{ at: "0,0", pixels: 2 }] });
+    expect(
+      compare(
+        plain,
+        file(
+          "translucent",
+          png(4, (x, y) => [...rgba(x, y).slice(0, 3), 254], [2]),
+        ),
+      ),
+    ).toMatchObject({ differing: 30, maxChannelDelta: 1 });
+    expect(() => compare(plain, file("text", Buffer.from("not a png at all")))).toThrow("Not a PNG.");
+    const unsupported = "Only 8-bit RGB or RGBA, non-interlaced PNGs are supported.";
+    expect(() => compare(plain, file("deep", png(4, rgba, [0], { depth: 16 })))).toThrow(unsupported);
+    expect(() => compare(plain, file("interlaced", png(4, rgba, [0], { interlace: 1 })))).toThrow(unsupported);
   });
 
   test("summarizes samples by median and spread", () => {
@@ -73,6 +163,12 @@ describe("performance-pass perf.ts", () => {
     const tricky =
       'import{x}from"./x.js";export*from"./y.js";import"./z.js"\n// import "./no-1.js"\n/* import { a } from "./no-2.js" */\nconst s = "import \'./no-3.js\'";\nconst url = "https://example.com/x"; import { w } from "./w.js";';
     expect(importsOf(tricky).sort()).toEqual(["./w.js", "./x.js", "./y.js", "./z.js"]);
+    // Escaped quotes stay inside their string; an unterminated comment or string ends the scan.
+    const escaped = "const q = \"a\\\" import './no-4.js'\"; import './v.js';\nimport `./t.js`; import './u.js' // import './no-5.js'";
+    // A bare import of a template literal is not recognised.
+    expect(importsOf(escaped).sort()).toEqual(["./u.js", "./v.js"]);
+    expect(importsOf("import './s.js'; /* import './no-6.js'")).toEqual(["./s.js"]);
+    expect(importsOf("import './r.js'; const open = \"import './no-7.js'")).toEqual(["./r.js"]);
     const root = tree({
       "main.js": 'import "./lib/a.js";\nconst later = import("./late.js");',
       "lib/a.js": 'import { b } from "../b.js";\nimport { main } from "../main.js";',

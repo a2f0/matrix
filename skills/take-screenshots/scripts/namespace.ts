@@ -135,54 +135,73 @@ export function updateOwner(file: string, change: (owner: Owner | undefined) => 
 /** Reserve the namespace for this repository, or explain whose it is. */
 export function claimNamespace(target: Target, artifacts: string, apply: boolean): string | undefined {
   const file = path.join(artifacts, target.project, OWNER);
-  const identity = target.repo ?? `local:${target.project}`;
-  const lower = (name: string) => name.toLowerCase();
-  const foreign = (holder: string) => `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace`;
-  const decide = (owner: Owner | undefined, damaged: boolean): { error?: string; next?: Owner } => {
-    if (damaged) return { error: foreign("(unreadable repository.json)") };
-    if (!owner) {
-      const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
-      const renamed = target.alias !== undefined && recorded !== undefined && lower(recorded) === lower(target.alias);
-      if (recorded !== undefined && lower(recorded) !== lower(identity) && !renamed) return { error: foreign(recorded) };
-      return {
-        next: {
-          repo: identity,
-          aliases: target.verified && target.alias ? [target.alias] : [],
-          id: target.verified ? target.id : undefined,
-          explicit: target.explicit,
-        },
-      };
-    }
-    // GitHub's node id survives renames and transfers; a different id is a different repository, whatever its name.
-    if (target.verified && target.id !== undefined && owner.id !== undefined && owner.id !== target.id) {
-      return { error: foreign(`${owner.repo} (another GitHub repository, ${owner.id})`) };
-    }
-    const names = [owner.repo, ...owner.aliases].map(lower);
-    const sameName = lower(owner.repo) === lower(identity);
-    // The same repository after renames or transfers: GitHub confirmed origin's old name, which the namespace
-    // knows, or GitHub's id matches the recorded one.
-    const priorName = target.alias !== undefined && names.includes(lower(target.alias));
-    const sameId = target.verified === true && target.id !== undefined && owner.id === target.id;
-    if (!sameName && !(target.verified && (priorName || sameId))) return { error: foreign(owner.repo) };
-    if (!target.verified) return {};
-    const aliases = [...owner.aliases, owner.repo, ...(target.alias ? [target.alias] : [])].filter(
-      (name, index, all) => lower(name) !== lower(identity) && all.findIndex(other => lower(other) === lower(name)) === index,
-    );
-    const next = { ...owner, repo: identity, aliases, id: owner.id ?? target.id };
-    const changed = JSON.stringify(next) !== JSON.stringify({ ...owner, id: owner.id });
-    return changed ? { next } : {};
-  };
   const damaged = () => lexists(file) && readOwner(file) === undefined;
-  if (!apply) return decide(readOwner(file), damaged()).error;
+  if (!apply) return decideClaim(target, artifacts, readOwner(file), damaged()).error;
   // Decide and write under the owner lock, so a concurrent claim sees this one's result.
   mkdirSync(path.dirname(file), { recursive: true });
   let error: string | undefined;
   updateOwner(file, owner => {
-    const result = decide(owner, damaged());
+    const result = decideClaim(target, artifacts, owner, damaged());
     error = result.error;
     return result.error ? undefined : result.next;
   });
   return error;
+}
+
+/** Why a claim is refused, or the owner record to write; neither when the namespace is this repository's as recorded. */
+interface Claim {
+  readonly error?: string;
+  readonly next?: Owner;
+}
+
+const lower = (name: string) => name.toLowerCase();
+
+function foreignClaim(holder: string, identity: string): Claim {
+  return { error: `the store holds captures of ${holder}, not ${identity}; pass --project to use another namespace` };
+}
+
+function decideClaim(target: Target, artifacts: string, owner: Owner | undefined, damaged: boolean): Claim {
+  const identity = target.repo ?? `local:${target.project}`;
+  if (damaged) return foreignClaim("(unreadable repository.json)", identity);
+  if (!owner) return firstClaim(target, artifacts, identity);
+  return ownedClaim(target, owner, identity);
+}
+
+/** A namespace with no owner file yet: refuse it only when its capture record names another repository. */
+function firstClaim(target: Target, artifacts: string, identity: string): Claim {
+  const recorded = readRecord(path.join(artifacts, target.project, "screenshots"))?.repo;
+  const renamed = target.alias !== undefined && recorded !== undefined && lower(recorded) === lower(target.alias);
+  if (recorded !== undefined && lower(recorded) !== lower(identity) && !renamed) return foreignClaim(recorded, identity);
+  return {
+    next: {
+      repo: identity,
+      aliases: target.verified && target.alias ? [target.alias] : [],
+      id: target.verified ? target.id : undefined,
+      explicit: target.explicit,
+    },
+  };
+}
+
+/** A namespace with an owner: this repository's under its name, a confirmed earlier name, or its GitHub id. */
+function ownedClaim(target: Target, owner: Owner, identity: string): Claim {
+  // GitHub's node id survives renames and transfers; a different id is a different repository, whatever its name.
+  if (target.verified && target.id !== undefined && owner.id !== undefined && owner.id !== target.id) {
+    return foreignClaim(`${owner.repo} (another GitHub repository, ${owner.id})`, identity);
+  }
+  const names = [owner.repo, ...owner.aliases].map(lower);
+  const sameName = lower(owner.repo) === lower(identity);
+  // The same repository after renames or transfers: GitHub confirmed origin's old name, which the namespace
+  // knows, or GitHub's id matches the recorded one.
+  const priorName = target.alias !== undefined && names.includes(lower(target.alias));
+  const sameId = target.verified === true && target.id !== undefined && owner.id === target.id;
+  if (!sameName && !(target.verified && (priorName || sameId))) return foreignClaim(owner.repo, identity);
+  if (!target.verified) return {};
+  const aliases = [...owner.aliases, owner.repo, ...(target.alias ? [target.alias] : [])].filter(
+    (name, index, all) => lower(name) !== lower(identity) && all.findIndex(other => lower(other) === lower(name)) === index,
+  );
+  const next = { ...owner, repo: identity, aliases, id: owner.id ?? target.id };
+  const changed = JSON.stringify(next) !== JSON.stringify({ ...owner, id: owner.id });
+  return changed ? { next } : {};
 }
 
 /**

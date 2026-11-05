@@ -96,16 +96,20 @@ export function parseOptions(argv: string[]): Options {
     }
     if (!isNumber(name) && !isString(name)) throw new Error(`Unknown option ${arg}.`);
     i += 1;
-    const value = argv[i];
-    if (value === undefined) throw new Error(`${arg} needs a value.`);
-    if (isNumber(name)) {
-      const number = Number(value);
-      if (!Number.isFinite(number) || number < 0) throw new Error(`${arg} needs a non-negative number.`);
-      options[name] = number;
-    } else options[name] = value;
+    setValue(options, name, arg, argv[i]);
   }
   if (options.runs < 1) throw new Error("--runs needs at least 1.");
   return options;
+}
+
+/** Stores the value that follows a `--name` option, as a number where the option takes one. */
+function setValue(options: Options, name: NumberOption | StringOption, arg: string, value: string | undefined): void {
+  if (value === undefined) throw new Error(`${arg} needs a value.`);
+  if (isNumber(name)) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0) throw new Error(`${arg} needs a non-negative number.`);
+    options[name] = number;
+  } else options[name] = value;
 }
 
 /** Median and spread of repeated samples; the median is what rounds compare. */
@@ -141,26 +145,33 @@ function tokens(source: string): { code: string; strings: string[] } {
       continue;
     }
     if (char === "'" || char === '"' || char === "`") {
-      let j = i + 1,
-        text = "";
-      while (j < source.length && source[j] !== char) {
-        if (source[j] === "\\") {
-          text += source[j]! + (source[j + 1] ?? "");
-          j += 2;
-          continue;
-        }
-        text += source[j]!;
-        j += 1;
-      }
+      const literal = stringLiteral(source, i);
       code += `${char}${strings.length}${char}`;
-      strings.push(text);
-      i = j + 1;
+      strings.push(literal.text);
+      i = literal.end;
       continue;
     }
     code += char;
     i += 1;
   }
   return { code, strings };
+}
+
+/** The contents of the string literal whose quote is at `start`, escapes kept, and the index just past its closing quote. */
+function stringLiteral(source: string, start: number): { text: string; end: number } {
+  const quote = source[start];
+  let j = start + 1,
+    text = "";
+  while (j < source.length && source[j] !== quote) {
+    if (source[j] === "\\") {
+      text += source[j]! + (source[j + 1] ?? "");
+      j += 2;
+      continue;
+    }
+    text += source[j]!;
+    j += 1;
+  }
+  return { text, end: j + 1 };
 }
 
 /** Relative imports of an ES module's source: static `import`/`export from`, bare `import "x"`, and literal `import("x")`. */
@@ -526,6 +537,13 @@ export async function shot(options: Options): Promise<void> {
 
 /** An 8-bit RGB or RGBA, non-interlaced PNG, as Chrome writes screenshots, decoded to RGBA. */
 function decodePng(file: Buffer): { width: number; height: number; data: Uint8Array } {
+  const { width, height, channels, compressed } = readPngChunks(file);
+  const pixels = unfilterRows(inflateSync(compressed), width, height, channels);
+  return { width, height, data: toRgba(pixels, width * height, channels) };
+}
+
+/** The header fields and concatenated image data of a PNG, rejecting formats `decodePng` cannot read. */
+function readPngChunks(file: Buffer): { width: number; height: number; channels: number; compressed: Buffer } {
   if (file.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("Not a PNG.");
   let width = 0,
     height = 0,
@@ -544,10 +562,13 @@ function decodePng(file: Buffer): { width: number; height: number; data: Uint8Ar
     } else if (type === "IDAT") chunks.push(body);
     at += 12 + length;
   }
-  const raw = inflateSync(Buffer.concat(chunks)),
-    stride = width * channels;
-  const pixels = new Uint8Array(stride * height),
-    data = new Uint8Array(width * height * 4);
+  return { width, height, channels, compressed: Buffer.concat(chunks) };
+}
+
+/** Reverses each scanline's filter, giving `channels` bytes per pixel. */
+function unfilterRows(raw: Buffer, width: number, height: number, channels: number): Uint8Array {
+  const stride = width * channels;
+  const pixels = new Uint8Array(stride * height);
   for (let y = 0; y < height; y += 1) {
     const filter = raw[y * (stride + 1)]!,
       row = y * stride;
@@ -556,25 +577,33 @@ function decodePng(file: Buffer): { width: number; height: number; data: Uint8Ar
       const left = x >= channels ? pixels[row + x - channels]! : 0,
         up = y ? pixels[row - stride + x]! : 0;
       const corner = x >= channels && y ? pixels[row - stride + x - channels]! : 0;
-      let predicted = 0;
-      if (filter === 1) predicted = left;
-      else if (filter === 2) predicted = up;
-      else if (filter === 3) predicted = (left + up) >> 1;
-      else if (filter === 4) {
-        const estimate = left + up - corner,
-          a = Math.abs(estimate - left),
-          b = Math.abs(estimate - up),
-          c = Math.abs(estimate - corner);
-        predicted = a <= b && a <= c ? left : b <= c ? up : corner;
-      }
-      pixels[row + x] = (value + predicted) & 255;
+      pixels[row + x] = (value + predictor(filter, left, up, corner)) & 255;
     }
   }
-  for (let pixel = 0; pixel < width * height; pixel += 1) {
+  return pixels;
+}
+
+/** The byte a PNG filter type predicts from the left, upper and upper-left neighbours. */
+function predictor(filter: number, left: number, up: number, corner: number): number {
+  if (filter === 1) return left;
+  if (filter === 2) return up;
+  if (filter === 3) return (left + up) >> 1;
+  if (filter !== 4) return 0;
+  const estimate = left + up - corner,
+    a = Math.abs(estimate - left),
+    b = Math.abs(estimate - up),
+    c = Math.abs(estimate - corner);
+  return a <= b && a <= c ? left : b <= c ? up : corner;
+}
+
+/** Widens RGB or RGBA pixels to RGBA, opaque where the image has no alpha. */
+function toRgba(pixels: Uint8Array, count: number, channels: number): Uint8Array {
+  const data = new Uint8Array(count * 4);
+  for (let pixel = 0; pixel < count; pixel += 1) {
     for (let c = 0; c < channels; c += 1) data[pixel * 4 + c] = pixels[pixel * channels + c]!;
     if (channels === 3) data[pixel * 4 + 3] = 255;
   }
-  return { width, height, data };
+  return data;
 }
 
 /** Counts the pixels that differ between two PNG screenshots; `diff` prints the result. */
