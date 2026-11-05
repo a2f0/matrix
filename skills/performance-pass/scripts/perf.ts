@@ -79,27 +79,26 @@ export function parseOptions(argv: string[]): Options {
     seed: true,
     http1: false,
   };
-  for (let i = 1; i < argv.length; i += 1) {
-    const arg = argv[i]!;
-    if (!arg.startsWith("--")) {
-      options.args.push(arg);
-      continue;
-    }
-    const name = arg.slice(2);
-    if (name === "no-seed") {
-      options.seed = false;
-      continue;
-    }
-    if (isFlag(name)) {
-      options[name] = true;
-      continue;
-    }
-    if (!isNumber(name) && !isString(name)) throw new Error(`Unknown option ${arg}.`);
-    i += 1;
-    setValue(options, name, arg, argv[i]);
-  }
+  for (let i = 1; i < argv.length; i += 1) i = readArgument(options, argv, i);
   if (options.runs < 1) throw new Error("--runs needs at least 1.");
   return options;
+}
+
+/** Applies the argument at `index` to `options`, returning the index of the last argument it used. */
+function readArgument(options: Options, argv: string[], index: number): number {
+  const arg = argv[index]!;
+  if (!arg.startsWith("--")) {
+    options.args.push(arg);
+    return index;
+  }
+  const name = arg.slice(2);
+  if (name === "no-seed") options.seed = false;
+  else if (isFlag(name)) options[name] = true;
+  else if (isNumber(name) || isString(name)) {
+    setValue(options, name, arg, argv[index + 1]);
+    return index + 1;
+  } else throw new Error(`Unknown option ${arg}.`);
+  return index;
 }
 
 /** Stores the value that follows a `--name` option, as a number where the option takes one. */
@@ -296,36 +295,41 @@ export function serve(root: string, port: number, http1 = false) {
   };
   warm(base);
   const handler = (request: IncomingMessage | Http2ServerRequest, response: ServerResponse | Http2ServerResponse) => {
-    const send = (status: number, headers?: Record<string, string>, body?: Buffer) => {
-      if (response instanceof ServerResponse) response.writeHead(status, headers).end(body);
-      else if (body) response.writeHead(status, headers).end(body);
-      else response.writeHead(status, headers).end();
-    };
     const pathname = requestPath(request.url);
     const file = pathname ? inside(pathname) : undefined;
-    if (!file) {
-      send(404);
-      return;
-    }
-    const extension = path.extname(file).toLowerCase();
-    const etag = etagOf(statSync(file));
-    const headers: Record<string, string> = { "content-type": TYPES[extension] ?? "application/octet-stream", "cache-control": "no-cache", etag };
-    if (request.headers["if-none-match"] === etag) {
-      send(304, headers);
-      return;
-    }
-    let body: Buffer = readFileSync(file);
-    if (COMPRESSED.has(extension) && /\bgzip\b/.test(String(request.headers["accept-encoding"] ?? ""))) {
-      body = compressed(file, etag, body);
-      headers["content-encoding"] = "gzip";
-    }
-    send(200, headers, body);
+    respond(response, file ? reply(request, file, compressed) : { status: 404 });
   };
   const server = http1 ? createServer(handler) : createSecureServer({ ...certificate(), allowHTTP1: true }, handler);
   // Loopback only: the build is for this machine's browser, not the network.
   return server.listen(port, "127.0.0.1", () =>
     console.log(`Serving ${base} at ${http1 ? "http" : "https"}://127.0.0.1:${(server.address() as AddressInfo).port}/`),
   );
+}
+
+interface Reply {
+  status: number;
+  headers?: Record<string, string>;
+  body?: Buffer;
+}
+
+/** What a request for a served file gets: 304 when its ETag matches, else the file, gzipped when its type and the client allow. */
+function reply(request: IncomingMessage | Http2ServerRequest, file: string, compressed: (file: string, etag: string, body: Buffer) => Buffer): Reply {
+  const extension = path.extname(file).toLowerCase();
+  const etag = etagOf(statSync(file));
+  const headers: Record<string, string> = { "content-type": TYPES[extension] ?? "application/octet-stream", "cache-control": "no-cache", etag };
+  if (request.headers["if-none-match"] === etag) return { status: 304, headers };
+  let body: Buffer = readFileSync(file);
+  if (COMPRESSED.has(extension) && /\bgzip\b/.test(String(request.headers["accept-encoding"] ?? ""))) {
+    body = compressed(file, etag, body);
+    headers["content-encoding"] = "gzip";
+  }
+  return { status: 200, headers, body };
+}
+
+function respond(response: ServerResponse | Http2ServerResponse, { status, headers, body }: Reply): void {
+  if (response instanceof ServerResponse) response.writeHead(status, headers).end(body);
+  else if (body) response.writeHead(status, headers).end(body);
+  else response.writeHead(status, headers).end();
 }
 
 /** The decoded path a request names, a directory's naming its index.html; empty when it does not decode. */
@@ -515,11 +519,14 @@ async function measure(options: Options) {
   for (const row of report.waterfall ?? [])
     console.log(`  ${String(row.start).padStart(6)} ${String(row.end ?? "-").padStart(6)} ${String(row.bytes ?? "").padStart(8)} ${row.path}`);
   if (report.cpu) {
-    console.log("  CPU self (ms):");
-    for (const row of report.cpu.self) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
-    console.log("  CPU inclusive (ms):");
-    for (const row of report.cpu.inclusive) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
+    printCpuRows("self", report.cpu.self);
+    printCpuRows("inclusive", report.cpu.inclusive);
   }
+}
+
+function printCpuRows(title: string, rows: { fn: string; ms: number }[]): void {
+  console.log(`  CPU ${title} (ms):`);
+  for (const row of rows) console.log(`  ${row.ms.toFixed(1).padStart(8)} ${row.fn}`);
 }
 
 export async function shot(options: Options): Promise<void> {
