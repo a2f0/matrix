@@ -3,7 +3,7 @@ import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync,
 import path from "node:path";
 import type { CheckoutStatus } from "./checkouts";
 import { git, gitOutput } from "./git";
-import { repoName } from "./manifest";
+import { findRepo, repoName } from "./manifest";
 import { errorMessage, plural } from "./text";
 
 export const STATUSES = ["pending", "skipped", "unchanged", "in-progress", "open", "merged", "blocked", "failed"] as const;
@@ -300,8 +300,7 @@ export function startSweep(root: string, branch: string, selected: string[], sta
 }
 
 function resolveRepo(sweep: Sweep, name: string): string {
-  const key = name.toLowerCase();
-  const repo = sweep.repos.find(candidate => candidate.toLowerCase() === key || repoName(candidate).toLowerCase() === key);
+  const repo = findRepo(sweep.repos, name);
   if (!repo) throw new Error(`'${name}' is not part of sweep '${sweep.branch}'.`);
   return repo;
 }

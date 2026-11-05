@@ -2,7 +2,7 @@ import type { Audit } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
 import type { GitTransport } from "./gitTransport";
 import { notReady, type Recurrence, type Retro } from "./sweeps";
-import type { Teardown } from "./teardown";
+import { leftoverRepos, type Teardown } from "./teardown";
 import { plural } from "./text";
 
 /** Bytes available to this user, and the volume's size. */
@@ -79,7 +79,7 @@ export function assessHealth(inputs: HealthInputs): Health {
   const suggestions: string[] = [];
   const low = inputs.disk !== undefined && inputs.disk.free < MIN_FREE_DISK_GIB * GIB;
   if (low) suggestions.push(`Free disk space before the next sweep: ${gib(inputs.disk!.free)} free of ${gib(inputs.disk!.total)}; validation needs at least ${MIN_FREE_DISK_GIB} GiB; \`bun run space\` lists what is safe to remove.`);
-  const leftover = inputs.running?.repos.filter(item => !item.ok).map(item => item.repo) ?? [];
+  const leftover = inputs.running ? leftoverRepos(inputs.running) : [];
   if (leftover.length > 0) suggestions.push(`Stop what earlier work left running in ${list(leftover)}: \`bun run teardown\` lists it, \`--apply\` stops recorded processes, and untracked ones need stopping by hand.`);
   for (const problem of inputs.git?.problems ?? []) suggestions.push(`Keep Git on SSH: ${problem}; see docs/health.md#github-over-ssh.`);
   for (const { repo, reason } of notReadyList) suggestions.push(`Inspect ${repo} before the next sweep: ${reason}.`);

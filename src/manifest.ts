@@ -84,12 +84,17 @@ export function parseGitHubRepo(url: string): string | undefined {
   return GITHUB_REMOTE.exec(url)?.[1];
 }
 
+/** The repo a name means, as owner/name or checkout name, ignoring case. */
+export function findRepo(repos: readonly string[], name: string): string | undefined {
+  const key = name.toLowerCase();
+  return repos.find(candidate => candidate.toLowerCase() === key || repoName(candidate).toLowerCase() === key);
+}
+
 /** Select managed repos by owner/name or checkout name; no names selects all. */
 export function selectRepos(manifest: Manifest, names: string[]): string[] {
   if (names.length === 0) return manifest.repos;
   return names.map(name => {
-    const key = name.toLowerCase();
-    const repo = manifest.repos.find(candidate => candidate.toLowerCase() === key || repoName(candidate).toLowerCase() === key);
+    const repo = findRepo(manifest.repos, name);
     if (!repo) throw new Error(`'${name}' is not a managed repository in matrix.json.`);
     return repo;
   });
