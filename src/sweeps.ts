@@ -58,14 +58,20 @@ function pullRequest(value: string): string {
   return value;
 }
 
-/** Validate `sweep record` options into an update. */
-export function parseUpdate(values: Record<string, string>, lists: Record<string, string[]>): EntryUpdate {
+/** The single-valued `sweep record` options, each validated by its field's rule. */
+function parseValues(values: Record<string, string>): EntryUpdate {
   const update: EntryUpdate = {};
   if (values.status !== undefined) update.status = oneOf(STATUSES, values.status, "status");
   if (values.verdict !== undefined) update.verdict = oneOf(VERDICTS, values.verdict.toUpperCase(), "verdict");
   for (const field of TEXT_FIELDS) if (values[field] !== undefined) update[field] = text(values[field], field);
   for (const field of OID_FIELDS) if (values[field] !== undefined) update[field] = commitId(values[field], field);
   if (values.pr !== undefined) update.pr = pullRequest(values.pr);
+  return update;
+}
+
+/** Validate `sweep record` options into an update. */
+export function parseUpdate(values: Record<string, string>, lists: Record<string, string[]>): EntryUpdate {
+  const update = parseValues(values);
   if (lists.note) update.notes = lists.note.map(note => text(note, "note"));
   const events = EVENT_KINDS.flatMap(kind => (lists[kind] ?? []).map(value => parseEvent(kind, value)));
   if (events.length > 0) update.events = events;

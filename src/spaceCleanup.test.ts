@@ -211,15 +211,15 @@ describe("space cleanup", () => {
         ".gradle/caches/x": "x",
       });
       const ran: string[] = [];
+      const outputs = new Map([
+        ["bun", path.join(home, ".bun/install/cache")],
+        ["xcrun", "    iPhone 8 (ABC) (Shutdown) (unavailable, runtime profile not found)\n"],
+        ["brew", "==> This operation would free approximately 1.5GB of disk space."],
+      ]);
       const fake: Host = {
         home,
         has: command => commands.includes(command),
-        output: command => {
-          if (command === "bun") return path.join(home, ".bun/install/cache");
-          if (command === "xcrun") return "    iPhone 8 (ABC) (Shutdown) (unavailable, runtime profile not found)\n";
-          if (command === "brew") return "==> This operation would free approximately 1.5GB of disk space.";
-          return "";
-        },
+        output: command => outputs.get(command) ?? "",
         run: (command, args) => {
           ran.push(`${command} ${args.join(" ")}`);
           return "";

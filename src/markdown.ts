@@ -53,8 +53,13 @@ function readOutsideFence(scan: HeadingScan, line: string, index: number): void 
   else if (heading) scan.found.push({ level: heading[1]!.length, text: heading[2] ?? "", line: index });
   // = underlines a level 1 heading and - a level 2 one; the heading is the whole paragraph.
   else if (underline && paragraph) scan.found.push({ level: underline[0] === "=" ? 1 : 2, text: paragraph.lines.join(" "), line: paragraph.start });
-  if (marker || heading || underline || !line.trim()) scan.paragraph = undefined;
-  else if (paragraph) paragraph.lines.push(line.trim());
+  trackParagraph(scan, line, index, Boolean(marker || heading || underline));
+}
+
+/** A blank line or a fence, heading, or underline ends the paragraph; any other line continues or starts one. */
+function trackParagraph(scan: HeadingScan, line: string, index: number, endsParagraph: boolean): void {
+  if (endsParagraph || !line.trim()) scan.paragraph = undefined;
+  else if (scan.paragraph) scan.paragraph.lines.push(line.trim());
   else scan.paragraph = { lines: [line.trim()], start: index };
 }
 

@@ -99,6 +99,13 @@ function tierBytes(candidates: Candidate[], tier: Tier): number {
   return selected(candidates, new Set([tier])).reduce((sum, candidate) => sum + candidate.bytes, 0);
 }
 
+/** Bytes each tier would free across every repository. */
+function tierTotals(repos: RepoReport[]): Record<Tier, number> {
+  const totals: Record<Tier, number> = { caches: 0, builds: 0, deps: 0 };
+  for (const tier of TIERS) for (const repo of repos) totals[tier] += tierBytes(repo.candidates, tier);
+  return totals;
+}
+
 /** The busy processes reported for a repository; undefined when there are none. */
 function workersOf(procs: Proc[] | undefined): RepoReport["busy"] {
   return procs?.map(({ pid, name, cwd }) => ({ pid, name, cwd: cwd! }));
@@ -136,9 +143,7 @@ export function main(argv: string[], cwd = process.cwd(), discover: () => Proc[]
   }
   const after = options.apply ? free(volume) : undefined;
 
-  const totals: Record<Tier, number> = { caches: 0, builds: 0, deps: 0 };
-  for (const tier of TIERS) for (const repo of repos) totals[tier] += tierBytes(repo.candidates, tier);
-  const report: Report = { options, workspace, before, after, totals, repos, machine };
+  const report: Report = { options, workspace, before, after, totals: tierTotals(repos), repos, machine };
   console.log(options.json ? jsonReport(report) : textReport(report));
   return failures > 0 ? 1 : 0;
 }

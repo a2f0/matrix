@@ -104,9 +104,14 @@ export function scanRepository(name: string, root: string, options: Pick<Options
     const report = scanFile(file, text);
     if (report && report.score >= options.minScore) files.push(report);
   }
+  return { name, root, scanned, ...ranked(files, options.limit) };
+}
+
+/** Highest scores first, ties by path, cut to `limit` files (0 keeps all) with the count left out. */
+function ranked(files: FileReport[], limit: number): Pick<RepoReport, "files" | "more"> {
   files.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
-  const shown = options.limit === 0 ? files : files.slice(0, options.limit);
-  return { name, root, scanned, files: shown, more: files.length - shown.length };
+  const shown = limit === 0 ? files : files.slice(0, limit);
+  return { files: shown, more: files.length - shown.length };
 }
 
 function describe(report: FileReport): string[] {

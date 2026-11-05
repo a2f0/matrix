@@ -261,6 +261,24 @@ describe("explicit-state-machines CLI", () => {
     ]);
   });
 
+  test("ranks candidates by score then path, and says how many --limit left out", () => {
+    const status = 'def a(self):\n    self.status = "one"\ndef b(self):\n    self.status = "two"\ndef c(self):\n    self.status = "three"\n';
+    const root = repo(path.join(realpathSync(tempDir("explicit-state-machines")), "repo"), { "b.py": WORKER, "a.py": WORKER, "status.py": status });
+    const output: string[] = [];
+    expect(main(["--json", "--limit", "2"], root, text => output.push(text))).toBe(0);
+    const [report] = JSON.parse(output.join("\n")).repos;
+    expect(Object.keys(report)).toEqual(["name", "root", "scanned", "files", "more"]);
+    expect(report.files.map((file: { path: string }) => file.path)).toEqual(["a.py", "b.py"]);
+    expect(report.more).toBe(1);
+    output.length = 0;
+    expect(main(["--limit", "1"], root, text => output.push(text))).toBe(0);
+    expect(output.join("\n")).toContain("3 candidate files of 3 scanned");
+    expect(output.join("\n")).toContain("  ... 2 more (raise --limit)");
+    output.length = 0;
+    expect(main(["--json", "--limit", "0"], root, text => output.push(text))).toBe(0);
+    expect(JSON.parse(output.join("\n")).repos[0]).toMatchObject({ more: 0, files: [{ path: "a.py" }, { path: "b.py" }, { path: "status.py" }] });
+  });
+
   test("resolves targets exactly as space-cleanup does", () => {
     const home = realpathSync(tempDir("explicit-state-machines"));
     const root = path.join(home, "matrix");
