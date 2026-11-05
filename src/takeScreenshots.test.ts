@@ -251,6 +251,25 @@ describe("take-screenshots artifacts", () => {
     expect(readRecord(store)).toMatchObject({ status: "complete", dirty: true, over: { dirty: true } });
   });
 
+  test("ignores inherited variables that bind git to other configuration or repositories", async () => {
+    const { home, app } = workspace();
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    write(app, "src/wip.ts");
+    // A hook's environment could hide the untracked file behind an exclude-everything rule.
+    write(home, "exclude-all", "*\n");
+    const inherited = {
+      GIT_CONFIG_PARAMETERS: `'core.excludesFile'='${path.join(home, "exclude-all")}'`,
+      GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.excludesFile", GIT_CONFIG_VALUE_0: path.join(home, "exclude-all"),
+    };
+    const saved = Object.fromEntries(Object.keys(inherited).map(name => [name, process.env[name]]));
+    Object.assign(process.env, inherited);
+    try {
+      await expect(main(["capture"], app, undefined, print)).rejects.toThrow("local changes");
+    } finally {
+      for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+
   test("a live lock blocks a second capture; a dead holder's lock waits for a person", async () => {
     const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "take-screenshots-lock-")));
     temps.push(dir);
