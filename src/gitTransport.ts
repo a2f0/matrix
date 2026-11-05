@@ -116,41 +116,57 @@ export function sshEndpoint(output: string): { hostname: string; port: number } 
 export function inspectGitTransport(root: string, run: Runner = runner): GitTransport {
   const problems: string[] = [];
 
-  const gh = run("gh", ["config", "get", "git_protocol", "--host", GITHUB]);
-  const ghMissing = (gh.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
-  const ghProtocol = ghMissing ? null : gh.status === 0 ? gh.stdout.trim() : "";
+  const ghProtocol = readGhProtocol(run);
   if (ghProtocol !== null && ghProtocol !== "ssh") {
     problems.push(
       `gh uses ${ghProtocol === "" ? "an unreadable protocol" : ghProtocol} for ${GITHUB}, so \`gh repo clone\` and \`gh pr checkout\` use HTTPS; run \`gh config set git_protocol ssh --host ${GITHUB}\`, which overrides the global setting`,
     );
   }
 
-  const config = git(root, ["config", "--null", "--get-regexp", "^credential\\..*helper$"]);
-  if (config.status !== 0 && config.status !== 1) throw new Error(`git config failed: ${config.stderr.trim()}`);
-  const credentialHelpers = config.status === 0 ? effectiveHelpers(config.stdout).map(helperName) : [];
+  const credentialHelpers = readCredentialHelpers(root);
   if (credentialHelpers.length > 0) {
     problems.push(
       `Git would ask ${credentialHelpers.map(helper => (/^[A-Za-z0-9._-]+$/.test(helper) ? `\`${helper}\`` : helper)).join(", ")} for https://${GITHUB} credentials, which can wait on a keychain prompt; set an empty \`credential.https://${GITHUB}.helper\`, as dotfiles' gitconfig does`,
     );
   }
 
+  const ssh = resolveSshEndpoint(root, run);
+  if ("error" in ssh) problems.push(`Could not resolve Git's SSH endpoint for ${GITHUB}: ${ssh.error}`);
+  else if (ssh.hostname !== SSH_OVER_HTTPS.hostname || ssh.port !== SSH_OVER_HTTPS.port) {
+    problems.push(
+      `Git's SSH reaches ${GITHUB} at ${ssh.hostname}:${ssh.port}, which fails where port 22 is blocked; send it to ${SSH_OVER_HTTPS.hostname}:${SSH_OVER_HTTPS.port}, as dotfiles' Git SSH config does`,
+    );
+  }
+
+  return { ghProtocol, credentialHelpers, ssh, problems };
+}
+
+/** gh's protocol for GitHub: null when gh is not installed, and empty when it cannot be read. */
+function readGhProtocol(run: Runner): string | null {
+  const gh = run("gh", ["config", "get", "git_protocol", "--host", GITHUB]);
+  if ((gh.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return null;
+  return gh.status === 0 ? gh.stdout.trim() : "";
+}
+
+/** The names of the credential helpers Git would ask for GitHub over HTTPS. */
+function readCredentialHelpers(root: string): string[] {
+  const config = git(root, ["config", "--null", "--get-regexp", "^credential\\..*helper$"]);
+  if (config.status !== 0 && config.status !== 1) throw new Error(`git config failed: ${config.stderr.trim()}`);
+  return config.status === 0 ? effectiveHelpers(config.stdout).map(helperName) : [];
+}
+
+/** Where Git's SSH would connect for GitHub, or why that could not be resolved. */
+function resolveSshEndpoint(root: string, run: Runner): GitTransport["ssh"] {
   const { command, shell } = sshCommand(root);
   // Git runs a configured command through the shell with its arguments appended; `-G` prints the resolved config without connecting.
   const resolved = shell ? run("sh", ["-c", `${command} "$@"`, command, "-G", `git@${GITHUB}`]) : run(command, ["-G", `git@${GITHUB}`]);
   const endpoint = resolved.status === 0 ? sshEndpoint(resolved.stdout) : undefined;
+  if (endpoint) return endpoint;
   // The command and its stderr can carry credentials (a proxy password, a wrapper token), so neither is reported.
   const failure = resolved.error
     ? `could not start (${(resolved.error as NodeJS.ErrnoException).code ?? "error"})`
     : resolved.status !== 0
       ? `exited ${resolved.status ?? "on a signal"}`
       : "printed no host and port";
-  const ssh = endpoint ?? { error: `\`-G\` through Git's ${shell ? "configured core.sshCommand" : "ssh"} ${failure}` };
-  if (!endpoint) problems.push(`Could not resolve Git's SSH endpoint for ${GITHUB}: ${"error" in ssh ? ssh.error : ""}`);
-  else if (endpoint.hostname !== SSH_OVER_HTTPS.hostname || endpoint.port !== SSH_OVER_HTTPS.port) {
-    problems.push(
-      `Git's SSH reaches ${GITHUB} at ${endpoint.hostname}:${endpoint.port}, which fails where port 22 is blocked; send it to ${SSH_OVER_HTTPS.hostname}:${SSH_OVER_HTTPS.port}, as dotfiles' Git SSH config does`,
-    );
-  }
-
-  return { ghProtocol, credentialHelpers, ssh, problems };
+  return { error: `\`-G\` through Git's ${shell ? "configured core.sshCommand" : "ssh"} ${failure}` };
 }

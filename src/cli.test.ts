@@ -246,3 +246,23 @@ test("status, discover, and deploy-secrets parse options like every other comman
   expect(main(["discover"], root, undefined, services)).toBe(0);
   expect(JSON.parse(writes.join(""))).toEqual({ applied: false, added: ["a2f0/new"], notDiscovered: [] });
 });
+
+test("dispatches help, and rejects unknown commands and sweep actions", () => {
+  for (const argv of [[], ["--help"], ["-h"]]) {
+    const { services, writes } = fakeServices();
+    expect(main(argv, root, undefined, services)).toBe(0);
+    expect(writes.join("")).toStartWith("Usage: matrix <command>");
+  }
+  const { services } = fakeServices();
+  // Names inherited from Object.prototype are not commands either.
+  for (const command of ["bogus", "toString", "constructor"]) {
+    expect(() => main([command], root, undefined, services)).toThrow(`Unknown command '${command}'. Run matrix --help.`);
+  }
+  for (const action of [[], ["bogus"], ["toString"]]) {
+    expect(() => main(["sweep", ...action], root, undefined, services)).toThrow(
+      "Usage: matrix sweep <start|record|report|list|retro|resolve>; see matrix --help.",
+    );
+  }
+  expect(() => main(["sweep", "list", "extra"], root, undefined, services)).toThrow("Usage: matrix sweep list");
+  expect(() => main(["sweep", "retro", "chore/x", "--last", "2"], root, undefined, services)).toThrow("sweep retro takes branches or --last, not both.");
+});

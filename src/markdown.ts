@@ -21,34 +21,41 @@ function closes(line: string, fence: string): boolean {
   return marker !== undefined && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker;
 }
 
+interface HeadingScan {
+  fence?: string;
+  // The lines of the paragraph being read, which a Setext underline turns into a heading.
+  paragraph?: { lines: string[]; start: number };
+  readonly found: Heading[];
+}
+
 /**
  * Markdown headings outside fenced code blocks. As in CommonMark, a fence closes
  * only on the same character repeated at least as many times, so a longer fence
  * can show shorter ones as examples.
  */
 export function headings(source: string): Heading[] {
-  let fence: string | undefined;
-  // The lines of the paragraph being read, which a Setext underline turns into a heading.
-  let paragraph: { lines: string[]; start: number } | undefined;
-  const found: Heading[] = [];
+  const scan: HeadingScan = { found: [] };
   for (const [index, line] of source.split("\n").entries()) {
-    const marker = FENCE.exec(line)?.[1];
-    if (fence === undefined) {
-      const heading = /^ {0,3}(#{1,6})(?:\s+(.*?))?(?:\s+#+)?\s*$/.exec(line);
-      const underline = /^ {0,3}(=+|-+)\s*$/.exec(line)?.[1];
-      if (marker) fence = marker;
-      // An ATX heading may end with closing hashes, which are not part of its text.
-      else if (heading) found.push({ level: heading[1]!.length, text: heading[2] ?? "", line: index });
-      // = underlines a level 1 heading and - a level 2 one; the heading is the whole paragraph.
-      else if (underline && paragraph) found.push({ level: underline[0] === "=" ? 1 : 2, text: paragraph.lines.join(" "), line: paragraph.start });
-      if (marker || heading || underline || !line.trim()) paragraph = undefined;
-      else if (paragraph) paragraph.lines.push(line.trim());
-      else paragraph = { lines: [line.trim()], start: index };
-    } else if (closes(line, fence)) {
-      fence = undefined;
-    }
+    if (scan.fence === undefined) readOutsideFence(scan, line, index);
+    else if (closes(line, scan.fence)) scan.fence = undefined;
   }
-  return found;
+  return scan.found;
+}
+
+/** Read one line outside a fence: it may open a fence, be or end a heading, or continue a paragraph. */
+function readOutsideFence(scan: HeadingScan, line: string, index: number): void {
+  const marker = FENCE.exec(line)?.[1];
+  const heading = /^ {0,3}(#{1,6})(?:\s+(.*?))?(?:\s+#+)?\s*$/.exec(line);
+  const underline = /^ {0,3}(=+|-+)\s*$/.exec(line)?.[1];
+  const paragraph = scan.paragraph;
+  if (marker) scan.fence = marker;
+  // An ATX heading may end with closing hashes, which are not part of its text.
+  else if (heading) scan.found.push({ level: heading[1]!.length, text: heading[2] ?? "", line: index });
+  // = underlines a level 1 heading and - a level 2 one; the heading is the whole paragraph.
+  else if (underline && paragraph) scan.found.push({ level: underline[0] === "=" ? 1 : 2, text: paragraph.lines.join(" "), line: paragraph.start });
+  if (marker || heading || underline || !line.trim()) scan.paragraph = undefined;
+  else if (paragraph) paragraph.lines.push(line.trim());
+  else scan.paragraph = { lines: [line.trim()], start: index };
 }
 
 /** A section's body: the lines after its heading, up to the next heading at its level or above. */

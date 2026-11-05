@@ -138,39 +138,52 @@ export function codeLines(text: string, syntax: "c" | "hash"): string[] {
   // String-aware, so "/*" or "//" inside a string literal never hides code.
   // Strings are tracked per line; a template literal spanning lines is rare
   // enough in state code that a lead missed there is acceptable.
-  let inBlock = false;
-  return lines.map(line => {
-    let out = "";
-    let quote: string | undefined;
-    for (let index = 0; index < line.length; index++) {
-      const char = line[index],
-        next = line[index + 1];
-      if (inBlock) {
-        if (char === "*" && next === "/") {
-          inBlock = false;
-          index++;
-        }
-        continue;
-      }
-      if (quote) {
-        out += char;
-        if (char === "\\") {
-          out += next ?? "";
-          index++;
-        } else if (char === quote) quote = undefined;
-        continue;
-      }
-      if (char === "/" && next === "*") {
-        inBlock = true;
-        index++;
-        continue;
-      }
-      if (char === "/" && next === "/") break;
-      if (char === '"' || char === "'" || char === "`") quote = char;
-      out += char;
+  const state = { inBlock: false };
+  return lines.map(line => stripComments(line, state));
+}
+
+/** One line without its comments; `state.inBlock` carries an open block comment to the next line. */
+function stripComments(line: string, state: { inBlock: boolean }): string {
+  let out = "";
+  let index = 0;
+  while (index < line.length) {
+    if (state.inBlock) {
+      index = blockCommentEnd(line, index, state);
+      continue;
     }
-    return out;
-  });
+    const char = line[index],
+      next = line[index + 1];
+    if (char === "/" && next === "*") {
+      state.inBlock = true;
+      index += 2;
+      continue;
+    }
+    if (char === "/" && next === "/") break;
+    const end = char === '"' || char === "'" || char === "`" ? stringEnd(line, index) : index + 1;
+    out += line.slice(index, end);
+    index = end;
+  }
+  return out;
+}
+
+// Where an open block comment ends on this line (just past its `*/`), or the line's end.
+function blockCommentEnd(line: string, index: number, state: { inBlock: boolean }): number {
+  const close = line.indexOf("*/", index);
+  if (close < 0) return line.length;
+  state.inBlock = false;
+  return close + 2;
+}
+
+/** Just past the string literal opening at `start`, honoring backslash escapes; the line's end when unterminated. */
+function stringEnd(line: string, start: number): number {
+  const quote = line[start];
+  let index = start + 1;
+  while (index < line.length) {
+    if (line[index] === "\\") index += 2;
+    else if (line[index] === quote) return index + 1;
+    else index++;
+  }
+  return index;
 }
 
 const BOOLEAN = String.raw`(true|false|True|False)\b`;
@@ -206,40 +219,64 @@ const STATUS_SETTER = /\bset_?([A-Za-z_$][\w$]*)\(\s*(["'`])([\w-]+)\2\s*\)/g;
  *   from several places, so its transitions are scattered.
  */
 export function scanText(text: string, syntax: "c" | "hash"): Signal[] {
-  const flags = new Map<string, { values: Set<string>; lines: Set<number> }>();
-  const statuses = new Map<string, { values: Set<string>; lines: Set<number> }>();
-  const note = (map: typeof flags, name: string, value: string, line: number) => {
-    const entry = map.get(name) ?? { values: new Set<string>(), lines: new Set<number>() };
-    entry.values.add(value);
-    entry.lines.add(line);
-    map.set(name, entry);
-  };
+  const flags: Writes = new Map();
+  const statuses: Writes = new Map();
   codeLines(text, syntax).forEach((line, index) => {
     const at = index + 1;
-    for (const match of line.matchAll(USE_STATE)) if (isFlag(match[1])) note(flags, match[1], match[2], at);
-    for (const match of line.matchAll(ASSIGN)) {
-      const name = targetName(match[1], match[2]);
-      if (isFlag(name)) note(flags, name, match[3].toLowerCase(), at);
-    }
-    for (const match of line.matchAll(SETTER)) {
-      const name = fromSetter(match[1]);
-      if (isFlag(name)) note(flags, name, match[2].toLowerCase(), at);
-    }
-    for (const match of line.matchAll(STATUS_ASSIGN)) {
-      const name = targetName(match[1], match[2]);
-      if (STATUS.test(name)) note(statuses, name, match[4], at);
-    }
-    if (syntax === "hash") {
-      const flag = TCL_FLAG.exec(line);
-      if (flag && isFlag(flag[1])) note(flags, flag[1], String(TCL_TRUE.has(flag[2])), at);
-      const status = flag ? undefined : TCL_STATUS.exec(line);
-      if (status && STATUS.test(status[1])) note(statuses, status[1], status[2], at);
-    }
-    for (const match of line.matchAll(STATUS_SETTER)) {
-      const name = fromSetter(match[1]);
-      if (STATUS.test(name)) note(statuses, name, match[3], at);
-    }
+    noteFlagWrites(line, at, flags);
+    noteStatusAssigns(line, at, statuses);
+    if (syntax === "hash") noteTclWrites(line, at, flags, statuses);
+    noteStatusSetters(line, at, statuses);
   });
+  return signalsFrom(flags, statuses);
+}
+
+/** The values each flag or status field is written with, and the lines that write it. */
+type Writes = Map<string, { values: Set<string>; lines: Set<number> }>;
+
+function note(map: Writes, name: string, value: string, line: number): void {
+  const entry = map.get(name) ?? { values: new Set<string>(), lines: new Set<number>() };
+  entry.values.add(value);
+  entry.lines.add(line);
+  map.set(name, entry);
+}
+
+/** `useState` booleans, `x = true` assignments and `setX(false)` calls. */
+function noteFlagWrites(line: string, at: number, flags: Writes): void {
+  for (const match of line.matchAll(USE_STATE)) if (isFlag(match[1])) note(flags, match[1], match[2], at);
+  for (const match of line.matchAll(ASSIGN)) {
+    const name = targetName(match[1], match[2]);
+    if (isFlag(name)) note(flags, name, match[3].toLowerCase(), at);
+  }
+  for (const match of line.matchAll(SETTER)) {
+    const name = fromSetter(match[1]);
+    if (isFlag(name)) note(flags, name, match[2].toLowerCase(), at);
+  }
+}
+
+function noteStatusAssigns(line: string, at: number, statuses: Writes): void {
+  for (const match of line.matchAll(STATUS_ASSIGN)) {
+    const name = targetName(match[1], match[2]);
+    if (STATUS.test(name)) note(statuses, name, match[4], at);
+  }
+}
+
+/** Tcl's `set name value`: a flag when the value is boolean, otherwise a status. */
+function noteTclWrites(line: string, at: number, flags: Writes, statuses: Writes): void {
+  const flag = TCL_FLAG.exec(line);
+  if (flag && isFlag(flag[1])) note(flags, flag[1], String(TCL_TRUE.has(flag[2])), at);
+  const status = flag ? undefined : TCL_STATUS.exec(line);
+  if (status && STATUS.test(status[1])) note(statuses, status[1], status[2], at);
+}
+
+function noteStatusSetters(line: string, at: number, statuses: Writes): void {
+  for (const match of line.matchAll(STATUS_SETTER)) {
+    const name = fromSetter(match[1]);
+    if (STATUS.test(name)) note(statuses, name, match[3], at);
+  }
+}
+
+function signalsFrom(flags: Writes, statuses: Writes): Signal[] {
   const signals: Signal[] = [];
   const toggled = [...flags].filter(([, entry]) => entry.values.size === 2);
   if (toggled.length >= 2) {

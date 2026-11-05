@@ -13,30 +13,38 @@ export function parseOptions(args: string[], spec: Record<string, FlagKind>, com
   const parsed: Parsed = { positional: [], values: {}, lists: {}, booleans: new Set() };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
-    if (!arg.startsWith("--")) {
-      if (arg.startsWith("-") && arg !== "-") throw new Error(`Unknown ${command} option '${arg}'.`);
-      parsed.positional.push(arg);
+    if (arg.startsWith("--")) {
+      index += readOption(parsed, args, index, spec, command);
       continue;
     }
-    const equals = arg.indexOf("=");
-    const name = arg.slice(2, equals === -1 ? undefined : equals);
-    const kind = spec[name];
-    if (kind === undefined) throw new Error(`Unknown ${command} option '--${name}'.`);
-    if (kind === "boolean") {
-      if (equals !== -1) throw new Error(`${command} option '--${name}' takes no value.`);
-      parsed.booleans.add(name);
-      continue;
-    }
-    const value = equals === -1 ? args[++index] : arg.slice(equals + 1);
-    // A following option means the value was left out; `--name=--text` passes text that starts with dashes.
-    if (value === undefined || (equals === -1 && value.startsWith("--"))) {
-      throw new Error(`${command} option '--${name}' needs a value; use --${name}=<value> for one that starts with --.`);
-    }
-    if (kind === "list") parsed.lists[name] = [...(parsed.lists[name] ?? []), value];
-    else if (name in parsed.values) throw new Error(`${command} option '--${name}' was given twice.`);
-    else parsed.values[name] = value;
+    if (arg.startsWith("-") && arg !== "-") throw new Error(`Unknown ${command} option '${arg}'.`);
+    parsed.positional.push(arg);
   }
   return parsed;
+}
+
+/** Record the `--` option at `args[index]`, returning how many following arguments it consumed as its value. */
+function readOption(parsed: Parsed, args: string[], index: number, spec: Record<string, FlagKind>, command: string): number {
+  const arg = args[index]!;
+  const equals = arg.indexOf("=");
+  const name = arg.slice(2, equals === -1 ? undefined : equals);
+  const kind = spec[name];
+  if (kind === undefined) throw new Error(`Unknown ${command} option '--${name}'.`);
+  if (kind === "boolean") {
+    if (equals !== -1) throw new Error(`${command} option '--${name}' takes no value.`);
+    parsed.booleans.add(name);
+    return 0;
+  }
+  const separate = equals === -1;
+  const value = separate ? args[index + 1] : arg.slice(equals + 1);
+  // A following option means the value was left out; `--name=--text` passes text that starts with dashes.
+  if (value === undefined || (separate && value.startsWith("--"))) {
+    throw new Error(`${command} option '--${name}' needs a value; use --${name}=<value> for one that starts with --.`);
+  }
+  if (kind === "list") parsed.lists[name] = [...(parsed.lists[name] ?? []), value];
+  else if (name in parsed.values) throw new Error(`${command} option '--${name}' was given twice.`);
+  else parsed.values[name] = value;
+  return separate ? 1 : 0;
 }
 
 /** A positive integer option, or undefined when absent so the command's own default applies. */

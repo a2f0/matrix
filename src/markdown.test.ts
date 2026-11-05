@@ -10,6 +10,39 @@ test("finds ATX and Setext headings outside code fences", () => {
   ]);
 });
 
+test("keeps heading edge cases: empty, interrupting, unclosed fences, and bare underlines", () => {
+  const source = [
+    "#",
+    "#5 is prose",
+    "---",
+    "Para one",
+    "## Breaks in",
+    "---",
+    "~~~~",
+    "~~~",
+    "# Hidden by the longer fence",
+    "```",
+    "~~~~",
+    "   ###   Indented ###   ",
+    "    # Too indented",
+    "line a",
+    "  line b",
+    "===",
+    "",
+    "===",
+    "```js",
+    "``` not a close",
+    "# Hidden",
+  ].join("\n");
+  expect(headings(source)).toEqual([
+    { level: 1, text: "", line: 0 },
+    { level: 2, text: "#5 is prose", line: 1 },
+    { level: 2, text: "Breaks in", line: 4 },
+    { level: 3, text: "Indented", line: 11 },
+    { level: 1, text: "# Too indented line a line b", line: 12 },
+  ]);
+});
+
 test("reads a section up to the next heading at its level or above", () => {
   const source = "# Doc\n\n## Output capture\n\nOne\n\n### Detail\n\nTwo\n\n## Next\n\nThree\n";
   expect(section(source, "output capture")).toBe("\nOne\n\n### Detail\n\nTwo\n");

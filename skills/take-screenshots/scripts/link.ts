@@ -78,6 +78,8 @@ export interface LinkResult {
   readonly blocked?: string;
 }
 
+type Action = NonNullable<LinkResult["action"]>;
+
 /** Plan, and with apply perform, the link for one repository. */
 export function link(target: Target, artifacts: string, apply: boolean, supersede = false, now = new Date()): LinkResult {
   const store = storeDir(target, artifacts);
@@ -90,52 +92,56 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
     const foreign = claimNamespace(target, artifacts, apply);
     return foreign ? blocked(`${foreign}; remove ${LINK} from this clone`) : { ...base, before: "linked" };
   }
-  if (isInside(artifacts, target.root)) return blocked(`the store ${artifacts} is inside the repository`);
-  if (!ignorePatternMatchesFile(target.root)) return blocked(`the root .gitignore must list ${LINK} without a trailing slash, so the link is ignored`);
-  const foreign = claimNamespace(target, artifacts, false);
-  if (foreign) return blocked(foreign);
-  if (state.state === "elsewhere") return blocked(`${LINK} already links to ${state.target}; remove it by hand if that is stale`);
-  if (state.state === "other") return blocked(`${LINK} is neither a directory nor a link`);
-  let action: LinkResult["action"] = "link";
-  if (state.state === "directory") {
-    if (state.entries === 0) action = "replace-empty-directory";
-    else if (emptyOrMissing(store)) action = "move-and-link";
-    else if (supersede) action = "supersede-and-link";
-    else return blocked(`${LINK} holds a capture and the store already holds another; compare them, then rerun with --supersede to move this clone's aside`);
-  }
+  const refusal = linkRefusal(target, artifacts, state);
+  if (refusal) return blocked(refusal);
+  const action = linkAction(state, store, supersede);
+  if (!action)
+    return blocked(`${LINK} holds a capture and the store already holds another; compare them, then rerun with --supersede to move this clone's aside`);
   // Kept, never deleted: a person removes superseded captures once nothing needs them.
   const superseded =
     action === "supersede-and-link"
       ? path.join(artifacts, target.project, "superseded", `${target.name}-${now.toISOString().replace(/[:.]/g, "-")}`)
       : undefined;
   if (!apply) return { ...base, before: state.state, action, ...(superseded ? { superseded } : {}) };
+  const failure = applyLink(target, artifacts, store, state, action, superseded);
+  if (failure) return blocked(failure);
+  return { ...base, before: state.state, action, applied: true, ...(superseded ? { superseded } : {}) };
+}
+
+/** Why an unlinked clone cannot be linked automatically, checked in this order. */
+function linkRefusal(target: Target, artifacts: string, state: LinkState): string | undefined {
+  if (isInside(artifacts, target.root)) return `the store ${artifacts} is inside the repository`;
+  if (!ignorePatternMatchesFile(target.root)) return `the root .gitignore must list ${LINK} without a trailing slash, so the link is ignored`;
+  const foreign = claimNamespace(target, artifacts, false);
+  if (foreign) return foreign;
+  if (state.state === "elsewhere") return `${LINK} already links to ${state.target}; remove it by hand if that is stale`;
+  if (state.state === "other") return `${LINK} is neither a directory nor a link`;
+  return undefined;
+}
+
+/** What linking does with the clone's current `.screenshots`; undefined when both it and the store hold captures. */
+function linkAction(state: LinkState, store: string, supersede: boolean): Action | undefined {
+  if (state.state !== "directory") return "link";
+  if (state.entries === 0) return "replace-empty-directory";
+  if (emptyOrMissing(store)) return "move-and-link";
+  if (supersede) return "supersede-and-link";
+  return undefined;
+}
+
+/** Performs a planned link; returns why it stopped, or undefined once linked. */
+function applyLink(target: Target, artifacts: string, store: string, state: LinkState, action: Action, superseded: string | undefined): string | undefined {
   // Recheck at apply time: another process may have linked or written since the plan.
   const current = linkState(target, artifacts);
   if (current.state !== state.state || (current.state === "directory" && state.state === "directory" && current.entries !== state.entries)) {
-    return blocked(`${LINK} changed while planning; run link again`);
+    return `${LINK} changed while planning; run link again`;
   }
   const claimed = claimNamespace(target, artifacts, true);
-  if (claimed) return blocked(claimed);
+  if (claimed) return claimed;
   mkdirSync(path.dirname(store), { recursive: true });
   const linkPath = path.join(target.root, LINK);
   const relative = path.relative(realpathSync(target.root), path.join(realpathSync(path.dirname(store)), path.basename(store)));
-  if (action === "move-and-link") {
-    if (lexists(store)) rmdirSync(store); // empty, checked above; rename cannot replace it across all platforms
-    try {
-      renameSync(linkPath, store);
-    } catch (error) {
-      return blocked(`could not move ${LINK} into the store (${(error as NodeJS.ErrnoException).code ?? String(error)}); move it by hand`);
-    }
-  } else if (action === "supersede-and-link") {
-    mkdirSync(path.dirname(superseded!), { recursive: true });
-    if (lexists(superseded!)) return blocked(`${superseded} already exists; run link again`);
-    renameSync(linkPath, superseded!);
-  } else if (action === "replace-empty-directory") {
-    rmdirSync(linkPath); // fails, safely, if something was written meanwhile
-    mkdirSync(store, { recursive: true });
-  } else {
-    mkdirSync(store, { recursive: true });
-  }
+  const vacated = vacateLink(action, linkPath, store, superseded);
+  if (vacated) return vacated;
   try {
     symlinkSync(relative, linkPath);
   } catch (error) {
@@ -143,7 +149,29 @@ export function link(target: Target, artifacts: string, apply: boolean, supersed
     if (action === "supersede-and-link") renameSync(superseded!, linkPath);
     throw error;
   }
-  return { ...base, before: state.state, action, applied: true, ...(superseded ? { superseded } : {}) };
+  return undefined;
+}
+
+/** Moves the clone's `.screenshots` out of the way of the link, as the action says; returns why it could not. */
+function vacateLink(action: Action, linkPath: string, store: string, superseded: string | undefined): string | undefined {
+  if (action === "move-and-link") {
+    if (lexists(store)) rmdirSync(store); // empty, checked above; rename cannot replace it across all platforms
+    try {
+      renameSync(linkPath, store);
+    } catch (error) {
+      return `could not move ${LINK} into the store (${(error as NodeJS.ErrnoException).code ?? String(error)}); move it by hand`;
+    }
+  } else if (action === "supersede-and-link") {
+    mkdirSync(path.dirname(superseded!), { recursive: true });
+    if (lexists(superseded!)) return `${superseded} already exists; run link again`;
+    renameSync(linkPath, superseded!);
+  } else if (action === "replace-empty-directory") {
+    rmdirSync(linkPath); // fails, safely, if something was written meanwhile
+    mkdirSync(store, { recursive: true });
+  } else {
+    mkdirSync(store, { recursive: true });
+  }
+  return undefined;
 }
 
 function isInside(child: string, parent: string): boolean {

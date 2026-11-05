@@ -58,52 +58,65 @@ function agentToolCommands(): Map<string, Set<string>> {
   return commands;
 }
 
+/** Why a relative link in a doc does not resolve: a missing file or heading; empty for external links. */
+function brokenLink(file: string, target: string): string[] {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return [];
+  const [relative, hash] = target.split("#");
+  const destination = relative ? path.normalize(path.join(path.dirname(file), relative)) : file;
+  // Links outside the repository, such as the sibling secrets folder, vary by machine.
+  if (destination.startsWith("..")) return [];
+  if (!existsSync(path.join(ROOT, destination))) return [`${file}: ${target}`];
+  if (hash && destination.endsWith(".md") && !anchors(read(destination)).has(hash)) return [`${file}: ${target} has no such heading`];
+  return [];
+}
+
+interface KnownNames {
+  readonly scripts: Set<string>;
+  readonly actions: Set<string>;
+  readonly rules: Set<string>;
+}
+
+/** Package scripts, sweep actions, and audit rules a doc's code snippet names that do not exist. */
+function missingNames(file: string, snippet: string, { scripts, actions, rules }: KnownNames): string[] {
+  const missing: string[] = [];
+  for (const [, name, action] of snippet.matchAll(/\bbun run (?:--silent )?(?:--cwd \S+ )?([a-z][\w:-]*)(?: ([a-z]+))?/g)) {
+    if (!scripts.has(name!)) missing.push(`${file}: bun run ${name}`);
+    else if (name === "sweep" && action && !actions.has(action)) missing.push(`${file}: bun run sweep ${action}`);
+  }
+  for (const [, rule] of snippet.matchAll(/--rule[ =]([a-z-]+)/g)) if (!rules.has(rule!)) missing.push(`${file}: --rule ${rule}`);
+  return missing;
+}
+
+/** agent-tool commands and subcommands a doc's code snippet names that the pinned release lacks. */
+function missingAgentToolCommands(file: string, snippet: string, commands: Map<string, Set<string>>): string[] {
+  const missing: string[] = [];
+  for (const [, group, sub] of snippet.matchAll(/(?:^|[\s(])agent-tool(?: --(?:repo|config) \S+)* ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g)) {
+    const subs = commands.get(group!);
+    if (!subs) missing.push(`${file}: agent-tool ${group}`);
+    else if (sub && subs.size > 0 && !subs.has(sub)) missing.push(`${file}: agent-tool ${group} ${sub}`);
+  }
+  return missing;
+}
+
 describe("guidance", () => {
   test("every relative link and anchor resolves", () => {
-    const broken: string[] = [];
-    for (const file of DOCS) {
-      for (const target of linkTargets(read(file))) {
-        if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
-        const [relative, hash] = target.split("#");
-        const destination = relative ? path.normalize(path.join(path.dirname(file), relative)) : file;
-        // Links outside the repository, such as the sibling secrets folder, vary by machine.
-        if (destination.startsWith("..")) continue;
-        if (!existsSync(path.join(ROOT, destination))) broken.push(`${file}: ${target}`);
-        else if (hash && destination.endsWith(".md") && !anchors(read(destination)).has(hash)) broken.push(`${file}: ${target} has no such heading`);
-      }
-    }
+    const broken = DOCS.flatMap(file => linkTargets(read(file)).flatMap(target => brokenLink(file, target)));
     expect(broken).toEqual([]);
   });
 
   test("every package script, matrix command, and audit rule the docs name exists", () => {
-    const scripts = new Set(Object.keys((JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts));
-    const actions = new Set([...HELP.matchAll(/^ {2}sweep ([a-z]+)/gm)].map(([, action]) => action!));
-    const rules = new Set(RULES.map(rule => rule.id));
-    const missing: string[] = [];
-    for (const file of MATRIX_DOCS) {
-      for (const snippet of code(file)) {
-        for (const [, name, action] of snippet.matchAll(/\bbun run (?:--silent )?(?:--cwd \S+ )?([a-z][\w:-]*)(?: ([a-z]+))?/g)) {
-          if (!scripts.has(name!)) missing.push(`${file}: bun run ${name}`);
-          else if (name === "sweep" && action && !actions.has(action)) missing.push(`${file}: bun run sweep ${action}`);
-        }
-        for (const [, rule] of snippet.matchAll(/--rule[ =]([a-z-]+)/g)) if (!rules.has(rule!)) missing.push(`${file}: --rule ${rule}`);
-      }
-    }
+    const known: KnownNames = {
+      scripts: new Set(Object.keys((JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts)),
+      actions: new Set([...HELP.matchAll(/^ {2}sweep ([a-z]+)/gm)].map(([, action]) => action!)),
+      rules: new Set(RULES.map(rule => rule.id)),
+    };
+    const missing = MATRIX_DOCS.flatMap(file => code(file).flatMap(snippet => missingNames(file, snippet, known)));
     expect(missing).toEqual([]);
   });
 
   test("every agent-tool command the docs name exists in the pinned release", () => {
     const commands = agentToolCommands();
-    const missing: string[] = [];
-    for (const file of DOCS) {
-      for (const snippet of code(file)) {
-        for (const [, group, sub] of snippet.matchAll(/(?:^|[\s(])agent-tool(?: --(?:repo|config) \S+)* ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g)) {
-          const subs = commands.get(group!);
-          if (!subs) missing.push(`${file}: agent-tool ${group}`);
-          else if (sub && subs.size > 0 && !subs.has(sub)) missing.push(`${file}: agent-tool ${group} ${sub}`);
-        }
-      }
-    }
+    const missing = DOCS.flatMap(file => code(file).flatMap(snippet => missingAgentToolCommands(file, snippet, commands)));
     expect(missing).toEqual([]);
   });
 
