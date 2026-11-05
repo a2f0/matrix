@@ -19,7 +19,7 @@ publish another branch's icons; see [brand images](../AGENTS.md#brand-images).
 
 ```text
 matrix-artifacts/
-  <project>/         Named like the repository's matrix checkout
+  <project>/         The repository's GitHub name (see Namespaces)
     screenshots/     Linked as each clone's gitignored .screenshots
       capture.json   Provenance of the newest capture
       ...            The repository's own capture layout
@@ -72,7 +72,7 @@ clone selects itself.
 ## Provenance
 
 `capture.json` is written before the capture starts (`running`) and again when
-it ends (`complete` or `failed`), atomically:
+it ends (`complete`, `failed`, or `incomplete`), atomically:
 
 ```json
 {
@@ -132,35 +132,12 @@ runs, the error names the group to stop; delete the file once it is gone.
 
 ## Repository contract
 
-A repository that captures screenshots:
+What a repository that captures screenshots must provide (the `screenshots`
+package script, the ignore pattern, the output layout, and how builds read
+captures) is
+[adding capture to a repository](../skills/take-screenshots/references/adding-capture.md).
+`bun run audit --rule screenshots-store` checks the script and ignore pattern,
+and `--rule screenshots-gallery` checks that a website stages captures with
+agent-tool.
 
-- exposes the capture as the root package script `screenshots`, which writes
-  below `<root>/.screenshots/` in a layout the repository documents;
-- lists `.screenshots` in the root `.gitignore` without a trailing slash;
-- clears or replaces files inside `.screenshots`, never `.screenshots` itself,
-  which would replace the link with a local directory;
-- never captures as part of a build or deploy: builds read `.screenshots`, and
-  a build that publishes screenshots reads `.screenshots/capture.json` before
-  and after copying them, failing on a `running`, `failed`, `incomplete`, or
-  `dirty` capture, a record that changed during the copy, or a linked,
-  non-empty store with no record, and printing the capture's commit (a
-  website does this with agent-tool's `screenshots build` and renders the
-  result with its gallery elements);
-- captures browser phone layouts at the full 390x844 screen, so framed phones
-  keep a real phone's proportions (native store captures keep each device's
-  required size);
-- keeps build caches honest: a cached task that copies screenshots must hash
-  them through the link, or run uncached.
-
-`bun run audit --rule screenshots-store` checks the script and ignore pattern, and
-`--rule screenshots-gallery` checks that a website stages captures with agent-tool.
-[Adding capture to a repository](../skills/take-screenshots/references/adding-capture.md)
-describes the shared capture conventions.
-
-## Rules for agents
-
-- Capture through `artifacts capture`, never by running a repository's
-  `screenshots` package script directly, so the lock and provenance stay correct.
-- Before a deploy that publishes screenshots, run `artifacts status` and report
-  the capture's commit; recapture only when the screens it shows changed since.
-- Never copy screenshots into a repository or commit them.
+Agents follow the [take-screenshots skill's rules](../skills/take-screenshots/SKILL.md#rules).

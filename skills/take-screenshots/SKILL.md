@@ -14,7 +14,8 @@ recapturing. Brand images are not part of this: they render from
 
 ## Run it
 
-The script lives beside this file and needs only Bun. `link` and `capture` are
+The script, `scripts/artifacts.ts` with its sibling modules, lives beside this
+file and needs only Bun. `link` and `capture` are
 dry runs until `--apply`; `--json` gives agents the report.
 
 - From a matrix workspace: `bun run artifacts <command> [checkout...]`.
@@ -68,7 +69,10 @@ dry runs until `--apply`; `--json` gives agents the report.
   Never remove `.screenshots` itself; capture code clears files inside it.
 - Builds and deploys never capture. A build that publishes screenshots reads
   `.screenshots/capture.json` before and after copying, and refuses `running`,
-  `failed`, or `dirty` captures and a record that changed meanwhile.
+  `failed`, `incomplete`, or `dirty` captures and a record that changed
+  meanwhile.
+- Before a deploy that publishes screenshots, run `status` and report the
+  capture's commit; recapture only when the screens it shows changed since.
 
 ## Adding capture to a repository
 
