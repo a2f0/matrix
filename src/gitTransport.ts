@@ -23,7 +23,7 @@ interface Run { readonly status: number | null; readonly stdout: string; readonl
 export type Runner = (command: string, args: string[]) => Run;
 
 /** The SSH endpoint that keeps working where port 22 is blocked. */
-export const SSH_OVER_HTTPS = { hostname: "ssh.github.com", port: 443 } as const;
+const SSH_OVER_HTTPS = { hostname: "ssh.github.com", port: 443 } as const;
 
 const runner: Runner = (command, args) => {
   const result = spawnSync(command, args, { encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" }, timeout: 30_000 });

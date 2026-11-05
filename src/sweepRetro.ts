@@ -34,7 +34,7 @@ export function recordResolution(root: string, kind: string, cause: string, reso
 }
 
 /** Every recorded resolution, oldest first. */
-export function listResolutions(root: string): Resolution[] {
+function listResolutions(root: string): Resolution[] {
   const directory = resolutionsDirectory(root);
   if (!existsSync(directory)) return [];
   return readdirSync(directory)

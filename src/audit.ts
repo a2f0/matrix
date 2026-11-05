@@ -25,7 +25,7 @@ export const AGENT_TOOL_GRACE_DAYS = 7;
 const DAY_MS = 86_400_000;
 const EXACT_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 
-export type Outcome = { readonly status: "pass" } | { readonly status: "fail" | "skip"; readonly detail: string };
+type Outcome = { readonly status: "pass" } | { readonly status: "fail" | "skip"; readonly detail: string };
 
 export interface AuditContext {
   /** When each published release of a package appeared, by exact version; only remote rules call it. */
@@ -312,7 +312,7 @@ export const RULES: readonly Rule[] = [
   },
 ];
 
-export interface CheckoutAudit {
+interface CheckoutAudit {
   readonly repo: string;
   readonly path: string;
   readonly branch?: string | null;

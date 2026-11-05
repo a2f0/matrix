@@ -7,7 +7,7 @@ import { git } from "./git";
  * checkout's own Markdown is stale guidance. Patterns are POSIX extended
  * regular expressions for `git grep -E`.
  */
-export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: string; exempt?: RegExp }> = [
+const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: string; exempt?: RegExp }> = [
   { id: "review-reply-endpoint", pattern: "pulls/([^/[:space:]`]+/)?comments/[^/[:space:]`]+/replies", replacement: "agent-tool pr threads reply" },
   { id: "untracked-branch-switch", pattern: "git switch --no-track", replacement: "agent-tool branch create" },
   { id: "pr-checks-watch", pattern: "gh pr checks[^`]*--watch", replacement: "agent-tool pr checks --wait" },

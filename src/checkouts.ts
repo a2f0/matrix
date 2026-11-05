@@ -34,7 +34,7 @@ export interface CheckoutStatus {
   readonly error?: string;
 }
 
-export interface AgentToolInstall {
+interface AgentToolInstall {
   readonly pinned: string;
   /** Null when node_modules has no agent-tool package. */
   readonly installed: string | null;

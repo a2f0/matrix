@@ -15,7 +15,7 @@ export interface DiskSpace {
  * Validation suites, native builds, and browser caches need room: sweeps hit
  * ENOSPC with about 30 GiB free, so health asks for this much before one starts.
  */
-export const MIN_FREE_DISK_GIB = 50;
+const MIN_FREE_DISK_GIB = 50;
 const GIB = 1024 ** 3;
 
 export interface HealthInputs {

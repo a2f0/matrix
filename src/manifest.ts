@@ -59,7 +59,7 @@ export function parseManifest(source: string): Manifest {
   };
 }
 
-export function manifestPath(root: string): string { return path.join(root, "matrix.json"); }
+function manifestPath(root: string): string { return path.join(root, "matrix.json"); }
 export function loadManifest(root: string): Manifest { return parseManifest(readFileSync(manifestPath(root), "utf8")); }
 export function saveManifest(root: string, manifest: Manifest): void {
   writeFileSync(manifestPath(root), `${JSON.stringify(manifest, null, 2)}\n`);

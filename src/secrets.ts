@@ -8,7 +8,7 @@ const KINDS = { secret: "secrets.env", variable: "variables.env" } as const;
 type Kind = keyof typeof KINDS;
 const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
 
-export interface CiFile {
+interface CiFile {
   /** Repository settings this file manages; set on apply, never deleted. */
   deploy: string[];
   /** Settings already on GitHub that this file does not name; left untouched. */

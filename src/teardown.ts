@@ -18,7 +18,7 @@ export interface AgentToolTeardown {
   skipped: Array<{ file: string }>;
 }
 
-export interface RepoTeardown {
+interface RepoTeardown {
   readonly repo: string;
   readonly path: string;
   readonly ok: boolean;
@@ -47,7 +47,7 @@ export function isAgentToolTeardown(value: unknown): value is AgentToolTeardown 
 
 const name = (item: { id: string; label: string | null }) => item.label ? `${item.label} (${item.id})` : item.id;
 
-export function summarize(repo: string, path: string, report: AgentToolTeardown): RepoTeardown {
+function summarize(repo: string, path: string, report: AgentToolTeardown): RepoTeardown {
   return {
     repo,
     path,
