@@ -142,6 +142,8 @@ export function codeLines(text: string, syntax: "c" | "hash"): string[] {
   return lines.map(line => stripComments(line, state));
 }
 
+const QUOTES = new Set(['"', "'", "`"]);
+
 /** One line without its comments; `state.inBlock` carries an open block comment to the next line. */
 function stripComments(line: string, state: { inBlock: boolean }): string {
   let out = "";
@@ -151,15 +153,13 @@ function stripComments(line: string, state: { inBlock: boolean }): string {
       index = blockCommentEnd(line, index, state);
       continue;
     }
-    const char = line[index],
-      next = line[index + 1];
-    if (char === "/" && next === "*") {
+    if (line.startsWith("/*", index)) {
       state.inBlock = true;
       index += 2;
       continue;
     }
-    if (char === "/" && next === "/") break;
-    const end = char === '"' || char === "'" || char === "`" ? stringEnd(line, index) : index + 1;
+    if (line.startsWith("//", index)) break;
+    const end = QUOTES.has(line[index]) ? stringEnd(line, index) : index + 1;
     out += line.slice(index, end);
     index = end;
   }
