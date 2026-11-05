@@ -12,17 +12,27 @@ function biomeGuardsCycles(config: string): boolean {
 
 /** The text of the innermost `{...}` object enclosing `index`, or undefined. */
 function enclosingObject(text: string, index: number): string | undefined {
+  const start = openingBrace(text, index);
+  const end = start === undefined ? undefined : closingBrace(text, start);
+  return start === undefined || end === undefined ? undefined : text.slice(start, end + 1);
+}
+
+/** The index of the unmatched `{` at or before `index`, or undefined. */
+function openingBrace(text: string, index: number): number | undefined {
   let depth = 0;
-  let start = index;
-  for (; start >= 0; start--) {
+  for (let start = index; start >= 0; start--) {
     if (text[start] === "}") depth++;
-    else if (text[start] === "{" && depth-- === 0) break;
+    else if (text[start] === "{" && depth-- === 0) return start;
   }
-  if (start < 0) return undefined;
-  depth = 0;
+  return undefined;
+}
+
+/** The index of the `}` that closes the `{` at `start`, or undefined. */
+function closingBrace(text: string, start: number): number | undefined {
+  let depth = 0;
   for (let end = start; end < text.length; end++) {
     if (text[end] === "{") depth++;
-    else if (text[end] === "}" && --depth === 0) return text.slice(start, end + 1);
+    else if (text[end] === "}" && --depth === 0) return end;
   }
   return undefined;
 }
