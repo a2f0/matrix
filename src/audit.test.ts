@@ -66,6 +66,24 @@ describe("audit", () => {
     expect(result.rules.map(rule => rule.id)).not.toContain("agent-tool-latest");
   });
 
+  test("reports a checkout whose status could not be read without auditing it", () => {
+    const result = audit(root, ["a2f0/broken"], selectRules([], false), repo => ({ ...statusOf(repo), error: "git failed" }), context);
+    expect(result.checkouts).toEqual([{ repo: "a2f0/broken", path: "checkouts/broken", failed: [], skipped: [], error: "git failed" }]);
+    expect(result).toMatchObject({ ok: false, failures: {} });
+  });
+
+  test("lists failing repositories per rule in checkout order", () => {
+    const repos = [
+      checkout("first", { ".gitignore": "/.DS_Store\n" }),
+      checkout("fine"),
+      checkout("second", { "AGENTS.md": null, ".gitignore": "/.DS_Store\n" }),
+    ];
+    const result = audit(root, repos, selectRules(["agents-md", "ds-store-ignored"], false), statusOf, context);
+    // Rules appear in the order a checkout first fails them, not rule order.
+    expect(Object.keys(result.failures)).toEqual(["ds-store-ignored", "agents-md"]);
+    expect(result.failures).toEqual({ "ds-store-ignored": ["a2f0/first", "a2f0/second"], "agents-md": ["a2f0/second"] });
+  });
+
   test("reports guidance and repository hygiene failures", () => {
     const repo = checkout("bad", {
       "AGENTS.md": null,
@@ -411,6 +429,18 @@ describe("audit", () => {
       guard("cruiser-default", {
         "dependency-cruiser.config.ts":
           'export default { forbidden: [{ name: "no-circular", to: { circular: true } }], options: { tsPreCompilationDeps: true } };',
+      }),
+    ).toBe(missing);
+  });
+
+  test("ignores a no-circular mention outside any object or in an unclosed one", () => {
+    const options = "options: { tsPreCompilationDeps: true }";
+    expect(guard("cruiser-bare", { "dependency-cruiser.config.ts": `"no-circular" severity: "error" circular: true; export default { ${options} };` })).toBe(
+      missing,
+    );
+    expect(
+      guard("cruiser-unclosed", {
+        "dependency-cruiser.config.ts": `export default { ${options}, rule: { name: "no-circular", severity: "error", to: { circular: true }`,
       }),
     ).toBe(missing);
   });
