@@ -357,29 +357,31 @@ export function selectRules(ids: string[], remote: boolean): Rule[] {
 
 /** Check each checkout's working tree against the selected rules; reads local files only unless a remote rule runs. */
 export function audit(root: string, repos: string[], rules: Rule[], statusOf: (repo: string) => CheckoutStatus, context: AuditContext): Audit {
+  const checkouts = repos.map(repo => auditCheckout(root, repo, rules, statusOf(repo), context));
+  // Rules in the order a checkout first fails them, each listing its failing repositories in checkout order.
   const failures: Record<string, string[]> = {};
-  const checkouts = repos.map((repo): CheckoutAudit => {
-    const status = statusOf(repo);
-    const base = { repo, path: status.path, failed: [], skipped: [] };
-    if (status.error) return { ...base, error: status.error };
-    if (!status.present) return { ...base, error: "checkout missing; run sync" };
-    const checkout = openCheckout(repo, checkoutPath(root, repo));
-    const result: CheckoutAudit = { ...base, branch: status.branch, head: status.head, failed: [], skipped: [] };
-    for (const rule of rules) {
-      const outcome = rule.check(checkout, context);
-      if (outcome.status === "fail") {
-        result.failed.push({ rule: rule.id, detail: outcome.detail });
-        failures[rule.id] = [...(failures[rule.id] ?? []), repo];
-      } else if (outcome.status === "skip") result.skipped.push({ rule: rule.id, detail: outcome.detail });
-    }
-    return result;
-  });
+  for (const { repo, failed } of checkouts) for (const { rule } of failed) failures[rule] = [...(failures[rule] ?? []), repo];
   return {
     ok: checkouts.every(checkout => !checkout.error && checkout.failed.length === 0),
     rules: rules.map(({ id, summary, source }) => ({ id, summary, source })),
     failures,
     checkouts,
   };
+}
+
+/** One checkout's outcomes, or why it could not be audited. */
+function auditCheckout(root: string, repo: string, rules: Rule[], status: CheckoutStatus, context: AuditContext): CheckoutAudit {
+  const base = { repo, path: status.path, failed: [], skipped: [] };
+  if (status.error) return { ...base, error: status.error };
+  if (!status.present) return { ...base, error: "checkout missing; run sync" };
+  const checkout = openCheckout(repo, checkoutPath(root, repo));
+  const result: CheckoutAudit = { ...base, branch: status.branch, head: status.head, failed: [], skipped: [] };
+  for (const rule of rules) {
+    const outcome = rule.check(checkout, context);
+    if (outcome.status === "fail") result.failed.push({ rule: rule.id, detail: outcome.detail });
+    else if (outcome.status === "skip") result.skipped.push({ rule: rule.id, detail: outcome.detail });
+  }
+  return result;
 }
 
 /** Ask the registry through Bun, which matrix already requires, when each release of a package appeared. */

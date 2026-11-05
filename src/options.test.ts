@@ -25,6 +25,14 @@ test("rejects unknown, repeated, or incomplete options", () => {
   expect(() => parseOptions(["--markdown=yes"], spec, "sweep")).toThrow("takes no value");
 });
 
+test("takes empty and = values, a lone dash, and counts each form once", () => {
+  const parsed = parseOptions(["-", "--topic=", "--note=", "--note", "x=y"], spec, "sweep");
+  expect(parsed).toMatchObject({ positional: ["-"], values: { topic: "" }, lists: { note: ["", "x=y"] } });
+  expect(() => parseOptions(["--topic=a", "--topic", "b"], spec, "sweep")).toThrow("sweep option '--topic' was given twice.");
+  expect(() => parseOptions(["--topic"], spec, "sweep")).toThrow("sweep option '--topic' needs a value; use --topic=<value> for one that starts with --.");
+  expect(() => parseOptions(["--nope=1"], spec, "sweep")).toThrow("Unknown sweep option '--nope'.");
+});
+
 test("reads positive integers", () => {
   expect(count(undefined, "last")).toBeUndefined();
   expect(count("12", "last")).toBe(12);

@@ -26,7 +26,7 @@
     "enabled": true,
     "rules": {
       "preset": "recommended",
-      "complexity": { "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } } },
+      "complexity": { "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 12 } } },
       // House style asserts with `!` after a check the compiler cannot follow.
       "style": { "noNonNullAssertion": "off" },
       "suspicious": {

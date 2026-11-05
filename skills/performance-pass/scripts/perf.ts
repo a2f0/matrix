@@ -584,18 +584,21 @@ function pngHeader(body: Buffer): { width: number; height: number; channels: num
 function unfilterRows(raw: Buffer, width: number, height: number, channels: number): Uint8Array {
   const stride = width * channels;
   const pixels = new Uint8Array(stride * height);
-  for (let y = 0; y < height; y += 1) {
-    const filter = raw[y * (stride + 1)]!,
-      row = y * stride;
-    for (let x = 0; x < stride; x += 1) {
-      const value = raw[y * (stride + 1) + 1 + x]!;
-      const left = x >= channels ? pixels[row + x - channels]! : 0,
-        up = y ? pixels[row - stride + x]! : 0;
-      const corner = x >= channels && y ? pixels[row - stride + x - channels]! : 0;
-      pixels[row + x] = (value + predictor(filter, left, up, corner)) & 255;
-    }
-  }
+  for (let y = 0; y < height; y += 1) unfilterRow(raw, pixels, y, stride, channels);
   return pixels;
+}
+
+/** Reverses scanline `y`'s filter into `pixels`, reading the already decoded row above. */
+function unfilterRow(raw: Buffer, pixels: Uint8Array, y: number, stride: number, channels: number): void {
+  const filter = raw[y * (stride + 1)]!,
+    row = y * stride;
+  for (let x = 0; x < stride; x += 1) {
+    const value = raw[y * (stride + 1) + 1 + x]!;
+    const left = x >= channels ? pixels[row + x - channels]! : 0,
+      up = y ? pixels[row - stride + x]! : 0;
+    const corner = x >= channels && y ? pixels[row - stride + x - channels]! : 0;
+    pixels[row + x] = (value + predictor(filter, left, up, corner)) & 255;
+  }
 }
 
 /** The byte a PNG filter type predicts from the left, upper and upper-left neighbours. */

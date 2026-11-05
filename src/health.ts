@@ -167,6 +167,22 @@ function auditLine(audit: Health["audit"]): string {
   ].join("; ")}.`;
 }
 
+function checkoutsLine(checkouts: Health["checkouts"]): string {
+  return `- Checkouts: ${checkouts.ready} of ${checkouts.total} ready; ${checkouts.staleInstalls.length > 0 ? `stale installs in ${list(checkouts.staleInstalls)}` : "no stale installs"}; ${checkouts.unmanaged.length > 0 ? `unmanaged ${list(checkouts.unmanaged)}` : "no unmanaged entries"}.`;
+}
+
+function diskLine(disk: NonNullable<Health["disk"]>): string {
+  return `- Disk: ${gib(disk.free)} free of ${gib(disk.total)}${disk.low ? `, under the ${MIN_FREE_DISK_GIB} GiB a sweep needs` : ""}.`;
+}
+
+function gitLine(git: NonNullable<Health["git"]>): string {
+  return `- Git: ${git.problems.length === 0 ? "GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH" : `${plural(git.problems.length, "way", "ways")} to leave SSH for GitHub`}.`;
+}
+
+function runningLine(running: NonNullable<Health["running"]>): string {
+  return `- Running: ${running.leftover.length === 0 ? "nothing left running" : `teardown fails in ${list(running.leftover)}`}.`;
+}
+
 function discoveryLine(discovery: Health["discovery"]): string {
   return `- Discovery: ${discovery ? (discovery.added.length + discovery.notDiscovered.length === 0 ? "matrix.json matches the owner's repositories" : `${plural(discovery.added.length, "new repository", "new repositories")}, ${discovery.notDiscovered.length} no longer found`) : "not checked; run with --remote"}.`;
 }
@@ -183,15 +199,11 @@ export function markdownHealth(health: Health, at = new Date()): string {
     "",
     `Checked ${at.toISOString()}${health.remote ? ", including GitHub discovery and the npm registry" : " from local checkouts"}.`,
     "",
-    `- Checkouts: ${checkouts.ready} of ${checkouts.total} ready; ${checkouts.staleInstalls.length > 0 ? `stale installs in ${list(checkouts.staleInstalls)}` : "no stale installs"}; ${checkouts.unmanaged.length > 0 ? `unmanaged ${list(checkouts.unmanaged)}` : "no unmanaged entries"}.`,
+    checkoutsLine(checkouts),
     auditLine(audit),
-    ...(disk ? [`- Disk: ${gib(disk.free)} free of ${gib(disk.total)}${disk.low ? `, under the ${MIN_FREE_DISK_GIB} GiB a sweep needs` : ""}.`] : []),
-    ...(git
-      ? [
-          `- Git: ${git.problems.length === 0 ? "GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH" : `${plural(git.problems.length, "way", "ways")} to leave SSH for GitHub`}.`,
-        ]
-      : []),
-    ...(running ? [`- Running: ${running.leftover.length === 0 ? "nothing left running" : `teardown fails in ${list(running.leftover)}`}.`] : []),
+    ...(disk ? [diskLine(disk)] : []),
+    ...(git ? [gitLine(git)] : []),
+    ...(running ? [runningLine(running)] : []),
     discoveryLine(discovery),
     sweepsLine(sweeps),
     "",

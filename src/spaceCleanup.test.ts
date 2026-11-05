@@ -715,4 +715,33 @@ describe("space cleanup", () => {
     });
     expect(() => parseOptions(["-x"])).toThrow("unknown option -x\n\nUsage: space-cleanup");
   });
+
+  test("names each unsafe path's first failing check, in order", () => {
+    const root = fixture();
+    for (const rel of ["", "/abs", "a/../b", "./dist", "dist/.git/x"]) expect(unsafeReason(root, rel), rel).toBe("outside the repository");
+    expect(unsafeReason(root, "nothing-here")).toBe("missing");
+    symlinkSync(path.join(root, "dist"), path.join(root, "linked"));
+    expect(unsafeReason(root, "linked/index.js")).toBe("symlink");
+    // A repository named like credentials is reported as the repository.
+    mkdirSync(path.join(root, ".env.d/.git"), { recursive: true });
+    write(root, { ".env.d/build/x": "x" });
+    expect(unsafeReason(root, ".env.d/build")).toBe("inside repository .env.d");
+    expect(unsafeReason(root, "src/index.ts")).toBe("tracked");
+    expect(unsafeReason(root, "coverage")).toBe("not ignored");
+    expect(unsafeReason(root, "dist")).toBeUndefined();
+  });
+
+  test("joins process listings field by field", () => {
+    const table = [" 10   1  10 501 S    /usr/bin/node", " 11  10  10 501 S+   bun", "garbage"].join("\n");
+    const args = " 10 node build\n 11 bun test --watch";
+    const lsof = "n/ignored-before-any-pid\np10\nfcwd\nn/repo\np11\nn/repo/app\n";
+    expect(parseProcesses(table, args, lsof, 501, () => true)).toEqual([
+      { pid: 10, ppid: 1, pgid: 10, name: "node", args: "node build", cwd: "/repo" },
+      { pid: 11, ppid: 10, pgid: 10, name: "bun", args: "bun test --watch", cwd: "/repo/app" },
+    ]);
+    const many = [1, 2, 3, 4].map(pid => ` ${pid} 0 ${pid} 501 S proc${pid}`).join("\n");
+    expect(() => parseProcesses(many, "", "", 501, () => true)).toThrow(
+      /^cannot read the working directory of proc1 1, proc2 2, proc3 3, \.\.\.; without every process's/,
+    );
+  });
 });
