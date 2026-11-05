@@ -61,9 +61,12 @@
         "name": "commands",
         "include": [
           "src/audit.ts",
+          "src/auditCheckout.ts",
+          "src/cycleGuards.ts",
           "src/discover.ts",
           "src/gitTransport.ts",
           "src/secrets.ts",
+          "src/superseded.ts",
           "src/sweeps.ts"
         ]
       },

@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { openCheckout, RULES, supersededGuidance } from "./audit";
+import { RULES } from "./audit";
+import { openCheckout } from "./auditCheckout";
 import { HELP, ROOT } from "./cli";
 import { anchors, linkTargets, splitCode } from "./markdown";
+import { supersededGuidance } from "./superseded";
 
 /**
  * AGENTS.md grew fivefold in its first month, one lesson at a time, and every

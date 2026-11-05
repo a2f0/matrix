@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
-import path from "node:path";
+import { type Checkout, excludeManaged, openCheckout, sourceGlobs, TEST_PATH, workflows } from "./auditCheckout";
 import { type CheckoutStatus, redact } from "./checkouts";
 import { git } from "./git";
+import { typescriptGuarded } from "./cycleGuards";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
+import { supersededGuidance } from "./superseded";
 import { plural } from "./text";
 
 /**
@@ -25,16 +26,6 @@ const DAY_MS = 86_400_000;
 const EXACT_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 
 export type Outcome = { readonly status: "pass" } | { readonly status: "fail" | "skip"; readonly detail: string };
-
-/** One checkout as rules see it: its files, tracked paths, and package manifest. */
-export interface Checkout {
-  readonly repo: string;
-  readonly directory: string;
-  read(file: string): string | undefined;
-  exists(file: string): boolean;
-  tracked(...pathspecs: string[]): string[];
-  readonly packageJson?: Record<string, unknown>;
-}
 
 export interface AuditContext {
   /** When each published release of a package appeared, by exact version; only remote rules call it. */
@@ -66,110 +57,6 @@ function compareVersions(left: string, right: string): number {
   const b = right.split(".").map(Number);
   for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index]! - b[index]!;
   return 0;
-}
-
-/**
- * Guidance that a shared command replaced. Matrix stopped carrying these
- * fallbacks once every checkout pinned MINIMUM_AGENT_TOOL; a hit in a
- * checkout's own Markdown is stale guidance. Patterns are POSIX extended
- * regular expressions for `git grep -E`.
- */
-export const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: string; exempt?: RegExp }> = [
-  { id: "review-reply-endpoint", pattern: "pulls/([^/[:space:]`]+/)?comments/[^/[:space:]`]+/replies", replacement: "agent-tool pr threads reply" },
-  { id: "untracked-branch-switch", pattern: "git switch --no-track", replacement: "agent-tool branch create" },
-  { id: "pr-checks-watch", pattern: "gh pr checks[^`]*--watch", replacement: "agent-tool pr checks --wait" },
-  { id: "push-head-upstream", pattern: "git push (-u|--set-upstream) origin HEAD", replacement: "agent-tool branch push <reviewed-head> --remote origin" },
-  // A leased deletion is the stronger cleanup some checkouts require, not the hook-running push it replaced.
-  { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
-  // Rewriting GitHub SSH URLs to HTTPS reaches the keychain credential helper (a2f0/matrix#61).
-  { id: "https-insteadof", pattern: "url\\.\"?https://github\\.com/?\"?\\.[iI]nstead[oO]f", replacement: "SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh)" },
-];
-
-/** Biome's noImportCycles as an error that counts type-only imports, which the rule's default skips. */
-function biomeGuardsCycles(config: string): boolean {
-  // JSONC: drop comments outside strings, so a commented-out rule does not count.
-  const active = config.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_match, quoted: string | undefined) => quoted ?? "");
-  const rule = /"noImportCycles"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})/.exec(active)?.[1];
-  return rule !== undefined && /"level"\s*:\s*"error"/.test(rule) && /"ignoreTypes"\s*:\s*false/.test(rule);
-}
-
-/** The text of the innermost `{...}` object enclosing `index`, or undefined. */
-function enclosingObject(text: string, index: number): string | undefined {
-  let depth = 0;
-  let start = index;
-  for (; start >= 0; start--) {
-    if (text[start] === "}") depth++;
-    else if (text[start] === "{" && depth-- === 0) break;
-  }
-  if (start < 0) return undefined;
-  depth = 0;
-  for (let end = start; end < text.length; end++) {
-    if (text[end] === "{") depth++;
-    else if (text[end] === "}" && --depth === 0) return text.slice(start, end + 1);
-  }
-  return undefined;
-}
-
-/**
- * A dependency-cruiser rule set (a named config or a module importing
- * dependency-cruiser) with an error-level no-circular rule that sees type-only
- * imports: those are dropped unless tsPreCompilationDeps is true or "specify",
- * or the swc parser, which keeps them, reads the sources.
- */
-function cruiserGuardsCycles(file: string, text: string): boolean {
-  const config = /(^|\/)(\.dependency-cruiser|dependency-cruiser\.config)\.[a-z]+$/.test(file) || /["']dependency-cruiser["']/.test(text);
-  const typeAware = /tsPreCompilationDeps["']?\s*:\s*(true|["']specify["'])/.test(text) || /parser["']?\s*:\s*["']swc["']/.test(text);
-  if (!config || !typeAware) return false;
-  return [...text.matchAll(/["']no-circular["']/g)].some(match => {
-    const rule = enclosingObject(text, match.index);
-    return rule !== undefined && /severity["']?\s*:\s*["']error["']/.test(rule) && /circular["']?\s*:\s*true/.test(rule);
-  });
-}
-
-function typescriptGuarded(checkout: Checkout): boolean {
-  const configs = (patterns: string[]) => checkout.tracked(...patterns).map(file => ({ file, text: checkout.read(file) ?? "" }));
-  if (configs([":(glob)**/biome.json", ":(glob)**/biome.jsonc"]).some(({ text }) => biomeGuardsCycles(text))) return true;
-  // dependency-cruiser rules can live in any module the check imports (a2f0.net keeps them in a policy file).
-  const cruiser = git(checkout.directory, ["grep", "-l", "-z", "-I", "-F", "-e", "no-circular", "--", "*.ts", "*.mts", "*.cts", "*.js", "*.cjs", "*.mjs", "*.json"]);
-  if (cruiser.status !== 0 && cruiser.status !== 1) throw new Error(`git grep failed in ${checkout.repo}: ${cruiser.stderr}`);
-  const candidates = cruiser.stdout.split("\0").filter(file => file && !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file));
-  if (candidates.some(file => cruiserGuardsCycles(file, checkout.read(file) ?? ""))) return true;
-  if (agentToolGraphChecked(checkout)) return true;
-  return checkout.tracked(":(glob)**/moduleGraph.test.ts", ":(glob)**/module-graph.test.ts").length > 0;
-}
-
-/** Whether a run-group command array (any `command` field) runs `graph check`. */
-function commandRunsGraphCheck(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(commandRunsGraphCheck);
-  const record = object(value);
-  if (!record) return false;
-  const command = record.command;
-  if (Array.isArray(command) && command.some((part, index) => part === "graph" && command[index + 1] === "check")) return true;
-  return Object.values(record).some(commandRunsGraphCheck);
-}
-
-/**
- * agent-tool's shared check: a `graph` section in agent-tool.json, run as
- * `graph check` by a package script, a run group's command, a workflow step,
- * or a runner script under scripts/. Generated permission rules name the command too, so they never count.
- */
-function agentToolGraphChecked(checkout: Checkout): boolean {
-  const graph = object(parseObject(checkout.read("agent-tool.json"))?.graph);
-  if (!Array.isArray(graph?.include) || graph.include.length === 0) return false;
-  const runsIt = (text: string) => /\bgraph\s+check\b/.test(text);
-  const scripts = Object.values(object(checkout.packageJson?.scripts) ?? {});
-  if (scripts.some(script => typeof script === "string" && runsIt(script))) return true;
-  const workflows = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => checkout.read(file) ?? "");
-  if (workflows.some(text => text.split("\n").some(line => /^\s*(-\s*)?run:/.test(line) && runsIt(line)))) return true;
-  if (checkout.tracked(":(glob)scripts/**/*.json").some(file => commandRunsGraphCheck(parseObject(checkout.read(file))))) return true;
-  // A repository's own runner script passing the arguments (skyline's scripts/testing/check.ts).
-  return checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)scripts/**/*.${extension}`))
-    .filter(file => !/\.(test|spec)\.[cm]?[jt]s$/.test(file))
-    .some(file => /["'`]graph["'`]\s*,\s*["'`]check["'`]/.test(checkout.read(file) ?? ""));
-}
-
-function managedSkills(checkout: Checkout): string[] {
-  return Object.keys(object(parseObject(checkout.read(".agent-tool-skills.json"))?.files) ?? {});
 }
 
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
@@ -263,9 +150,8 @@ export const RULES: readonly Rule[] = [
     source: "AGENTS.md#output-capture",
     check: checkout => {
       const found: string[] = [];
-      const scripts = object(checkout.packageJson?.scripts) ?? {};
       if (checkout.packageJson === undefined) found.push("no root package.json for the agent:run and agent:logs scripts");
-      else for (const name of ["agent:run", "agent:logs"]) if (typeof scripts[name] !== "string") found.push(`no ${name} script`);
+      else for (const name of ["agent:run", "agent:logs"]) if (typeof checkout.scripts[name] !== "string") found.push(`no ${name} script`);
       const guidance = checkout.read("AGENTS.md");
       if (guidance === undefined) found.push("no AGENTS.md for the Output capture section");
       else {
@@ -325,7 +211,7 @@ export const RULES: readonly Rule[] = [
       if (!checkout.exists("assets/brand")) return skip("no assets/brand");
       const found: string[] = [];
       if (!checkout.exists("assets/brand/logo.svg")) found.push("no assets/brand/logo.svg");
-      if (!object(parseObject(checkout.read("agent-tool.json"))?.images)) found.push("agent-tool.json declares no images");
+      if (!object(checkout.agentToolJson?.images)) found.push("agent-tool.json declares no images");
       const rasters = checkout.tracked("assets/brand").filter(file => /\.(png|ico|icns|jpe?g|gif|webp|bmp|tiff?)$/i.test(file));
       if (rasters.length > 0) found.push(`committed rasters: ${rasters.join(", ")}`);
       return problems(found);
@@ -337,7 +223,7 @@ export const RULES: readonly Rule[] = [
     source: "docs/artifacts.md#repository-contract",
     check: checkout => {
       const ignore = (checkout.read(".gitignore") ?? "").split("\n").map(line => line.trim());
-      const script = object(checkout.packageJson?.scripts)?.screenshots;
+      const script = checkout.scripts.screenshots;
       if (typeof script !== "string" && !ignore.some(line => /^(\/|\*\*\/)?\.screenshots\/?$/.test(line))) return skip("captures no screenshots");
       const found: string[] = [];
       if (typeof script !== "string") found.push("ignores .screenshots but has no screenshots package script");
@@ -351,18 +237,18 @@ export const RULES: readonly Rule[] = [
     summary: "A website that shows captured screenshots stages them with agent-tool's screenshots build, not a copied guard",
     source: "docs/artifacts.md#repository-contract",
     check: checkout => {
-      const script = object(checkout.packageJson?.scripts)?.screenshots;
+      const script = checkout.scripts.screenshots;
       const websites = checkout.tracked(":(glob)**/astro.config.*");
       if (typeof script !== "string" || websites.length === 0) return skip("no website that shows captured screenshots");
       const found: string[] = [];
-      const targets = object(object(parseObject(checkout.read("agent-tool.json"))?.screenshots)?.targets);
+      const targets = object(object(checkout.agentToolJson?.screenshots)?.targets);
       if (!targets || Object.keys(targets).length === 0) found.push("agent-tool.json declares no screenshots targets");
       // A declared target proves nothing unless some build or dev script runs it.
       const scripts = checkout.tracked(":(glob)**/package.json")
-        .flatMap(file => Object.values(object(object(parseObject(checkout.read(file)))?.scripts) ?? {}));
+        .flatMap(file => Object.values(object(parseObject(checkout.read(file))?.scripts) ?? {}));
       if (!scripts.some(value => typeof value === "string" && /\bagent-tool\b[^&|;]*\sscreenshots build\b/.test(value))) found.push("no package script runs agent-tool screenshots build");
-      const copies = checkout.tracked(...["ts", "mts", "js", "mjs"].map(extension => `:(glob)**/*.${extension}`))
-        .filter(file => !/(^|\/)(tests?|__tests__|fixtures?)\/|\.(test|spec)\.[cm]?[jt]s$/.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
+      const copies = checkout.tracked(...sourceGlobs("**/"))
+        .filter(file => !TEST_PATH.test(file) && /\bwithSharedCapture\b/.test(checkout.read(file) ?? ""));
       if (copies.length > 0) found.push(`copies the capture guard: ${copies.join(", ")}`);
       return problems(found);
     },
@@ -377,9 +263,8 @@ export const RULES: readonly Rule[] = [
       for (const file of [".agent-tool-permissions.json", ".claude/settings.json", ".codex/rules/agent-tool.rules"]) {
         if (!checkout.exists(file)) found.push(`no ${file}; run agent-tool permissions install --apply`);
       }
-      const script = object(checkout.packageJson?.scripts)?.["agents:check"];
-      const workflows = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => checkout.read(file) ?? "");
-      if (!(typeof script === "string" && script.includes("permissions check")) && !workflows.some(text => text.includes("permissions check"))) {
+      const script = checkout.scripts["agents:check"];
+      if (!(typeof script === "string" && script.includes("permissions check")) && !workflows(checkout).some(text => text.includes("permissions check"))) {
         found.push("neither the agents:check script nor a workflow runs agent-tool permissions check");
       }
       return problems(found);
@@ -390,7 +275,7 @@ export const RULES: readonly Rule[] = [
     summary: "TypeScript or Python sources have a merge-gating guard against import cycles, type-only imports included",
     source: "docs/tooling.md#import-cycles-and-layering",
     check: checkout => {
-      const exclusions = managedSkills(checkout).map(file => `:(exclude,literal)${file}`);
+      const exclusions = excludeManaged(checkout);
       const typescript = checkout.tracked(...["ts", "tsx", "mts", "cts"].map(extension => `:(glob)**/*.${extension}`), ...exclusions)
         .some(file => !/\.d\.[cm]?ts$/.test(file));
       const python = checkout.tracked(":(glob)**/__init__.py", ...exclusions).length > 0;
@@ -426,48 +311,6 @@ export const RULES: readonly Rule[] = [
     check: checkout => problems(supersededGuidance(checkout)),
   },
 ];
-
-/**
- * Superseded commands in a checkout's tracked Markdown, skipping managed skills
- * and any other paths given, one finding per pattern.
- */
-export function supersededGuidance(checkout: Checkout, skip: string[] = []): string[] {
-  const exclusions = [...managedSkills(checkout), ...skip].map(file => `:(exclude,literal)${file}`);
-  const found: string[] = [];
-  for (const entry of SUPERSEDED) {
-    // -z separates path, line number, and text with NUL, so a path may contain colons.
-    const result = git(checkout.directory, ["grep", "-z", "-n", "-I", "-E", "-e", entry.pattern, "--", "*.md", ...exclusions]);
-    if (result.status === 1) continue;
-    if (result.status !== 0) throw new Error(`git grep failed in ${checkout.repo}: ${result.stderr}`);
-    const hits = result.stdout.split("\n")
-      .map(line => line.split("\0"))
-      .filter(([, , ...text]) => !entry.exempt?.test(text.join("\0")))
-      .map(([file, line]) => `${file}:${line}`);
-    if (hits.length === 0) continue;
-    found.push(`${entry.id} at ${hits.slice(0, 5).join(", ")}${hits.length > 5 ? ` and ${hits.length - 5} more` : ""} (use ${entry.replacement})`);
-  }
-  return found;
-}
-
-function isFile(file: string): boolean {
-  try { return lstatSync(file).isFile(); } catch { return false; }
-}
-
-export function openCheckout(repo: string, directory: string): Checkout {
-  const read = (file: string) => (isFile(path.join(directory, file)) ? readFileSync(path.join(directory, file), "utf8") : undefined);
-  return {
-    repo,
-    directory,
-    read,
-    exists: file => existsSync(path.join(directory, file)),
-    tracked: (...pathspecs) => {
-      const result = git(directory, ["ls-files", "-z", "--", ...pathspecs]);
-      if (result.status !== 0) throw new Error(`git ls-files failed in ${repo}: ${result.stderr}`);
-      return result.stdout.split("\0").filter(Boolean);
-    },
-    packageJson: parseObject(read("package.json")),
-  };
-}
 
 export interface CheckoutAudit {
   readonly repo: string;
