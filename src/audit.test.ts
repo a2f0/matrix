@@ -562,6 +562,18 @@ describe("audit", () => {
     );
   });
 
+  test("skips agent-tool's managed skill sources, which consumers install as managed skills", () => {
+    const prohibition = "Never prune with raw `git push --delete`.\n";
+    const producer = { "package.json": JSON.stringify({ name: "@a2f0/agent-tool" }), "skills/ship-pr/SKILL.md": prohibition };
+    expect(failures(checkout("agent-tool", producer), ["superseded-guidance"])).toEqual({});
+    expect(failures(checkout("agent-tool-docs", { ...producer, "docs/ship.md": prohibition }), ["superseded-guidance"])["superseded-guidance"]).toBe(
+      "push-delete at docs/ship.md:1 (use agent-tool repo cleanup)",
+    );
+    expect(failures(checkout("consumer", { "skills/ship-pr/SKILL.md": prohibition }), ["superseded-guidance"])["superseded-guidance"]).toBe(
+      "push-delete at skills/ship-pr/SKILL.md:1 (use agent-tool repo cleanup)",
+    );
+  });
+
   test("requires origin to fetch and push over SSH", () => {
     const repo = checkout("https");
     const directory = path.join(root, "checkouts", "https");
