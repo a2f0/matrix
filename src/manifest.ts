@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { errorMessage } from "./text";
 
@@ -70,8 +71,17 @@ function manifestPath(root: string): string {
 export function loadManifest(root: string): Manifest {
   return parseManifest(readFileSync(manifestPath(root), "utf8"));
 }
+/** Write a new file beside matrix.json and rename it into place, so a failed write leaves the old manifest whole. */
 export function saveManifest(root: string, manifest: Manifest): void {
-  writeFileSync(manifestPath(root), `${JSON.stringify(manifest, null, 2)}\n`);
+  const file = manifestPath(root);
+  const temporary = path.join(root, `.matrix.json.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx", mode: statSync(file).mode & 0o777 });
+    renameSync(temporary, file);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 export function repoName(repo: string): string {

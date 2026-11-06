@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { checkoutPath, cloneUrl, isGitHubSsh, parseGitHubRepo, parseManifest, selectRepos } from "./manifest";
+import { checkoutPath, cloneUrl, isGitHubSsh, loadManifest, parseGitHubRepo, parseManifest, saveManifest, selectRepos } from "./manifest";
+import { tempDir } from "./testFixtures";
 
 const valid = {
   schemaVersion: 1,
@@ -34,6 +36,31 @@ describe("parseManifest", () => {
     expect(() => parse({ ...valid, repos: ["a2f0/tools", "other/Tools"] })).toThrow("reuses checkout name 'Tools'");
     expect(parse({ ...valid, discover: { ...valid.discover, exclude: ["a2f0/tools", "other/tools"] } }).discover.exclude).toHaveLength(2);
     expect(() => parseManifest("{")).toThrow("matrix.json: manifest is not JSON");
+  });
+});
+
+describe("saveManifest", () => {
+  test("replaces matrix.json whole", () => {
+    const root = tempDir("matrix-manifest-");
+    writeFileSync(path.join(root, "matrix.json"), `${JSON.stringify(valid)}\n`);
+    saveManifest(root, { ...parse(valid), repos: [...valid.repos, "a2f0/zz"] });
+    expect(loadManifest(root).repos).toEqual([...valid.repos, "a2f0/zz"]);
+    expect(readdirSync(root)).toEqual(["matrix.json"]);
+  });
+
+  test("keeps the previous matrix.json when the write fails partway", () => {
+    const root = tempDir("matrix-manifest-");
+    const before = `${JSON.stringify(valid)}\n`;
+    writeFileSync(path.join(root, "matrix.json"), before);
+    // A file-size limit makes the write fail after its first block, as a full disk would.
+    const repos = Array.from({ length: 400 }, (_, index) => `a2f0/repo-${index}`);
+    const script = `import { saveManifest } from ${JSON.stringify(path.join(import.meta.dir, "manifest.ts"))};
+saveManifest(${JSON.stringify(root)}, { ...${JSON.stringify(valid)}, repos: ${JSON.stringify(repos)} });`;
+    const result = spawnSync("/bin/sh", ["-c", 'trap "" XFSZ; ulimit -f 4; exec "$0" -e "$1"', process.execPath, script], { encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("EFBIG");
+    expect(readFileSync(path.join(root, "matrix.json"), "utf8")).toBe(before);
+    expect(readdirSync(root)).toEqual(["matrix.json"]);
   });
 });
 
