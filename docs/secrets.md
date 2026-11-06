@@ -106,6 +106,26 @@ codex mcp add sentry -- ~/github/matrix/scripts/sentry/mcp.sh
 hermes mcp add sentry --command ~/github/matrix/scripts/sentry/mcp.sh
 ```
 
+For omp, use `/mcp add` in an interactive session, select **User level**, and
+register the same launcher as a stdio command. Equivalently, merge this entry
+into the active profile's user `mcp.json` (`~/.omp/agent/mcp.json` by default),
+replacing the example command with the primary clone's absolute path:
+
+```json
+{
+  "mcpServers": {
+    "sentry": {
+      "type": "stdio",
+      "command": "/absolute/path/to/matrix/scripts/sentry/mcp.sh"
+    }
+  }
+}
+```
+
+Preserve other server entries and run `/mcp reload`. No token belongs in that
+file. Register it once in user scope, not in each checkout; omp does not import
+other harnesses' user-level MCP registrations unless their providers are enabled.
+
 Without an MCP client, read the token into a shell variable and call the API
 (`https://sentry.io/api/0/organizations/tearleads/issues/`) with it, never on a
 command line or in output. API events carry only allowlisted fields, so a

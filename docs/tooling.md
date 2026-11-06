@@ -279,6 +279,72 @@ Repositories that do not use Bun's test runner keep `agent:run` for their tests;
 `agent-tool bun test` is what harness permission rules allow without a prompt
 ([harness permissions](#harness-permissions)).
 
+## omp
+
+Start the coordinator with `omp` from the matrix root after the README's
+Quick start. No separate instruction file or copied skill tree is needed:
+omp loads the root `AGENTS.md` and discovers the managed `.claude/skills` and
+`.agents/skills` layouts, deduplicating identical skills. Matrix's
+`.omp/config.yml` adds `skills/` through `skills.customDirectories`, so its
+repository-owned skills come from this checkout rather than machine-global
+links to another clone. This project setting replaces any global custom-directory
+list; it does not disable normal user or managed skill discovery.
+Custom-directory skills win same-name collisions; differing global copies remain
+available under namespaced names.
+Check the resolved paths with `omp skill list --json`. Restart the session
+after changing skill discovery.
+
+Keep the coordinator at the matrix root. A task brief must name the checkout,
+require reading its `AGENTS.md` and linked setup/release guidance, and carry
+the relevant sweep rules and commands: omp task subagents do not receive
+`AGENTS.md` automatically. They inherit the coordinator's discovered skills,
+so read the checkout's own installed shipping skill by path when its
+agent-tool pin differs. Delegate at most four checkouts and run at most two
+heavy suites, as [sweep scheduling](sweeps.md#scheduling) requires.
+
+For a standalone checkout session, use `omp --cwd checkouts/<name>`.
+That checkout's guidance and skills apply; matrix's `.omp/config.yml` does
+not follow it into a different working directory. Install the checkout's
+documented dependencies and hooks before running its scripts. `sync` clones,
+fetches, and fast-forwards clean default branches; it does not install dependencies.
+For checkouts that pin agent-tool, `status.staleInstalls` also includes fresh
+clones without an installed copy.
+
+### Language servers
+
+Install dependencies before starting omp so project-local binaries are visible.
+omp detects servers from root markers and available binaries; no matrix-wide
+LSP override is needed. Matrix pins TypeScript 7, so omp selects
+`typescript-native` (`tsc --lsp --stdio`) from `node_modules/.bin`, not the
+globally installed `typescript-language-server`. That server remains useful
+for checkouts on TypeScript 6 or earlier. Keep each checkout's pinned compiler;
+do not downgrade it to fit a language server.
+
+After installing dependencies in an already-running session, invoke the LSP
+tool with `{"action":"reload","file":"*"}`, then request a hover, definition,
+or references on a real source symbol. `status` alone only proves that a
+binary is configured, not that it works. Use LSP for symbol-aware navigation
+and refactors; it does not replace the repository's validation.
+
+### Review, approvals, and optional services
+
+omp can coordinate `ship-pr`; the pinned agent-tool's independent reviewer
+adapters remain Claude Code, Codex, and OpenCode. Choose a different
+model/provider from the author where possible. No omp reviewer adapter is
+required to author or ship from omp.
+
+The generated Claude/Codex command permission files are not omp approval
+policy. Keep the user's omp approval settings; the workspace does not enable
+yolo or grant blanket tool access. For optional Sentry access, register the
+existing launcher in omp's user MCP config as [secrets](secrets.md#sentry-mcp)
+describes, never a token in project config.
+
+These discovery and LSP details follow omp 18.17.0's
+[skills](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/skills.md),
+[context](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/context-files.md), and
+[LSP](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/lsp-config.md) contracts.
+They are runtime checks, not a requirement to add `.omp` files to every checkout.
+
 ## State machines
 
 Implicit state machines are code that moves through modes without naming
@@ -290,7 +356,7 @@ events, and one pure transition function, with async work tagged so only the
 current request can finish.
 
 Three pieces carry the standard, and all of them work in Claude Code, Codex,
-OpenCode, and Hermes:
+OpenCode, Hermes, and omp:
 
 - The `explicit-state-machines` skill, which agent-tool ships as a managed
   skill from 0.1.51 (`agent-tool skills install --apply` puts it in
