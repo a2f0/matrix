@@ -5,7 +5,7 @@
     "": {
       "name": "matrix",
       "devDependencies": {
-        "@a2f0/agent-tool": "0.1.38",
+        "@a2f0/agent-tool": "0.1.44",
         "@biomejs/biome": "2.6.4",
         "@types/bun": "1.4.4",
         "knip": "6.44.1",
@@ -15,7 +15,7 @@
     },
   },
   "packages": {
-    "@a2f0/agent-tool": ["@a2f0/agent-tool@0.1.38", "", { "dependencies": { "@resvg/resvg-wasm": "2.6.2" }, "bin": { "agent-tool": "src/index.ts" } }, "sha512-FJ1lzUSLBAl73paCnhPyU0lcqpEAaoXOHqKHqMPed7QyIaZg6KqxG9tST9+7S6uSPGqEFRIkj2a1KmkVxKZsRQ=="],
+    "@a2f0/agent-tool": ["@a2f0/agent-tool@0.1.44", "", { "dependencies": { "@resvg/resvg-wasm": "2.6.2" }, "bin": { "agent-tool": "src/index.ts" } }, "sha512-GHSVpVHl492nkKP36ZcFJGcnwk4udKp7utL9g5mi8FiJy86TQYA3pqFqsMp94Y6iw8FE/gvsE6eUq5z7Jtu1pw=="],
 
     "@biomejs/biome": ["@biomejs/biome@2.6.4", "", { "optionalDependencies": { "@biomejs/cli-android-arm64": "2.6.4", "@biomejs/cli-android-x64": "2.6.4", "@biomejs/cli-darwin-arm64": "2.6.4", "@biomejs/cli-darwin-x64": "2.6.4", "@biomejs/cli-linux-arm64": "2.6.4", "@biomejs/cli-linux-arm64-musl": "2.6.4", "@biomejs/cli-linux-x64": "2.6.4", "@biomejs/cli-linux-x64-musl": "2.6.4", "@biomejs/cli-win32-arm64": "2.6.4", "@biomejs/cli-win32-x64": "2.6.4" }, "bin": { "biome": "bin/biome" } }, "sha512-8sKKwaNW4ot22awZ3lBjwWLHnUFXgXnrBPYS2gNlBAXRbDC++7kqjK2H7dR/FgCDtPvO1xfKpgEhJkGxAKYkxA=="],
 
