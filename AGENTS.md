@@ -11,12 +11,12 @@ branches, use conventional commits, and preserve unrelated edits. Do not
 force-push or add attribution footers. Do not create GitHub issues without an
 explicit request.
 
-Claude Code, Codex, OpenCode, Hermes, and omp read this file. Managed skills
-live in `.claude/skills` and `.agents/skills`; omp discovers both. Hermes
-requires `hermes skills trust`; otherwise read `.agents/skills/<name>/SKILL.md`.
-See [omp setup and LSP](docs/tooling.md#omp).
-Subagents lack this conversation; omp also omits `AGENTS.md`. Give each its
-checkout path, require reading its guidance, and supply applicable rules and commands.
+Claude Code, Codex, OpenCode, Hermes, and omp read this file. Claude Code
+loads `.claude/skills`; Codex, OpenCode, and Hermes load `.agents/skills`;
+omp discovers both. Hermes requires `hermes skills trust`; otherwise read
+the skill by path. See [omp setup and LSP](docs/tooling.md#omp).
+Subagents lack this conversation; omp task subagents also omit `AGENTS.md`.
+Give them paths, explicit guidance-reading instructions, rules, and commands.
 
 ## Changing matrix itself
 

@@ -289,6 +289,8 @@ omp loads the root `AGENTS.md` and discovers the managed `.claude/skills` and
 repository-owned skills come from this checkout rather than machine-global
 links to another clone. This project setting replaces any global custom-directory
 list; it does not disable normal user or managed skill discovery.
+Custom-directory skills win same-name collisions; differing global copies remain
+available under namespaced names.
 Check the resolved paths with `omp skill list --json`. Restart the session
 after changing skill discovery.
 
@@ -337,9 +339,9 @@ existing launcher in omp's user MCP config as [secrets](secrets.md#sentry-mcp)
 describes, never a token in project config.
 
 These discovery and LSP details follow omp 18.17.0's
-[skills](https://github.com/can1357/oh-my-pi/blob/main/docs/skills.md),
-[context](https://github.com/can1357/oh-my-pi/blob/main/docs/context-files.md), and
-[LSP](https://github.com/can1357/oh-my-pi/blob/main/docs/lsp-config.md) contracts.
+[skills](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/skills.md),
+[context](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/context-files.md), and
+[LSP](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/lsp-config.md) contracts.
 They are runtime checks, not a requirement to add `.omp` files to every checkout.
 
 ## State machines
