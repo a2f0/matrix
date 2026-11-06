@@ -1,5 +1,6 @@
 import { type Checkout, excludeManaged } from "./auditCheckout";
 import { git } from "./git";
+import { AGENT_TOOL } from "./packageJson";
 
 /**
  * Guidance that a shared command replaced. Matrix stopped carrying these
@@ -26,10 +27,11 @@ const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: stri
 
 /**
  * Superseded commands in a checkout's tracked Markdown, skipping managed skills
- * and any other paths given, one finding per pattern.
+ * and any other paths given, one finding per pattern. agent-tool's own
+ * `skills/` are the sources of those managed skills, so they are skipped there too.
  */
 export function supersededGuidance(checkout: Checkout, skip: string[] = []): string[] {
-  const exclusions = excludeManaged(checkout, skip);
+  const exclusions = [...excludeManaged(checkout, skip), ...(checkout.packageJson?.name === AGENT_TOOL ? [":(exclude,glob)skills/**"] : [])];
   const found: string[] = [];
   for (const entry of SUPERSEDED) {
     // -z separates path, line number, and text with NUL, so a path may contain colons.
