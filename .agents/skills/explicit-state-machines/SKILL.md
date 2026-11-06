@@ -1,6 +1,6 @@
 ---
 name: explicit-state-machines
-description: Find implicit state machines in a repository, or across a matrix workspace and its checkouts, and refactor them into explicit ones (a closed set of states, typed events, one pure transition function) without changing behavior. Use when the user asks to "find all of the implicit state machines", to replace tangled boolean flags or scattered status writes, or to dogfood this pass across checkouts; not for adding a state-machine library or redesigning features.
+description: Find implicit state machines in a repository, or across many repositories, and refactor them into explicit ones (a closed set of states, typed events, one pure transition function) without changing behavior. Use when the user asks to "find all of the implicit state machines", to replace tangled boolean flags or scattered status writes, or to dogfood this pass across repositories; not for adding a state-machine library or redesigning features.
 ---
 
 # Explicit State Machines
@@ -20,19 +20,16 @@ impossible states or scattered transitions, and proves behavior did not change.
 
 ## Find candidates
 
-`scripts/state-machines.ts` beside this file ranks tracked source files by two
-signals: lifecycle booleans toggled together (`isLoading`, `hasError`,
+`agent-tool state-machines` ranks tracked source files by two signals:
+lifecycle booleans toggled together (`isLoading`, `hasError`,
 `_running`, `busy.current`, `this.#rendered`), and status-like fields assigned
 three or more string values from three or more places (`step.status = ...`).
-It reads extensionless scripts by their shebang, is read-only, and needs only
-Bun.
+It reads extensionless scripts by their shebang and is read-only.
 
-- From a matrix workspace: `bun run state-machines [checkout...]`. With no
-  names it covers the workspace and every checkout.
-- From any repository, including a checkout:
-  `bun <skill-dir>/scripts/state-machines.ts [path...]`, where `<skill-dir>` is
-  `~/.agents/skills/explicit-state-machines` or
-  `~/.claude/skills/explicit-state-machines`.
+- `agent-tool state-machines [path...] [--limit N] [--min-score N] [--json]`
+  scans the current repository; each path names the repository holding it.
+  If the repository's pinned agent-tool lacks the command, run
+  `bunx --bun @a2f0/agent-tool@latest state-machines`.
 - `--limit N` (default 25 per repository, 0 for all), `--min-score N`
   (default 3), `--json` for agents.
 
@@ -164,22 +161,26 @@ Follow `references/patterns.md` for the language at hand. In every language:
   alone with its reason.
 - Repository-specific findings (where machines cluster, conventions such as
   the tag name or reducer location) go in that repository's agent guidance.
-  Cross-repository lessons go in `references/lessons.md` here, by PR to matrix.
+  Cross-repository lessons go in `references/lessons.md` here, by PR to
+  agent-tool.
 
-## Across a matrix workspace
+## Across many repositories
 
-A pass over many checkouts is a sweep: follow matrix's `AGENTS.md` sweep
-rules (sync, status, ledger, one delegate per checkout, `ship-pr` each). Run
-`bun run state-machines --json` first, attach each checkout's slice to its
-delegate's brief, and remind delegates to read beyond the script's list.
+A pass over many repositories follows the coordinating workspace's sweep
+rules (status, ledger, one delegate per repository, `ship-pr` each). Run
+`agent-tool state-machines --json` in each repository first, attach its slice
+to that repository's delegate brief, and remind delegates to read beyond the
+script's list.
 Repositories whose push hook or ship policy runs a full browser, simulator,
 or package gate need a heavy slot to ship: a delegate without one prepares a
 reviewed commit or open PR and hands off to a finisher that holds one.
 
 ## Ownership
 
-matrix (`a2f0/matrix`) owns this skill at `skills/explicit-state-machines/`;
-`~/.claude/skills/explicit-state-machines` and
-`~/.agents/skills/explicit-state-machines` link to the primary matrix clone.
-Change it there, with its tests in `src/explicitStateMachines.test.ts`, rather
-than copying it into a checkout.
+agent-tool (`a2f0/agent-tool`) owns this skill in
+`skills/explicit-state-machines/`, and the `state-machines` scanner with its
+tests in `src/stateMachines/`. Repositories get it from
+`agent-tool skills install --apply`; do not edit the installed copy. Change it
+in agent-tool by PR, and send cross-repository lessons to
+`references/lessons.md` there. Repository-specific conventions still go in
+that repository's `AGENTS.md`.

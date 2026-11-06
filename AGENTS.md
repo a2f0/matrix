@@ -75,10 +75,8 @@ command, add the old spelling to the audit's superseded patterns.
 retro into suggested next steps ([docs/health.md](docs/health.md)); start there
 when a session has no specific task. Acting on a suggestion still needs a
 request that authorizes it. Shared skills work here or in any repository:
-[space-cleanup](skills/space-cleanup/SKILL.md) frees disk space,
-[performance-pass](skills/performance-pass/SKILL.md) speeds up page loads, and
-[explicit-state-machines](skills/explicit-state-machines/SKILL.md) makes
-implicit state machines explicit.
+[space-cleanup](skills/space-cleanup/SKILL.md) frees disk space and
+[performance-pass](skills/performance-pass/SKILL.md) speeds up page loads.
 Before reporting work done, `bun run teardown` must pass.
 
 ## Onboarding a repository
@@ -202,13 +200,17 @@ boot your own simulator or emulator and name it explicitly.
 
 Repositories that serve websites follow the
 [seo-optimization skill](https://github.com/a2f0/balebase/blob/main/skills/seo-optimization/SKILL.md),
-which balebase owns and `~/.claude/skills` and `~/.agents/skills` link to.
-Every non-production tier and internal host sends `X-Robots-Tag: noindex,
-nofollow` and a robots meta tag while robots.txt still allows crawling;
-production pages carry static titles, descriptions, canonical URLs, preview
-images, robots.txt, and a sitemap; and Workers set `workers_dev` and
-`preview_urls` to false. Bring a newly onboarded site to it, and change the
-skill before diverging in one repository.
+which balebase owns and `~/.claude/skills` and `~/.agents/skills` link to:
+non-production hosts are noindexed, production pages carry full metadata. Bring
+a newly onboarded site to it, and change the skill before diverging in one
+repository.
+
+## State machines
+
+Code that moves through phases names them: one closed state type, typed events,
+and one pure transition function. agent-tool's managed `explicit-state-machines`
+skill holds the rules, `agent-tool review` flags new implicit machines, and every
+`AGENTS.md` carries the [shared section](docs/tooling.md#state-machines).
 
 ## Sweeps across checkouts
 

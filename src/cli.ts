@@ -41,6 +41,9 @@ export const HELP = `Usage: matrix <command>
                         Group friction across sweeps; recurring causes need a lesson
   sweep resolve <kind> <cause> --resolution text [--pr url]
                         Record a recurring cause's fix, guidance, or decision
+  state-machines [repo...] [--limit N] [--min-score N] [--json]
+                        Rank files that look like implicit state machines in the workspace and
+                        each checkout (agent-tool state-machines); leads, not findings
   teardown [repo...] [--apply]
                         What the workspace and each checkout still run (agent-tool teardown);
                         --apply stops recorded processes. Exits 1 while anything remains
@@ -64,6 +67,8 @@ export interface Services {
   teardown(root: string, directory: string, apply: boolean): AgentToolTeardown;
   /** How this machine's Git and gh reach GitHub. */
   gitTransport(root: string): GitTransport;
+  /** agent-tool's `state-machines` over the given repositories, printing straight to the terminal; returns its exit status. */
+  stateMachines(root: string, directories: string[], flags: string[]): number;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -85,6 +90,12 @@ function teardown(root: string, directory: string, apply: boolean): AgentToolTea
   return report;
 }
 
+function stateMachines(root: string, directories: string[], flags: string[]): number {
+  const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), ["state-machines", ...directories, ...flags], { stdio: "inherit" });
+  if (result.error) throw new Error(`agent-tool state-machines could not run: ${result.error.message}`);
+  return result.status ?? 1;
+}
+
 function diskSpace(directory: string): DiskSpace {
   const stats = statfsSync(directory);
   return { free: stats.bavail * stats.bsize, total: stats.blocks * stats.bsize };
@@ -102,10 +113,11 @@ const SERVICES: Services = {
   diskSpace,
   teardown,
   gitTransport: root => inspectGitTransport(root),
+  stateMachines,
 };
 
 /** The workspace, then every checkout present, or only the named checkouts. */
-function teardownTargets(root: string, manifest: Manifest, names: string[]): Array<{ repo: string; path: string }> {
+function workspaceTargets(root: string, manifest: Manifest, names: string[]): Array<{ repo: string; path: string }> {
   const checkouts = selectRepos(manifest, names)
     .map(repo => ({ repo, path: checkoutPath(root, repo) }))
     .filter(target => existsSync(target.path));
@@ -334,7 +346,7 @@ const COMMANDS = new Map<string, Handler>([
         retro: retro(root),
         disk: services.diskSpace(root),
         git: services.gitTransport(root),
-        running: teardownAll(teardownTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
+        running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
         ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
       });
       if (booleans.has("markdown")) services.write(markdownHealth(health));
@@ -351,11 +363,29 @@ const COMMANDS = new Map<string, Handler>([
     },
   ],
   [
+    "state-machines",
+    (args, { root, manifest, services }) => {
+      const { positional, values, booleans } = parseOptions(args, { limit: "value", "min-score": "value", json: "boolean" }, "state-machines");
+      const flags = [
+        ...(values.limit === undefined ? [] : ["--limit", values.limit]),
+        ...(values["min-score"] === undefined ? [] : ["--min-score", values["min-score"]]),
+        ...(booleans.has("json") ? ["--json"] : []),
+      ];
+      const targets = workspaceTargets(root, manifest, positional);
+      usage(targets.length > 0, "None of the named checkouts is present; run matrix sync first.");
+      return services.stateMachines(
+        root,
+        targets.map(target => target.path),
+        flags,
+      );
+    },
+  ],
+  [
     "teardown",
     (args, { root, manifest, services, output }) => {
       const { positional, booleans } = parseOptions(args, { apply: "boolean" }, "teardown");
       const result = teardownAll(
-        teardownTargets(root, manifest, positional),
+        workspaceTargets(root, manifest, positional),
         (directory, apply) => services.teardown(root, directory, apply),
         booleans.has("apply"),
       );
