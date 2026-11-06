@@ -20,6 +20,7 @@
     "space": "bun skills/space-cleanup/scripts/space-cleanup.ts",
     "artifacts": "bun skills/take-screenshots/scripts/artifacts.ts",
     "perf": "bun skills/performance-pass/scripts/perf.ts",
+    "merged-commits": "bun skills/merged-commits/scripts/count.js",
     "state-machines": "bun src/index.ts state-machines",
     "secrets:backup": "bash scripts/secrets/backupSecrets.sh",
     "secrets:deploy": "bun src/index.ts deploy-secrets",

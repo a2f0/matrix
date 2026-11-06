@@ -42,6 +42,7 @@ bun run status
 | `bun run space [repo...] [--builds] [--deps] [--machine] [--apply]` | List regenerable, git-ignored output and caches to free disk space; `--apply` removes them |
 | `bun run artifacts <status\|link\|capture> [repo...] [--apply]` | Share screenshots through `../matrix-artifacts`: link each clone's `.screenshots`, capture under a lock, and report each capture's commit |
 | `bun run perf <serve\|measure\|shot\|diff\|graph> [args...] [--from checkouts/<name>]` | Measure page load from a checkout: serve a build over HTTP/2, time cold loads to a ready signal, and diff screenshots for fidelity |
+| `bun run merged-commits [today\|yesterday\|YYYY-MM-DD] [--timezone IANA]` | Count original commits in merged PRs across the matrix, with separate workspace-inclusive totals |
 | `bun run state-machines [repo...] [--limit N] [--min-score N] [--json]` | Rank source files that look like implicit state machines (lifecycle booleans toggled together, status strings written from many places) in the workspace and each checkout, with `agent-tool state-machines`; read-only |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
@@ -77,6 +78,16 @@ It reports failing repositories by rule and never changes a checkout; see
 [checkout audit](docs/audit.md). `health` rolls status, the audit, discovery,
 and recurring sweep friction into one report of suggested next steps, meant to
 run on a schedule; see [health report](docs/health.md).
+
+`merged-commits` uses authenticated `gh` to read every selected PR's commits,
+without syncing or changing checkouts. It defaults to today in the machine's
+local timezone; for example, `bun run merged-commits yesterday --timezone
+America/New_York` selects the previous Eastern calendar day, including DST.
+JSON includes per-PR evidence and distinct original commit counts per repository,
+plus comparisons with one squash commit or one additional merge commit per PR.
+Existing branch merge commits are already included; overlapping PR commits are
+deduplicated and reported separately. Historical dates use today's `matrix.json`,
+and the captured `asOf` cutoff makes today's report partial.
 
 ## Managed repositories
 

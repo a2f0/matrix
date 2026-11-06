@@ -1,0 +1,4 @@
+interface:
+  display_name: "Merged Commits"
+  short_description: "Count original commits behind merged matrix PRs"
+  default_prompt: "Use $merged-commits to count the original commits in today's merged PRs across the matrix and compare squash and non-squash totals."
