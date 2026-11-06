@@ -238,6 +238,31 @@ describe("audit", () => {
     ).toEqual({});
   });
 
+  test("checks the State machines section and the installed skill, which agent-tool itself ships from skills/", () => {
+    const rule = (name: string, files: Record<string, string | null>) => failures(checkout(name, files), ["state-machines"])["state-machines"];
+    expect(
+      rule("unadopted", {
+        "AGENTS.md": "# Guidance\n\n## Output capture\n\nRun `agent:run` and `agent:logs`.\n",
+        ".agents/skills/explicit-state-machines/SKILL.md": null,
+      }),
+    ).toBe(
+      "AGENTS.md has no State machines section; the explicit-state-machines skill is not installed; pin @a2f0/agent-tool 0.1.51 or later and run agent-tool skills install --apply",
+    );
+    expect(rule("unnamed", { "AGENTS.md": "# Guidance\n\n## State machines\n\nName your states.\n" })).toBe(
+      "State machines guidance does not mention explicit-state-machines",
+    );
+    // Only a manifest entry whose file is present counts as installed.
+    expect(rule("listed-only", { ".agents/skills/explicit-state-machines/SKILL.md": null })).toContain("skill is not installed");
+    expect(rule("paragraph", { "AGENTS.md": "# Guidance\n\nFollow the explicit-state-machines skill.\n" })).toBeUndefined();
+    const producer = {
+      "package.json": JSON.stringify({ name: "@a2f0/agent-tool" }),
+      ".agent-tool-skills.json": null,
+      ".agents/skills/explicit-state-machines/SKILL.md": null,
+    };
+    expect(rule("agent-tool", producer)).toBe("no tracked skills/explicit-state-machines/SKILL.md");
+    expect(rule("agent-tool-shipping", { ...producer, "skills/explicit-state-machines/SKILL.md": "# Explicit State Machines\n" })).toBeUndefined();
+  });
+
   // README cases run only the README rules: a whole audit per fixture made
   // this one test take over 5 s on a loaded machine.
   const README_RULES = ["readme-title", "readme-quick-start", "readme-agent-free"];
@@ -527,7 +552,7 @@ describe("audit", () => {
     });
     expect(failures(repo)["superseded-guidance"]).toBe(
       [
-        "review-reply-endpoint at AGENTS.md:7 (use agent-tool pr threads reply)",
+        "review-reply-endpoint at AGENTS.md:11 (use agent-tool pr threads reply)",
         "pr-checks-watch at docs/shipping.md:1 (use agent-tool pr checks --wait)",
         "squash-merge-action at docs/shipping.md:3 (use agent-tool pr merge <subject> <reviewed-head> <base-branch>)",
         "push-head-upstream at docs/shipping.md:1 (use agent-tool branch push <reviewed-head> --remote origin)",

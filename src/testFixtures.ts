@@ -52,7 +52,8 @@ export function write(root: string, files: Record<string, string>): void {
 }
 
 /** The default AGENTS.md and README.md of `checkoutFixture`. */
-export const GUIDANCE = "# Repository guidance\n\n## Output capture\n\nRun `bun run agent:run` and read `bun run agent:logs <log>`.\n";
+export const GUIDANCE =
+  "# Repository guidance\n\n## Output capture\n\nRun `bun run agent:run` and read `bun run agent:logs <log>`.\n\n## State machines\n\nFollow the explicit-state-machines skill.\n";
 export const README = "# demo\n\nA demo project.\n\n## Quick start\n\n```sh\nbun install\n```\n";
 
 let template: string | undefined;
@@ -92,8 +93,12 @@ export function checkoutFixture(directory: string, agentTool: string, files: Rec
     ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
     ".codex/rules/agent-tool.rules": 'prefix_rule(pattern=["agent-tool", "doctor"], decision="allow")\n',
     "agent-tool.json": JSON.stringify({ schemaVersion: 1 }),
-    ".agent-tool-skills.json": JSON.stringify({ schemaVersion: 1, files: { ".agents/skills/ship-pr/SKILL.md": "x" } }),
+    ".agent-tool-skills.json": JSON.stringify({
+      schemaVersion: 1,
+      files: { ".agents/skills/ship-pr/SKILL.md": "x", ".agents/skills/explicit-state-machines/SKILL.md": "x" },
+    }),
     ".agents/skills/ship-pr/SKILL.md": "Reply via POST /repos/o/r/pulls/1/comments/2/replies.\n",
+    ".agents/skills/explicit-state-machines/SKILL.md": "# Explicit State Machines\n",
     ...files,
   };
   mkdirSync(directory, { recursive: true });

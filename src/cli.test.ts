@@ -70,6 +70,7 @@ function fakeServices(overrides: Partial<Services> = {}) {
     diskSpace: () => ({ free: 200 * GIB, total: 500 * GIB }),
     teardown: () => CLEAN_TEARDOWN,
     gitTransport: () => SSH_ONLY,
+    stateMachines: () => 0,
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -103,7 +104,7 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(markdown).toContain(
     "1. Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB; `bun run space` lists what is safe to remove.",
   );
-  expect(markdown).toContain("- Audit (17 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain("- Audit (18 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
   expect(markdown).toContain("- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.");
@@ -265,4 +266,22 @@ test("dispatches help, and rejects unknown commands and sweep actions", () => {
   }
   expect(() => main(["sweep", "list", "extra"], root, undefined, services)).toThrow("Usage: matrix sweep list");
   expect(() => main(["sweep", "retro", "chore/x", "--last", "2"], root, undefined, services)).toThrow("sweep retro takes branches or --last, not both.");
+});
+
+test("state-machines scans the workspace and each present checkout, or the named ones, and forwards its flags and status", () => {
+  const calls: Array<{ directories: string[]; flags: string[] }> = [];
+  const { services } = fakeServices({
+    stateMachines: (_root, directories, flags) => {
+      calls.push({ directories, flags });
+      return calls.length === 1 ? 0 : 1;
+    },
+  });
+  expect(main(["state-machines"], root, undefined, services)).toBe(0);
+  expect(main(["state-machines", "good", "--limit", "0", "--min-score=5", "--json"], root, undefined, services)).toBe(1);
+  expect(calls).toEqual([
+    { directories: [root, path.join(root, "checkouts", "good")], flags: [] },
+    { directories: [path.join(root, "checkouts", "good")], flags: ["--limit", "0", "--min-score", "5", "--json"] },
+  ]);
+  expect(() => main(["state-machines", "missing"], root, undefined, services)).toThrow("None of the named checkouts is present");
+  expect(() => main(["state-machines", "--fix"], root, undefined, services)).toThrow("Unknown state-machines option '--fix'.");
 });

@@ -279,6 +279,52 @@ Repositories that do not use Bun's test runner keep `agent:run` for their tests;
 `agent-tool bun test` is what harness permission rules allow without a prompt
 ([harness permissions](#harness-permissions)).
 
+## State machines
+
+Implicit state machines are code that moves through modes without naming
+them: booleans valid only in some combinations, a status written from several
+places, nullable fields whose presence means a phase, or async work whose
+stale callback can still change state. Every managed repository makes such
+code explicit: one closed state type that carries each state's data, typed
+events, and one pure transition function, with async work tagged so only the
+current request can finish.
+
+Three pieces carry the standard, and all of them work in Claude Code, Codex,
+OpenCode, and Hermes:
+
+- The `explicit-state-machines` skill, which agent-tool ships as a managed
+  skill from 0.1.51 (`agent-tool skills install --apply` puts it in
+  `.agents/skills` and `.claude/skills`). It holds what to convert, what to
+  leave alone, recipes per language, and cross-repository lessons. Change it
+  in agent-tool, never in an installed copy.
+- `agent-tool state-machines [path...]`, a read-only scanner that ranks a
+  repository's files by those signals. Its results are leads to read, not
+  findings, so no CI job gates on it. `bun run state-machines [repo...]` runs it
+  over the workspace and every checkout.
+- `agent-tool review`, whose shared instructions flag implicit machines a
+  diff adds or extends (Major when an impossible combination or a stale result
+  is reachable) and apply the skill's criteria when the diff leaves the skill
+  unchanged. Keep it in the shared prompt: a repository `REVIEW.md` would
+  replace its `AGENTS.md` as review policy.
+
+Each repository's `AGENTS.md` has a `State machines` section adapted from the
+text below, with the repository's own conventions after it: the tag name,
+where transition functions live, and the stateful areas where machines cluster.
+An `AGENTS.md` without sections carries it as a paragraph. The audit's
+`state-machines` rule checks the section and the installed skill.
+
+```markdown
+## State machines
+
+Make implicit state machines explicit when you write or change code: one closed
+state type (a discriminated union, enum, or sealed type) carrying each state's
+data, typed events, and one pure transition function, with effects run on
+entering a state and async work tagged so only the current request can finish.
+Follow the `explicit-state-machines` skill for what to convert, what to leave
+alone, and how to prove behavior did not change; `agent-tool state-machines`
+lists leads. Reviews flag new implicit machines.
+```
+
 ## Harness permissions
 
 Agents can work without blanket approval when routine commands run freely and

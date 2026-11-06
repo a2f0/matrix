@@ -69,14 +69,31 @@ function outputCaptureScriptProblems(checkout: Checkout): string[] {
   return OUTPUT_CAPTURE_SCRIPTS.filter(name => typeof checkout.scripts[name] !== "string").map(name => `no ${name} script`);
 }
 
-/** What AGENTS.md lacks of the Output capture guidance. */
-function outputCaptureGuidanceProblems(guidance: string | undefined): string[] {
-  if (guidance === undefined) return ["no AGENTS.md for the Output capture section"];
+/** What AGENTS.md lacks of a shared section that must name each of `terms`. */
+function guidanceSectionProblems(guidance: string | undefined, title: string, terms: readonly string[]): string[] {
+  if (guidance === undefined) return [`no AGENTS.md for the ${title} section`];
   // An AGENTS.md without sections carries the same text as a paragraph.
   const sectioned = headings(guidance).some(heading => heading.level >= 2);
-  const text = sectioned ? section(guidance, "Output capture") : guidance;
-  if (text === undefined) return ["AGENTS.md has no Output capture section"];
-  return OUTPUT_CAPTURE_SCRIPTS.filter(name => !text.includes(name)).map(name => `Output capture guidance does not mention ${name}`);
+  const text = sectioned ? section(guidance, title) : guidance;
+  if (text === undefined) return [`AGENTS.md has no ${title} section`];
+  return terms.filter(term => !text.includes(term)).map(term => `${title} guidance does not mention ${term}`);
+}
+
+const STATE_MACHINES_SKILL = "explicit-state-machines";
+/** The first agent-tool release that ships the explicit-state-machines skill and its scanner. */
+const STATE_MACHINES_AGENT_TOOL = "0.1.51";
+
+/** Whether the explicit-state-machines skill ships here (the producer) or is installed as a managed skill. */
+function stateMachinesSkillProblems(checkout: Checkout): string[] {
+  const source = `skills/${STATE_MACHINES_SKILL}/SKILL.md`;
+  if (isProducer(checkout)) return checkout.tracked(source).length > 0 ? [] : [`no tracked ${source}`];
+  const files = object(parseObject(checkout.read(".agent-tool-skills.json"))?.files) ?? {};
+  const installed = Object.keys(files).some(file => file.endsWith(`/${STATE_MACHINES_SKILL}/SKILL.md`) && checkout.exists(file));
+  return installed
+    ? []
+    : [
+        `the ${STATE_MACHINES_SKILL} skill is not installed; pin @a2f0/agent-tool ${STATE_MACHINES_AGENT_TOOL} or later and run agent-tool skills install --apply`,
+      ];
 }
 
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
@@ -170,7 +187,15 @@ export const RULES: readonly Rule[] = [
     id: "output-capture",
     summary: "agent:run and agent:logs scripts, and an Output capture section in AGENTS.md",
     source: "AGENTS.md#output-capture",
-    check: checkout => problems([...outputCaptureScriptProblems(checkout), ...outputCaptureGuidanceProblems(checkout.read("AGENTS.md"))]),
+    check: checkout =>
+      problems([...outputCaptureScriptProblems(checkout), ...guidanceSectionProblems(checkout.read("AGENTS.md"), "Output capture", OUTPUT_CAPTURE_SCRIPTS)]),
+  },
+  {
+    id: "state-machines",
+    summary: "A State machines section in AGENTS.md naming the explicit-state-machines skill, and the skill installed",
+    source: "docs/tooling.md#state-machines",
+    check: checkout =>
+      problems([...guidanceSectionProblems(checkout.read("AGENTS.md"), "State machines", [STATE_MACHINES_SKILL]), ...stateMachinesSkillProblems(checkout)]),
   },
   {
     id: "readme-title",

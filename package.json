@@ -20,7 +20,7 @@
     "space": "bun skills/space-cleanup/scripts/space-cleanup.ts",
     "artifacts": "bun skills/take-screenshots/scripts/artifacts.ts",
     "perf": "bun skills/performance-pass/scripts/perf.ts",
-    "state-machines": "bun skills/explicit-state-machines/scripts/state-machines.ts",
+    "state-machines": "bun src/index.ts state-machines",
     "secrets:backup": "bash scripts/secrets/backupSecrets.sh",
     "secrets:deploy": "bun src/index.ts deploy-secrets",
     "typecheck": "tsc --noEmit",
@@ -37,7 +37,7 @@
     "lint:branch-name": "agent-tool branch check"
   },
   "devDependencies": {
-    "@a2f0/agent-tool": "0.1.46",
+    "@a2f0/agent-tool": "0.1.51",
     "@biomejs/biome": "2.6.4",
     "@types/bun": "1.4.4",
     "knip": "6.44.1",
