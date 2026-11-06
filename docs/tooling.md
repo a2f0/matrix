@@ -305,9 +305,10 @@ heavy suites, as [sweep scheduling](sweeps.md#scheduling) requires.
 For a standalone checkout session, use `omp --cwd checkouts/<name>`.
 That checkout's guidance and skills apply; matrix's `.omp/config.yml` does
 not follow it into a different working directory. Install the checkout's
-documented dependencies and hooks before running its scripts. `sync` only
-clones/fetches; `status.staleInstalls` includes fresh checkouts without an
-installed agent-tool.
+documented dependencies and hooks before running its scripts. `sync` clones,
+fetches, and fast-forwards clean default branches; it does not install dependencies.
+For checkouts that pin agent-tool, `status.staleInstalls` also includes fresh
+clones without an installed copy.
 
 ### Language servers
 

@@ -14,7 +14,7 @@ explicit request.
 Claude Code, Codex, OpenCode, Hermes, and omp read this file. Claude Code
 loads `.claude/skills`; Codex, OpenCode, and Hermes load `.agents/skills`;
 omp discovers both. Hermes requires `hermes skills trust`; otherwise read
-the skill by path. See [omp setup and LSP](docs/tooling.md#omp).
+`.agents/skills/<name>/SKILL.md`. See [omp setup and LSP](docs/tooling.md#omp).
 Subagents lack this conversation; omp task subagents also omit `AGENTS.md`.
 Give them paths, explicit guidance-reading instructions, rules, and commands.
 
