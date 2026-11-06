@@ -519,7 +519,8 @@ describe("audit", () => {
   test("finds superseded commands in Markdown, every spelling, outside managed skills", () => {
     const repo = checkout("stale", {
       "AGENTS.md": `${GUIDANCE}\nReply with \`POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies\`.\n`,
-      "docs/shipping.md": "Run `git push -u origin HEAD`, then `gh pr checks 12 --watch`.\nOr `git push origin --delete feat/x`.\n",
+      "docs/shipping.md":
+        "Run `git push -u origin HEAD`, then `gh pr checks 12 --watch`.\nOr `git push origin --delete feat/x`.\nMerge with `bun run agent-tool squashMerge 'fix: x' abc main`.\n",
       "docs/cleanup.md": "Delete atomically: `git push --force-with-lease=refs/heads/x:abc --delete origin x`.\n",
       "scripts/ship.sh": "gh pr checks --watch\n",
       "docs/network.md": "Force HTTPS: `GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:`.\n",
@@ -528,6 +529,7 @@ describe("audit", () => {
       [
         "review-reply-endpoint at AGENTS.md:7 (use agent-tool pr threads reply)",
         "pr-checks-watch at docs/shipping.md:1 (use agent-tool pr checks --wait)",
+        "squash-merge-action at docs/shipping.md:3 (use agent-tool pr merge <subject> <reviewed-head> <base-branch>)",
         "push-head-upstream at docs/shipping.md:1 (use agent-tool branch push <reviewed-head> --remote origin)",
         "push-delete at docs/shipping.md:2 (use agent-tool repo cleanup)",
         "https-insteadof at docs/network.md:1 (use SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh))",

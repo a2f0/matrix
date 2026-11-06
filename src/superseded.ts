@@ -11,6 +11,8 @@ const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: stri
   { id: "review-reply-endpoint", pattern: "pulls/([^/[:space:]`]+/)?comments/[^/[:space:]`]+/replies", replacement: "agent-tool pr threads reply" },
   { id: "untracked-branch-switch", pattern: "git switch --no-track", replacement: "agent-tool branch create" },
   { id: "pr-checks-watch", pattern: "gh pr checks[^`]*--watch", replacement: "agent-tool pr checks --wait" },
+  // agent-tool 0.1.50 removed the legacy action, whose optional reviewed head let a merge skip preflight.
+  { id: "squash-merge-action", pattern: "agent-tool squashMerge", replacement: "agent-tool pr merge <subject> <reviewed-head> <base-branch>" },
   { id: "push-head-upstream", pattern: "git push (-u|--set-upstream) origin HEAD", replacement: "agent-tool branch push <reviewed-head> --remote origin" },
   // A leased deletion is the stronger cleanup some checkouts require, not the hook-running push it replaced.
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },

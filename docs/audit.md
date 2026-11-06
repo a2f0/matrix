@@ -54,6 +54,7 @@ which the agent-tool pin updates:
 | The REST route for review-comment replies | `agent-tool pr threads reply` |
 | `git switch --no-track` | `agent-tool branch create` |
 | `gh pr checks --watch` | `agent-tool pr checks --wait` |
+| The legacy squashMerge action, removed in agent-tool 0.1.50 | `agent-tool pr merge <subject> <reviewed-head> <base-branch>` |
 | `git push -u origin HEAD` | `agent-tool branch push <reviewed-head> --remote origin` |
 | `git push ... --delete`, except a `--force-with-lease` deletion that a checkout requires | `agent-tool repo cleanup` |
 | `url.https://github.com/.insteadOf`, which sends GitHub SSH URLs to HTTPS and its keychain helper | SSH through `ssh.github.com:443` ([GitHub over SSH](health.md#github-over-ssh)) |
