@@ -4,7 +4,7 @@ import type { KnipConfig } from "knip";
 // from package.json scripts, and the test preload from bunfig.toml.
 export default {
   entry: ["src/**/*.test.ts"],
-  project: ["src/**/*.ts", "skills/**/*.ts"],
+  project: ["src/**/*.ts", "skills/**/*.{ts,js}"],
   // Host tools the scripts and tests run, not package dependencies.
   ignoreBinaries: ["gpg", "du", "openssl"],
   treatConfigHintsAsErrors: true,
