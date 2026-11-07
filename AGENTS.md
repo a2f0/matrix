@@ -73,10 +73,10 @@ command, add the old spelling to the audit's superseded patterns.
 `bun run health [--remote]` combines status, the audit, discovery, and sweep
 retro into suggested next steps ([docs/health.md](docs/health.md)); start there
 when a session has no specific task. Acting on a suggestion still needs a
-request that authorizes it. Use [space-cleanup](skills/space-cleanup/SKILL.md)
-for disk space, [performance-pass](skills/performance-pass/SKILL.md) for page
-loads, and [merged-commits](skills/merged-commits/SKILL.md) for original PR
-commit counts across the matrix.
+request that authorizes it. Shared skills work here or in any repository:
+[space-cleanup](skills/space-cleanup/SKILL.md) for disk space and
+[performance-pass](skills/performance-pass/SKILL.md) for page loads. Here,
+[merged-commits](skills/merged-commits/SKILL.md) counts original PR commits.
 Before reporting work done, `bun run teardown` must pass.
 
 ## Onboarding a repository

@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 import { runGh } from "../../../src/gh";
 import { loadManifest } from "../../../src/manifest";
 import { selectDay } from "./day.js";
-import { countRepository, summarize } from "./github.js";
+import { buildReport } from "./github.js";
 
 const USAGE = `Usage: bun run merged-commits [today|yesterday|YYYY-MM-DD] [--timezone IANA]
 
@@ -27,23 +27,7 @@ function main() {
   const day = selectDay(positionals[0] ?? "today", values.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, new Date());
   const { repos } = loadManifest(process.cwd());
   const workspace = runGh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
-  const managed = repos.map(repo => countRepository(repo, day));
-  const repositories = managed.some(repo => repo.repo.toLowerCase() === workspace.toLowerCase()) ? managed : [...managed, countRepository(workspace, day)];
-  console.log(
-    JSON.stringify(
-      {
-        date: day.date,
-        timeZone: day.timeZone,
-        asOf: day.asOf,
-        workspace,
-        managed: summarize(managed),
-        includingWorkspace: summarize(repositories),
-        repositories,
-      },
-      null,
-      2,
-    ),
-  );
+  console.log(JSON.stringify(buildReport(repos, workspace, day), null, 2));
 }
 
 if (import.meta.main) {

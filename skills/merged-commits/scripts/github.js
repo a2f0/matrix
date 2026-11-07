@@ -28,10 +28,8 @@ function nextCursor(connection) {
   return connection.pageInfo.endCursor;
 }
 
-/** @param {string} repo @param {Day} day @param {Graphql} request */
-function mergedPullRequests(repo, day, request) {
-  /** @type {Map<number, PullRequest>} */
-  const selected = new Map();
+/** @param {string} repo @param {Day} day @param {string} cutoff @param {Map<number, PullRequest>} selected @param {Graphql} request */
+function scanPullRequests(repo, day, cutoff, selected, request) {
   /** @type {string | null} */
   let cursor = null;
   do {
@@ -49,9 +47,19 @@ function mergedPullRequests(repo, day, request) {
     const connection = repository.pullRequests;
     for (const pr of connection.nodes) if (day.contains(pr.mergedAt)) selected.set(pr.number, pr);
     // An old PR can have a recent update; never stop on mergedAt ordering.
-    if (connection.nodes.some(pr => Date.parse(pr.updatedAt) < Date.parse(day.updatedSince))) break;
+    if (connection.nodes.some(pr => Date.parse(pr.updatedAt) <= Date.parse(cutoff))) break;
     cursor = nextCursor(connection);
   } while (cursor);
+}
+
+/** @param {string} repo @param {Day} day @param {Graphql} request */
+function mergedPullRequests(repo, day, request) {
+  /** @type {Map<number, PullRequest>} */
+  const selected = new Map();
+  scanPullRequests(repo, day, day.updatedSince, selected, request);
+  // A comment or label change can move an unread PR ahead of our cursor.
+  // Recover PRs updated since the report began, deduplicating by PR number.
+  scanPullRequests(repo, day, day.asOf, selected, request);
   return [...selected.values()].sort((a, b) => a.number - b.number);
 }
 
@@ -94,7 +102,9 @@ function readCommits(repo, pr, connection, request) {
     const repository = /** @type {Record<string, {commits: Commits}>} */ (data.repository);
     connection = repository[`p${pr.number}`].commits;
   }
-  if (commits.size !== pr.commits.totalCount) throw new Error(`${pr.url}: incomplete commit list; run again.`);
+  if (commits.size !== pr.commits.totalCount) {
+    throw new Error(`${pr.url}: incomplete commit list (${commits.size} of ${pr.commits.totalCount}); cannot compute a complete count.`);
+  }
   return [...commits.values()];
 }
 
@@ -139,4 +149,21 @@ export function summarize(repositories) {
       withMergeCommits: 0,
     },
   );
+}
+
+/** @param {string[]} repos @param {string} workspace @param {Day} day @param {Graphql} [request] */
+export function buildReport(repos, workspace, day, request = graphql) {
+  const managed = repos.map(repo => countRepository(repo, day, request));
+  const repositories = managed.some(repo => repo.repo.toLowerCase() === workspace.toLowerCase())
+    ? managed
+    : [...managed, countRepository(workspace, day, request)];
+  return {
+    date: day.date,
+    timeZone: day.timeZone,
+    asOf: day.asOf,
+    workspace,
+    managed: summarize(managed),
+    includingWorkspace: summarize(repositories),
+    repositories,
+  };
 }

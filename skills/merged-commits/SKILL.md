@@ -52,9 +52,12 @@ visible, since these numbers are the requested result, not a noisy check.
   day still count when their PR merged during that day. Direct pushes do not.
 
 The helper reads merged PRs directly, not GitHub's search index. It paginates
-by update time until no older page can contain the day, then fetches every
-selected PR's commits with pagination. A failed API call or incomplete commit
-list fails the entire report: never turn missing repositories into zeroes.
+by update time until no older page can contain the day, rescans updates since
+`asOf` to recover PRs that moved ahead of its cursor, then fetches every selected
+PR's commits with pagination. A failed API call or incomplete commit list fails
+the entire report: never turn missing repositories into zeroes. An incomplete
+list reports the received and expected counts; it may reflect an API limit,
+so do not assume rerunning will fix it.
 This is a read-time view, not an atomic historical snapshot; if GitHub reports
 changing commit lists, rerun rather than report a partial total.
 
@@ -66,3 +69,9 @@ managed and workspace-inclusive scopes, with columns for squash commits,
 original commits, and original commits plus one merge commit per PR. Explain
 duplicates when present. Do not describe hypothetical squash counts as proof
 of how the PRs actually merged.
+
+## Ownership
+
+Matrix owns this skill and its JavaScript helpers; regression tests live in
+`src/mergedCommits.test.ts`. omp discovers `skills/` through the project config.
+Other harnesses can follow the link in `AGENTS.md`; no global install is needed.
