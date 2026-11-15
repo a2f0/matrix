@@ -29,7 +29,8 @@ issues. A useful report records the outcome and safe evidence, not raw secrets.
 ## Compatibility and deployment gates
 
 For matrix itself, keep the Bun version in `.mise.toml` aligned with
-`package.json`'s `packageManager`. CI installs the toolchain from `.mise.toml`.
+`package.json`'s `packageManager`. CI installs the toolchain from `.mise.toml`
+and `mise.lock`.
 `bun run audit --remote --rule agent-tool-latest` fails a checkout whose exact
 agent-tool pin has lacked a newer release for 7 days or more, and reports a pin
 inside that grace as skipped, naming the release it lacks. agent-tool can
@@ -51,6 +52,19 @@ local-change, or open-PR-only requests retain their narrower scope. A preview al
 does not authorize deployment, and the shipping default does not authorize a
 standalone infrastructure apply or manual deployment. These scope rules do not
 waive the preview gates.
+
+## Toolchain lockfiles
+
+Every checkout that declares mise tools sets `lockfile = true` and commits the
+`mise.lock` beside its config, in lockfile format 4, so CI installs the exact
+artifacts and checksums developers locked. `jdx/mise-action` adds `--locked`
+when a `mise.lock` exists, so a tool or platform missing from the lock fails
+CI instead of resolving a new version. Run `mise lock` after changing a tool
+and commit the result, with any `.mise/locks/` sidecars it writes for npm or
+PyPI tools. Format 4 needs mise 2026.11.1 or later, so every workflow's
+mise-action `version` moves before a lock's format does.
+`bun run audit --rule mise-lock` checks the setting, the lock's format, an
+entry for each declared tool, and every pinned mise-action `version`.
 
 ## Plan helper for checkouts without agent-tool
 

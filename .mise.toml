@@ -1,2 +1,5 @@
 [tools]
 bun = "1.4.4"
+
+[settings]
+lockfile = true
