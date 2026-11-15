@@ -55,16 +55,20 @@ waive the preview gates.
 
 ## Toolchain lockfiles
 
-Every checkout that declares mise tools sets `lockfile = true` and commits the
-`mise.lock` beside its config, in lockfile format 4, so CI installs the exact
-artifacts and checksums developers locked. `jdx/mise-action` adds `--locked`
-when a `mise.lock` exists, so a tool or platform missing from the lock fails
-CI instead of resolving a new version. Run `mise lock` after changing a tool
-and commit the result, with any `.mise/locks/` sidecars it writes for npm or
-PyPI tools. Format 4 needs mise 2026.11.1 or later, so every workflow's
-mise-action `version` moves before a lock's format does.
-`bun run audit --rule mise-lock` checks the setting, the lock's format, an
-entry for each declared tool, and every pinned mise-action `version`.
+Every checkout that declares mise tools commits the `mise.lock` beside its
+config, in lockfile format 4, so CI installs the exact artifacts and checksums
+developers locked. `jdx/mise-action` adds `--locked` when a `mise.lock` exists,
+so a tool or platform missing from the lock fails CI instead of resolving a new
+version. Run `mise lock` after changing a tool and commit the result, with any
+`.mise/locks/` sidecars it writes for npm or PyPI tools; `mise install`, `use`,
+and `upgrade` keep an existing lock current. Leave the `lockfile` setting
+unset: `false` turns locking off, and any `[settings]` table makes mise refuse
+the config until someone runs `mise trust`, which breaks mise shims in that
+directory and every one below it, checkouts under this workspace included.
+Format 4 needs mise 2026.11.1 or later, so every workflow's mise-action
+`version` moves before a lock's format does. `bun run audit --rule mise-lock`
+checks the lock's format, an entry for each declared tool, `lockfile = false`,
+and every pinned mise-action `version`.
 
 ## Plan helper for checkouts without agent-tool
 
