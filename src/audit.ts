@@ -393,11 +393,13 @@ export const RULES: readonly Rule[] = [
     source: "docs/dependency-upgrades.md#toolchain-lockfiles",
     check: checkout => {
       const config = checkout.tracked("mise.toml", ".mise.toml")[0];
-      const parsed = parseToml(config && checkout.read(config));
-      const tools = Object.keys(object(parsed?.tools) ?? {});
-      if (config === undefined || tools.length === 0) return skip("declares no mise tools");
+      if (config === undefined) return skip("declares no mise tools");
+      const parsed = parseToml(checkout.read(config));
+      if (!parsed) return fail(`${config} is missing from the working tree or is not valid TOML`);
+      const tools = Object.keys(object(parsed.tools) ?? {});
+      if (tools.length === 0) return skip("declares no mise tools");
       // Unset keeps an existing lock current but never recreates one; false turns locking off, which --locked rejects.
-      const setting = object(parsed?.settings)?.lockfile === true ? [] : [`${config} does not set lockfile = true under [settings]`];
+      const setting = object(parsed.settings)?.lockfile === true ? [] : [`${config} does not set lockfile = true under [settings]`];
       return problems([...setting, ...miseLockProblems(checkout, config, tools), ...ciMiseProblems(checkout)]);
     },
   },

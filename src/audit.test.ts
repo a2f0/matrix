@@ -587,6 +587,11 @@ describe("audit", () => {
         }),
       ),
     ).toBeUndefined();
+    // A config the rule cannot read fails rather than passing as one without tools.
+    expect(rule(checkout("bad-config", { ".mise.toml": "[tools\nbun = 1\n" }))).toBe(".mise.toml is missing from the working tree or is not valid TOML");
+    const deleted = checkout("deleted-config", { ".mise.toml": config });
+    rmSync(path.join(root, "checkouts", "deleted-config", ".mise.toml"));
+    expect(rule(deleted)).toBe(".mise.toml is missing from the working tree or is not valid TOML");
     const settingsOnly = audit(
       root,
       [checkout("settings-only", { ".mise.toml": "[settings]\nlockfile = true\n" })],
