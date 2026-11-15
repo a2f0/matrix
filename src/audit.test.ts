@@ -59,6 +59,7 @@ describe("audit", () => {
         { rule: "screenshots-store", detail: "captures no screenshots" },
         { rule: "screenshots-gallery", detail: "no website that shows captured screenshots" },
         { rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" },
+        { rule: "mise-lock", detail: "declares no mise tools" },
       ],
     });
     expect(result.checkouts[1]).toMatchObject({ repo: "a2f0/missing", error: "checkout missing; run sync" });
@@ -539,6 +540,53 @@ describe("audit", () => {
       context,
     );
     expect(skipped.checkouts[0]!.skipped).toEqual([{ rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" }]);
+  });
+
+  test("requires mise tools to install from a format 4 lock that every pinned CI mise reads", () => {
+    const config = '[tools]\nbun = "1.4.4"\n"aqua:koalaman/shellcheck" = { version = "0.11.0" }\n\n[settings]\nlockfile = true\n';
+    const lock = (header: string, tools: string[]) =>
+      `# @generated\n${header}\n${tools.map(tool => `[[tools."${tool}"]]\nversion = "1"\nbackend = "core:${tool}"\n`).join("\n")}`;
+    // Each pinned step, then one that installs the latest mise, which reads any format.
+    const workflow = (...versions: string[]) =>
+      `jobs:\n  check:\n    steps:\n${versions.map(version => `      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6\n        with:\n          version: ${version}\n`).join("")}      - uses: jdx/mise-action@v5\n`;
+    const composite = (version: string) => `runs:\n  using: composite\n  steps:\n  - uses: jdx/mise-action@v5\n    with:\n      version: v${version}\n`;
+    const rule = (repo: string) => failures(repo, ["mise-lock"])["mise-lock"];
+    expect(
+      rule(
+        checkout("unlocked", {
+          ".mise.toml": config,
+          ".github/workflows/ci.yml": workflow("2026.11.0", "2026.11.0", "2026.11.8"),
+          ".github/actions/setup/action.yml": composite("2026.10.3"),
+        }),
+      ),
+    ).toBe(
+      "no tracked mise.lock beside .mise.toml; run mise lock; .github/actions/setup/action.yml pins mise 2026.10.3, older than 2026.11.1, which reads format 4; .github/workflows/ci.yml pins mise 2026.11.0, older than 2026.11.1, which reads format 4",
+    );
+    // An older format, or a tool added after locking, fails.
+    expect(rule(checkout("format-3", { "mise.toml": config, "mise.lock": lock("", ["bun"]) }))).toBe(
+      "mise.lock is unversioned, not format 4; mise.lock has no entry for aqua:koalaman/shellcheck; run mise lock",
+    );
+    expect(rule(checkout("garbled", { "mise.toml": config, "mise.lock": "lockfile_version = = 4\n" }))).toBe(
+      "mise.lock is missing from the working tree or is not valid TOML",
+    );
+    expect(
+      rule(
+        checkout("locked", {
+          ".mise.toml": config,
+          "mise.lock": lock("lockfile_version = 4\n", ["bun", "aqua:koalaman/shellcheck"]),
+          ".github/workflows/ci.yml": workflow("2026.11.8"),
+          ".github/actions/setup/action.yml": composite("2026.11.6"),
+        }),
+      ),
+    ).toBeUndefined();
+    const settingsOnly = audit(
+      root,
+      [checkout("settings-only", { ".mise.toml": "[settings]\nlockfile = true\n" })],
+      selectRules(["mise-lock"], false),
+      statusOf,
+      context,
+    );
+    expect(settingsOnly.checkouts[0]!.skipped).toEqual([{ rule: "mise-lock", detail: "declares no mise tools" }]);
   });
 
   test("finds superseded commands in Markdown, every spelling, outside managed skills", () => {

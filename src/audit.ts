@@ -96,6 +96,69 @@ function stateMachinesSkillProblems(checkout: Checkout): string[] {
       ];
 }
 
+/** The lockfile format matrix standardizes on, and the oldest mise release that reads it. */
+const MISE_LOCK_FORMAT = 4;
+const MINIMUM_MISE = "2026.11.1";
+const MISE_ACTION = /^jdx\/mise-action@/;
+
+/** Parse TOML that should hold a table; missing or malformed TOML gives undefined. */
+function parseToml(source: string | undefined): Record<string, unknown> | undefined {
+  if (source === undefined) return undefined;
+  try {
+    return object(Bun.TOML.parse(source));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The `version` input of every jdx/mise-action step in a parsed workflow or composite action. */
+function miseActionVersions(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(miseActionVersions);
+  const record = object(node);
+  if (!record) return [];
+  const version = typeof record.uses === "string" && MISE_ACTION.test(record.uses) ? object(record.with)?.version : undefined;
+  return [...(version === undefined ? [] : [String(version)]), ...Object.values(record).flatMap(miseActionVersions)];
+}
+
+/** What keeps the root mise config's tools from installing out of a current-format lockfile. */
+function miseLockProblems(checkout: Checkout, config: string, tools: string[]): string[] {
+  if (checkout.tracked("mise.lock").length === 0) return [`no tracked mise.lock beside ${config}; run mise lock`];
+  const lock = parseToml(checkout.read("mise.lock"));
+  if (!lock) return ["mise.lock is missing from the working tree or is not valid TOML"];
+  const found: string[] = [];
+  const format = lock.lockfile_version;
+  if (typeof format !== "number" || format < MISE_LOCK_FORMAT)
+    found.push(`mise.lock is ${typeof format === "number" ? `format ${format}` : "unversioned"}, not format ${MISE_LOCK_FORMAT}`);
+  const locked = object(lock.tools) ?? {};
+  const unlocked = tools.filter(tool => !(tool in locked));
+  if (unlocked.length > 0) found.push(`mise.lock has no entry for ${unlocked.join(", ")}; run mise lock`);
+  return found;
+}
+
+/** Workflows and composite actions that pin a jdx/mise-action `version` too old to read the lockfile format. */
+function ciMiseProblems(checkout: Checkout): string[] {
+  const files = checkout.tracked(
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    ":(glob).github/actions/**/action.yml",
+    ":(glob).github/actions/**/action.yaml",
+  );
+  return files.flatMap(file => {
+    let parsed: unknown;
+    try {
+      parsed = Bun.YAML.parse(checkout.read(file) ?? "");
+    } catch {
+      return [];
+    }
+    const old = new Set(
+      miseActionVersions(parsed)
+        .map(version => version.replace(/^v/, ""))
+        .filter(version => EXACT_VERSION.test(version) && compareVersions(version, MINIMUM_MISE) < 0),
+    );
+    return [...old].map(version => `${file} pins mise ${version}, older than ${MINIMUM_MISE}, which reads format ${MISE_LOCK_FORMAT}`);
+  });
+}
+
 const ONBOARDING = "AGENTS.md#onboarding-a-repository";
 
 /** Hermes truncates a context file past this many characters (Unicode code points), dropping its middle. */
@@ -322,6 +385,17 @@ export const RULES: readonly Rule[] = [
         );
       if (python && checkout.tracked(":(glob)**/test_module_graph.py").length === 0) missing.push("the Python package has no test_module_graph.py");
       return problems(missing);
+    },
+  },
+  {
+    id: "mise-lock",
+    summary: `mise tools install from a format ${MISE_LOCK_FORMAT} mise.lock, and CI pins mise ${MINIMUM_MISE} or newer to read it`,
+    source: "docs/dependency-upgrades.md#toolchain-lockfiles",
+    check: checkout => {
+      const config = checkout.tracked("mise.toml", ".mise.toml")[0];
+      const tools = Object.keys(object(parseToml(config && checkout.read(config))?.tools) ?? {});
+      if (config === undefined || tools.length === 0) return skip("declares no mise tools");
+      return problems([...miseLockProblems(checkout, config, tools), ...ciMiseProblems(checkout)]);
     },
   },
   {
