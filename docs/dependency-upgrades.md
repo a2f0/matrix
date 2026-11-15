@@ -63,8 +63,8 @@ CI instead of resolving a new version. Run `mise lock` after changing a tool
 and commit the result, with any `.mise/locks/` sidecars it writes for npm or
 PyPI tools. Format 4 needs mise 2026.11.1 or later, so every workflow's
 mise-action `version` moves before a lock's format does.
-`bun run audit --rule mise-lock` checks the lock's format, an entry for each
-declared tool, and every pinned mise-action `version`.
+`bun run audit --rule mise-lock` checks the setting, the lock's format, an
+entry for each declared tool, and every pinned mise-action `version`.
 
 ## Plan helper for checkouts without agent-tool
 
