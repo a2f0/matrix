@@ -543,8 +543,7 @@ describe("audit", () => {
   });
 
   test("requires mise tools to install from a format 4 lock that every pinned CI mise reads", () => {
-    const declared = '[tools]\nbun = "1.4.4"\n"aqua:koalaman/shellcheck" = { version = "0.11.0" }\n';
-    const config = `${declared}\n[settings]\nlockfile = true\n`;
+    const config = '[tools]\nbun = "1.4.4"\n"aqua:koalaman/shellcheck" = { version = "0.11.0" }\n';
     const lock = (header: string, tools: string[]) =>
       `# @generated\n${header}\n${tools.map(tool => `[[tools."${tool}"]]\nversion = "1"\nbackend = "core:${tool}"\n`).join("\n")}`;
     // Each pinned step, then one that installs the latest mise, which reads any format.
@@ -570,13 +569,11 @@ describe("audit", () => {
     expect(rule(checkout("garbled", { "mise.toml": config, "mise.lock": "lockfile_version = = 4\n" }))).toBe(
       "mise.lock is missing from the working tree or is not valid TOML",
     );
-    // Locking must be on: unset never recreates a deleted lock, and false makes mise-action's --locked fail.
+    // lockfile = false turns locking off, which mise-action's --locked rejects.
     const valid = lock("lockfile_version = 4\n", ["bun", "aqua:koalaman/shellcheck"]);
-    for (const settings of ["", "\n[settings]\nlockfile = false\n"]) {
-      expect(rule(checkout(`setting-${settings.length}`, { "mise.toml": declared + settings, "mise.lock": valid }))).toBe(
-        "mise.toml does not set lockfile = true under [settings]",
-      );
-    }
+    expect(rule(checkout("lockfile-off", { "mise.toml": `${config}\n[settings]\nlockfile = false\n`, "mise.lock": valid }))).toBe(
+      "mise.toml sets lockfile = false",
+    );
     expect(
       rule(
         checkout("locked", {

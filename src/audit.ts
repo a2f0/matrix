@@ -398,8 +398,8 @@ export const RULES: readonly Rule[] = [
       if (!parsed) return fail(`${config} is missing from the working tree or is not valid TOML`);
       const tools = Object.keys(object(parsed.tools) ?? {});
       if (tools.length === 0) return skip("declares no mise tools");
-      // Unset keeps an existing lock current but never recreates one; false turns locking off, which --locked rejects.
-      const setting = object(parsed.settings)?.lockfile === true ? [] : [`${config} does not set lockfile = true under [settings]`];
+      // false turns locking off, which mise-action's --locked rejects; leaving it unset keeps a committed lock current.
+      const setting = object(parsed.settings)?.lockfile === false ? [`${config} sets lockfile = false`] : [];
       return problems([...setting, ...miseLockProblems(checkout, config, tools), ...ciMiseProblems(checkout)]);
     },
   },
