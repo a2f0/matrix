@@ -110,7 +110,7 @@ const SHIPPING_JOB = /deploy|publish/i;
  * `npm ci` and its kin install dependencies.
  */
 const VALIDATION_STEP =
-  /\b(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|verify)\b|\b(?:bun|npm|pnpm|yarn)\s+run\s+ci\b|\bbun\s+test\b|\b(?:pytest|vitest|jest)\b|\b(?:cargo|go|swift|dotnet)\s+test\b|\bgradlew\b.*\btest|\bxcodebuild\b.*\btest\b|\bturbo\s+(?:run\s+)?test/;
+  /\b(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|verify)\b|\b(?:bun|npm|pnpm|yarn)\s+run\s+ci\b|\bbun\s+test\b|\b(?:pytest|vitest|jest)\b|\b(?:cargo|go|swift|dotnet)\s+test\b|\bgradlew\b.*\b(?:test|check|test\w*UnitTest|connected\w*AndroidTest)\b|\bxcodebuild\b.*\btest\b|\bturbo\s+(?:run\s+)?test\b/;
 
 /**
  * A validation command where a command starts: at the script's start or after
@@ -229,14 +229,63 @@ function validationAt(step: Record<string, unknown>): number {
   return run.includes("&&") && /[;\n]/.test(run.slice(at)) ? -1 : at;
 }
 
-/** Text in a step that deploys or publishes: its command, action, or inputs. */
-const SHIPPING_STEP = /deploy|publish|release/i;
+/** Words that name deploying or publishing. */
+const SHIPPING_WORD = /deploy|publish|release/i;
 
-/** Where a step deploys or publishes: in its command, or anywhere when an action or its inputs do. */
+/** Commands that never ship, whatever their arguments name, such as `cd packages/release`. */
+const NEUTRAL_COMMANDS = new Set([
+  "cd",
+  "echo",
+  "printf",
+  "mkdir",
+  "ls",
+  "cat",
+  "export",
+  "test",
+  "[",
+  "pushd",
+  "popd",
+  "rm",
+  "cp",
+  "mv",
+  "touch",
+  "chmod",
+  "tar",
+  "grep",
+  "find",
+]);
+
+/** Words that run the command after them. */
+const WRAPPERS = new Set(["npx", "bunx", "sudo", "exec", "time", "env"]);
+
+/** Package managers whose `run`, `x`, `exec`, or `dlx` names the command or script after it. */
+const RUNNERS = new Set(["bun", "npm", "pnpm", "yarn", "deno"]);
+
+/**
+ * Whether one command deploys or publishes, by the two words that name what it
+ * runs, past assignments, wrappers, and a package manager's `run`: `npm
+ * publish`, `wrangler deploy`, `bun run deploy`, or a release script, but not
+ * `cargo build --release` or `echo Preparing release`.
+ */
+function namesShipping(command: string): boolean {
+  let words = command.trim().split(/\s+/);
+  while (words.length > 0 && (/^\w+=/.test(words[0]!) || WRAPPERS.has(words[0]!))) words = words.slice(1);
+  if (words.length === 0 || NEUTRAL_COMMANDS.has(words[0]!)) return false;
+  if (RUNNERS.has(words[0]!) && ["run", "x", "exec", "dlx"].includes(words[1] ?? "")) words = words.slice(2);
+  return words.slice(0, 2).some(word => !word.startsWith("-") && SHIPPING_WORD.test(word));
+}
+
+/** Where a script's first shipping command starts, outside comments and quoted text, or -1. */
+function shippingCommandAt(run: string): number {
+  for (const command of executable(run).matchAll(/[^;\n|&]+/g)) if (namesShipping(command[0])) return command.index;
+  return -1;
+}
+
+/** Where a step deploys or publishes: a shipping command in its script, or anywhere when its action or an input's command does. */
 function shippingAt(step: Record<string, unknown>): number {
-  const run = typeof step.run === "string" ? executable(script(step)).search(SHIPPING_STEP) : -1;
-  if (run !== -1) return run;
-  return SHIPPING_STEP.test(JSON.stringify([step.uses ?? null, step.with ?? null])) ? 0 : -1;
+  if (typeof step.run === "string") return shippingCommandAt(script(step));
+  const inputs = Object.values(object(step.with) ?? {}).filter(value => typeof value === "string");
+  return (typeof step.uses === "string" && SHIPPING_WORD.test(step.uses)) || inputs.some(namesShipping) ? 0 : -1;
 }
 
 /** Whether a needed job's steps run validation that fails it; the shipping job waits for the whole job to succeed. */

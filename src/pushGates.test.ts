@@ -210,10 +210,30 @@ describe("ungatedShippingJobs", () => {
     ])
       expect(publish(run)).toEqual([]);
     expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "# bun test\nnpm publish" }] }) } }, [])).toEqual(["publish"]);
+    // Compiling tests is not running them.
+    expect(publish("./gradlew testClasses")).toEqual(["publish"]);
+    for (const run of ["./gradlew testDebugUnitTest", "./gradlew :app:test", "./gradlew check"]) expect(publish(run)).toEqual([]);
     // A line continuation joins lines into one command, as the shell reads them.
     expect(publish("echo \\\nbun test")).toEqual(["publish"]);
     expect(publish("bun test \\\n  --coverage")).toEqual([]);
     expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "echo \\\nbun test\nnpm publish" }] }) } }, [])).toEqual(["publish"]);
+    // Shipping is what a command runs, not a word in its arguments.
+    const ships = (...runs: Array<string | Record<string, unknown>>) =>
+      ungatedShippingJobs({ jobs: { publish: job({ steps: runs.map(run => (typeof run === "string" ? { run } : run)) }) } }, []);
+    for (const neutral of ["cargo build --release", "echo Preparing release", "cd packages/release", "bun run agent-tool runs list"])
+      expect(ships(neutral, "bun test", "npm publish")).toEqual([]);
+    for (const shipping of [
+      "npm publish",
+      "npx wrangler deploy",
+      "bun run deploy",
+      "NODE_ENV=production bun run release:prod",
+      "bash scripts/release/publishNpmPackage.sh client",
+      "gh release create v1",
+      { uses: "softprops/action-gh-release@v2" },
+      { uses: "cloudflare/wrangler-action@v3", with: { command: "deploy" } },
+    ])
+      expect(ships(shipping, "bun test")).toEqual(["publish"]);
+    expect(ships({ uses: "actions-rs/cargo@v1", with: { command: "build", args: "--release" } }, "bun test", "npm publish")).toEqual([]);
     // Shipping words in comments or quoted text are not shipping.
     expect(
       ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "echo 'Preparing release'" }, { run: "bun test" }, { run: "npm publish" }] }) } }, []),
