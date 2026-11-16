@@ -106,11 +106,12 @@ const SHIPPING_JOB = /deploy|publish/i;
 
 /**
  * Steps that run a test runner, or a package script named for validation,
- * which conventionally runs the tests. A `ci` script needs `run`, since
+ * which conventionally runs the tests. A runner's arguments stay within its
+ * own command. A `ci` script needs `run`, since
  * `npm ci` and its kin install dependencies.
  */
 const VALIDATION_STEP =
-  /\b(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|verify)\b|\b(?:bun|npm|pnpm|yarn)\s+run\s+ci\b|\bbun\s+test\b|\b(?:pytest|vitest|jest)\b|\b(?:cargo|go|swift|dotnet)\s+test\b|\bgradlew\b.*\b(?:test|check|test\w*UnitTest|connected\w*AndroidTest)\b|\bxcodebuild\b.*\btest\b|\bturbo\s+(?:run\s+)?test\b/;
+  /\b(?:bun|npm|pnpm|yarn)[ \t]+(?:run[ \t]+)?(?:test|check|verify)\b|\b(?:bun|npm|pnpm|yarn)[ \t]+run[ \t]+ci\b|\bbun[ \t]+test\b|\b(?:pytest|vitest|jest)\b|\b(?:cargo|go|swift|dotnet)[ \t]+test\b|\bgradlew\b[^;&|\n]*\b(?:test|check|test\w*UnitTest|connected\w*AndroidTest)\b|\bxcodebuild\b[^;&|\n]*\btest\b|\bturbo[ \t]+(?:run[ \t]+)?test\b/;
 
 /**
  * A validation command where a command starts: at the script's start or after

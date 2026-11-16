@@ -213,6 +213,11 @@ describe("ungatedShippingJobs", () => {
     // Compiling tests is not running them.
     expect(publish("./gradlew testClasses")).toEqual(["publish"]);
     for (const run of ["./gradlew testDebugUnitTest", "./gradlew :app:test", "./gradlew check"]) expect(publish(run)).toEqual([]);
+    // A runner's task list ends with its command.
+    const own = (run: string) => ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run }] }) } }, []);
+    expect(own("./gradlew assemble && ./gradlew publish && ./gradlew test")).toEqual(["publish"]);
+    expect(own("xcodebuild build; npm publish; xcodebuild test")).toEqual(["publish"]);
+    expect(own("./gradlew assemble test && ./gradlew publish")).toEqual([]);
     // A line continuation joins lines into one command, as the shell reads them.
     expect(publish("echo \\\nbun test")).toEqual(["publish"]);
     expect(publish("bun test \\\n  --coverage")).toEqual([]);
