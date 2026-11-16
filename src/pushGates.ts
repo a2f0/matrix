@@ -340,8 +340,9 @@ function defaultShell(scope: Record<string, unknown> | undefined): unknown {
 /** One `&&` term comparing the event or ref to a literal: field, operator, value. */
 const CONTEXT_TERM = /^\(*\s*github\.(event_name|ref|ref_name)\s*(==|!=)\s*'([^']*)'\s*\)*$/;
 
-/** Whether one `&&` term is false on a push to `branch`. */
+/** Whether one `&&` term is false on a push to `branch`: a constant false, or a context comparison the push fails. */
 function falseOnPush(term: string, branch: string): boolean {
+  if (NEVER.test(term.replace(/^[\s(]*|[\s)]*$/g, ""))) return true;
   const match = CONTEXT_TERM.exec(term.trim());
   if (!match) return false;
   const [, field, operator, value] = match;
@@ -351,14 +352,15 @@ function falseOnPush(term: string, branch: string): boolean {
 
 /**
  * Whether a condition cannot hold on a push to `branch`, the only run this
- * audit reads: constant false, or every `||` alternative has an `&&` term
+ * audit reads: a constant false, such as `${{ false }}`, or every `||` alternative has an `&&` term
  * comparing `github.event_name`, `github.ref`, or `github.ref_name` to a value
  * the push does not have. A negation could invert a term, so a condition with
  * one is not read.
  */
 function neverOnPush(condition: unknown, branch: string): boolean {
-  if (condition === false) return true;
+  if (condition === false || condition === 0) return true;
   if (typeof condition !== "string") return false;
+  if (NEVER.test(condition)) return true;
   const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "");
   if (/!(?!=)/.test(plain)) return false;
   return plain.split("||").every(alternative => alternative.split("&&").some(term => falseOnPush(term, branch)));

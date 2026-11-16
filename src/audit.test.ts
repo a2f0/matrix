@@ -837,6 +837,8 @@ describe("audit", () => {
       )["default-branch-ci"];
     expect(gated("github.event_name == 'pull_request'")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
     expect(gated("github.ref != 'refs/heads/main'")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+    for (const disabled of ["false", `$\{{ false }}`, "0", "github.event_name == 'push' && false"])
+      expect(gated(disabled)).toBe("required check 'Tests' never runs on a push to main; let its job run there");
     for (const condition of ["always()", "github.event_name == 'push' || github.event_name == 'pull_request'", "vars.ENABLED == 'true'"])
       expect(gated(condition)).toBeUndefined();
     // GitHub also skips a job whose needs were skipped, unless its condition says otherwise.
