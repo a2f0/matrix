@@ -49,6 +49,27 @@ describe("ungatedShippingJobs", () => {
     expect(ungatedShippingJobs(undefined, [])).toEqual([]);
   });
 
+  test("does not count needs that a job may run after failing", () => {
+    const shipping = (publishIf?: string, packIf?: string) =>
+      ungatedShippingJobs(
+        {
+          jobs: {
+            test: job({ steps: [{ run: "bun test" }] }),
+            pack: job({ needs: "test", ...(packIf ? { if: packIf } : {}) }),
+            publish: job({ needs: "pack", ...(publishIf ? { if: publishIf } : {}) }),
+          },
+        },
+        [],
+      );
+    expect(shipping()).toEqual([]);
+    expect(shipping("github.ref == 'refs/heads/main'")).toEqual([]);
+    for (const condition of ["always()", "!cancelled()", "failure() || success()", "always() && github.ref == 'refs/heads/main'"]) {
+      expect(shipping(condition)).toEqual(["publish"]);
+      expect(shipping(undefined, condition)).toEqual(["publish"]);
+    }
+    expect(shipping("always() && needs.pack.result == 'success'")).toEqual([]);
+  });
+
   test("counts validation scripts but not installs that share their names", () => {
     const shipping = (run: string) => ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run }, { run: "npm publish" }] }) } }, []);
     for (const run of ["npm ci", "pnpm ci", "yarn ci", "bun ci", "npm install"]) expect(shipping(run)).toEqual(["publish"]);

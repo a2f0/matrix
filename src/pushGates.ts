@@ -148,10 +148,32 @@ function validationJob(id: string, job: Record<string, unknown>, required: strin
   return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name);
 }
 
+/** Status functions that let a job run after a job it needs fails. */
+const RUNS_AFTER_FAILURE = /\b(?:always|failure|cancelled)\(\s*\)/;
+
+/** A condition that still requires a needed job to have succeeded. */
+const NEEDS_SUCCESS = /\bneeds\.[\w-]+\.result\s*==\s*['"]success['"]/;
+
+/**
+ * Whether a job's `needs` holds it back until those jobs succeed: true unless
+ * its `if` uses `always()`, `failure()`, or `cancelled()` without comparing a
+ * needed job's result to success.
+ */
+function needsMustSucceed(job: Record<string, unknown>): boolean {
+  const condition = typeof job.if === "string" ? job.if : "";
+  return !RUNS_AFTER_FAILURE.test(condition) || NEEDS_SUCCESS.test(condition);
+}
+
+/** The jobs whose success a job waits for. */
+function gatingNeeds(job: Record<string, unknown>): string[] {
+  return needsMustSucceed(job) ? (patterns(job.needs) ?? []) : [];
+}
+
 /**
  * Whether shipping job `id` validates first, or needs, directly or through
  * other jobs, a required check, a job named for validation, or a job whose
- * steps validate.
+ * steps validate. A job that can run after its needs fail does not pass
+ * their validation on.
  */
 function waitsForChecks(jobs: Record<string, unknown>, id: string, required: string[]): boolean {
   const seen = new Set<string>();
@@ -162,7 +184,7 @@ function waitsForChecks(jobs: Record<string, unknown>, id: string, required: str
     if (seen.has(current) || !job) continue;
     seen.add(current);
     if ((current !== id && validationJob(current, job, required)) || validates(job)) return true;
-    queue.push(...(patterns(job.needs) ?? []));
+    queue.push(...gatingNeeds(job));
   }
   return false;
 }
