@@ -160,9 +160,13 @@ function blocking(step: Record<string, unknown>): boolean {
   return !excused && condition !== false && !NEVER.test(text) && !ONLY_AFTER_FAILURE.test(text);
 }
 
-/** Where a blocking step's command runs validation, or -1. */
+/** Shell that can keep a failed command from failing its step: `||`, a pipe, or `set +e`. */
+const MASKS_FAILURE = /\||\bset\s+\+e\b/;
+
+/** Where a blocking step's command runs validation, or -1; a command that can mask a failure validates nothing. */
 function validationAt(step: Record<string, unknown>): number {
-  return blocking(step) && typeof step.run === "string" ? step.run.search(VALIDATION_STEP) : -1;
+  const run = step.run;
+  return blocking(step) && typeof run === "string" && !MASKS_FAILURE.test(run) ? run.search(VALIDATION_STEP) : -1;
 }
 
 /** Text in a step that deploys or publishes: its command, action, or inputs. */
@@ -181,19 +185,27 @@ function validates(job: Record<string, unknown>): boolean {
 }
 
 /**
- * Whether a shipping job validates before it deploys or publishes: in an
- * earlier step, when the shipping step's condition still requires earlier
- * steps to succeed, or earlier in the step that ships.
+ * Whether a shipping job validates before every step that deploys or
+ * publishes: in an earlier step, when that step's condition still requires
+ * earlier steps to succeed, or earlier in the same step. With no step
+ * recognizably shipping, any validation in the job counts.
  */
 function validatesBeforeShipping(job: Record<string, unknown>): boolean {
   let validated = false;
+  let shipped = false;
   for (const step of steps(job)) {
     const validation = validationAt(step);
     const shipping = shippingAt(step);
-    if (shipping === -1) validated ||= validation !== -1;
-    else return (validated && successRequired(step.if) === "all") || (validation !== -1 && validation < shipping);
+    if (shipping !== -1 && !shipsAfter(validated, step, validation, shipping)) return false;
+    shipped ||= shipping !== -1;
+    validated ||= validation !== -1;
   }
-  return validated;
+  return shipped || validated;
+}
+
+/** Whether a shipping step ships only after validation: an earlier step's, which its condition waits for, or its own, earlier in its command. */
+function shipsAfter(validated: boolean, step: Record<string, unknown>, validation: number, shipping: number): boolean {
+  return (validated && successRequired(step.if) === "all") || (validation !== -1 && validation < shipping);
 }
 
 /**

@@ -137,6 +137,14 @@ describe("ungatedShippingJobs", () => {
     for (const condition of ["always()", "!cancelled()", "failure() || success()"])
       expect(publish("bun test", { run: "npm publish", if: condition })).toEqual(["publish"]);
     for (const condition of ["success()", "github.ref == 'refs/heads/main'"]) expect(publish("bun test", { run: "npm publish", if: condition })).toEqual([]);
+    // Every shipping step must be gated, not only the first.
+    expect(publish("bun test", "npm publish", { run: "npm publish --tag next", if: "always()" })).toEqual(["publish"]);
+    expect(publish("bun test", "npm publish", "npm publish --tag next")).toEqual([]);
+    // A command that can mask a failed test validates nothing.
+    for (const masked of ["bun test || true; npm publish", "bun test | tee test.log; npm publish", "set +e; bun test; npm publish"])
+      expect(publish(masked)).toEqual(["publish"]);
+    expect(publish("bun test || true", "npm publish")).toEqual(["publish"]);
+    expect(publish("bun test; npm publish")).toEqual([]);
   });
 
   test("counts validation scripts but not installs that share their names", () => {
