@@ -185,6 +185,11 @@ describe("ungatedShippingJobs", () => {
     // Every shipping step must be gated, not only the first.
     expect(publish("bun test", "npm publish", { run: "npm publish --tag next", if: "always()" })).toEqual(["publish"]);
     expect(publish("bun test", "npm publish", "npm publish --tag next")).toEqual([]);
+  });
+
+  test("counts only shell that stops at a failed test", () => {
+    const publish = (...runs: Array<string | Record<string, unknown>>) =>
+      ungatedShippingJobs({ jobs: { publish: job({ steps: runs.map(run => (typeof run === "string" ? { run } : run)) }) } }, []);
     // A command that can mask a failed test validates nothing.
     for (const masked of ["bun test || true; npm publish", "bun test | tee test.log; npm publish", "set +e; bun test; npm publish"])
       expect(publish(masked)).toEqual(["publish"]);
@@ -192,8 +197,9 @@ describe("ungatedShippingJobs", () => {
     expect(publish("bun test; npm publish")).toEqual([]);
     // Pipeline stages run at once, so a test piped into a publish does not gate it.
     expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "bun test | npm publish", shell: "bash" }] }) } }, [])).toEqual(["publish"]);
-    // Under -e, a validation that ends its && list still stops the script.
-    expect(publish("cd packages/client && bun test; npm publish")).toEqual([]);
+    // Under -e, a failure anywhere in an && list that more commands follow is ignored, before the tests or after.
+    for (const run of ["cd packages/client && bun test; npm publish", "false && bun test; npm publish"]) expect(publish(run)).toEqual(["publish"]);
+    expect(publish("cd packages/client && bun test", "npm publish")).toEqual([]);
     // Under -e, a failure inside an && list that more commands follow does not stop the script.
     for (const masked of ["bun test && echo ok; npm publish", "bun test && echo ok\nnpm publish"]) expect(publish(masked)).toEqual(["publish"]);
     expect(publish("bun test && echo ok", "npm publish")).toEqual([]);
@@ -296,7 +302,12 @@ describe("ungatedShippingJobs", () => {
       expect(ships(shipping, "bun test")).toEqual(["publish"]);
     expect(ships({ uses: "actions-rs/cargo@v1", with: { command: "build", args: "--release" } }, "bun test", "npm publish")).toEqual([]);
     // Options can come before the subcommand.
-    for (const shipping of ["npm --prefix web publish", "bun --cwd web run deploy", "pnpm -C packages/client publish --no-git-checks"])
+    for (const shipping of [
+      "npm --prefix web publish",
+      "npm --prefix web --workspace client publish",
+      "bun --cwd web run deploy",
+      "pnpm -C packages/client publish --no-git-checks",
+    ])
       expect(ships(shipping, "bun test")).toEqual(["publish"]);
     // Only command inputs name what an action runs.
     expect(ships({ uses: "actions/download-artifact@v4", with: { name: "release-bundle", path: "dist/release" } }, "bun test", "npm publish")).toEqual([]);

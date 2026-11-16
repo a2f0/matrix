@@ -227,20 +227,21 @@ function stopsOnError(step: Record<string, unknown>): boolean {
 }
 
 /**
- * Whether a step's script stops at a failed command from position `from` on:
- * plain commands, and either one command (a pipeline's status is its last
- * command's) or a shell that stops at the first failure with no `&&` list
- * that more commands follow, since `-e` ignores failures inside one.
+ * Whether a step's script stops at any failed command: plain commands, and
+ * either one command (a pipeline's status is its last command's) or a shell
+ * that stops at the first failure with no `&&` list that more commands
+ * follow, since `-e` ignores a failure anywhere inside one: `cd dir && bun
+ * test; npm publish` publishes untested when `cd` fails.
  */
-function stopsAtFailure(step: Record<string, unknown>, run: string, from: number): boolean {
+function stopsAtFailure(step: Record<string, unknown>, run: string): boolean {
   if (!plainScript(run, step.shell === "bash")) return false;
   if (!/[;\n]|&&/.test(run)) return true;
-  return stopsOnError(step) && !/&&[\s\S]*[;\n]/.test(run.slice(from));
+  return stopsOnError(step) && !/&&[\s\S]*[;\n]/.test(run);
 }
 
 /** Whether a step fails its job when its work fails: it is blocking, and its script, if it runs one, stops at a failure. */
 function failsOnError(step: Record<string, unknown>): boolean {
-  return blocking(step) && (typeof step.run !== "string" || stopsAtFailure(step, script(step), 0));
+  return blocking(step) && (typeof step.run !== "string" || stopsAtFailure(step, script(step)));
 }
 
 /** Where a step's script runs a validation command, outside comments and quoted text, or -1, whether or not it can fail the step. */
@@ -252,7 +253,7 @@ function namedValidationAt(step: Record<string, unknown>): number {
 /** Where a step's command runs validation whose failure fails the step, or -1. */
 function validationAt(step: Record<string, unknown>): number {
   const at = namedValidationAt(step);
-  return at !== -1 && blocking(step) && stopsAtFailure(step, script(step), at) ? at : -1;
+  return at !== -1 && blocking(step) && stopsAtFailure(step, script(step)) ? at : -1;
 }
 
 /** Words that name deploying or publishing. */
@@ -336,14 +337,19 @@ function namesShipping(command: string): boolean {
 
 /**
  * The non-option words that name what a command runs: for a package manager,
- * the script after `run`, or the binary and its subcommand after `x`,
- * `exec`, or `dlx`, or else its subcommand; for anything else, its first few.
+ * the script after `run`, the binary and its subcommand after `x`, `exec`,
+ * or `dlx`, or else the words up to a package-managing subcommand; for
+ * anything else, its first few.
  */
 function shippingWords(plain: string[]): string[] {
   if (!RUNNERS.has(plain[0]!)) return plain.slice(0, 4);
   const at = plain.findIndex((word, index) => index > 0 && ["run", "x", "exec", "dlx"].includes(word));
-  // A subcommand that manages packages names what it does, so its arguments are package names.
-  if (at === -1) return PACKAGE_SUBCOMMANDS.has(plain[1] ?? "") ? [] : plain.slice(1, 3);
+  if (at === -1) {
+    // Option values can come before the subcommand (`npm --prefix web publish`), so read up to one that only manages
+    // packages, whose arguments are package names (`npm install semantic-release`).
+    const stop = plain.findIndex((word, index) => index > 0 && PACKAGE_SUBCOMMANDS.has(word));
+    return plain.slice(1, stop === -1 ? undefined : stop);
+  }
   return plain.slice(at + 1, plain[at] === "run" ? at + 2 : at + 3);
 }
 
