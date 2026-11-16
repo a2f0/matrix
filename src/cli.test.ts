@@ -318,6 +318,31 @@ test("summarizes agent-tool's push-gate and base-health reports", () => {
     problems: [undeclared],
   });
   expect(parsePushGateReport({ ...gated, ok: false }, false)).toEqual({ status: "fails", problems: ["agent-tool push-gate check failed"] });
+  // agent-tool passes a test step with an allowSlow reason; the matrix standard does not.
+  const excused = {
+    ...gated,
+    steps: [
+      { label: "lint", command: ["bun", "run", "lint"], allowSlow: null, ok: true, findings: [], errors: [] },
+      {
+        label: "tests",
+        command: ["bun", "run", "test"],
+        allowSlow: "fast unit tests",
+        ok: true,
+        findings: [
+          { kind: "test", runner: "bun test", chain: ["package.json scripts.test: bun test", "bun test"] },
+          { kind: "install", runner: "bun install", chain: ["bun install"] },
+        ],
+        errors: [],
+      },
+    ],
+  };
+  expect(parsePushGateReport(excused, true)).toEqual({
+    status: "fails",
+    problems: [
+      "Step 'tests' runs a test run (bun test) under allowSlow; move it to CI",
+      "Step 'tests' runs a dependency install (bun install) under allowSlow; move it to CI",
+    ],
+  });
 
   expect(parseBaseHealthReport("a2f0/x", { status: "green", failingJobs: [] })).toEqual({ repo: "a2f0/x", status: "green" });
   expect(parseBaseHealthReport("a2f0/x", { status: "no-ci" })).toEqual({ repo: "a2f0/x", status: "no-ci" });

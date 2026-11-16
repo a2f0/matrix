@@ -9,6 +9,21 @@ describe("filterMatches", () => {
     expect(filterMatches(["**", "!main"], "main")).toBe(false);
     expect(filterMatches(["!main", "**"], "main")).toBe(true);
   });
+
+  test("reads ?, +, and character classes as GitHub does, not as shell globs", () => {
+    expect(filterMatches(["mai?n"], "main")).toBe(true);
+    expect(filterMatches(["mai?n"], "man")).toBe(true);
+    expect(filterMatches(["mai?n"], "maxn")).toBe(false);
+    expect(filterMatches(["ma+in"], "maaain")).toBe(true);
+    expect(filterMatches(["ma+in"], "min")).toBe(false);
+    expect(filterMatches(["[lm]ain"], "main")).toBe(true);
+    expect(filterMatches(["release/v[0-9]*"], "release/v2.1")).toBe(true);
+    expect(filterMatches(["release/*"], "release/a/b")).toBe(false);
+    expect(filterMatches(["release/**"], "release/a/b")).toBe(true);
+    expect(filterMatches(["main.x"], "mainyx")).toBe(false);
+    expect(filterMatches(["?main", "+main"], "main")).toBe(false);
+    expect(filterMatches(["?main"], "?main")).toBe(true);
+  });
 });
 
 describe("strictFreshness", () => {

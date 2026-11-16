@@ -131,12 +131,22 @@ function records(value: unknown): Record<string, unknown>[] {
  * `push-gate check`'s report (agent-tool 0.1.58): a checkout with neither a
  * tracked hook nor a `pushGate` section has no gate; otherwise `errors` holds
  * every problem, including each step that reaches a test run or install.
+ * agent-tool lets an `allowSlow` reason excuse such a step; the matrix
+ * standard keeps tests and installs out of every gate, so this does not.
  */
 export function parsePushGateReport(report: Record<string, unknown>, ok: boolean): PushGateResult {
   if (object(report.pushGate)?.declared !== true && object(report.hook)?.tracked !== true)
     return { status: "none", detail: strings(report.notes)[0] ?? "no push gate" };
-  if (ok) return { status: "conforms" };
-  const problems = strings(report.errors);
+  const excused = records(report.steps).flatMap(step =>
+    typeof step.allowSlow === "string"
+      ? records(step.findings).map(
+          finding =>
+            `Step '${String(step.label)}' runs ${finding.kind === "install" ? "a dependency install" : "a test run"} (${String(finding.runner)}) under allowSlow; move it to CI`,
+        )
+      : [],
+  );
+  if (ok && excused.length === 0) return { status: "conforms" };
+  const problems = [...strings(report.errors), ...excused];
   return { status: "fails", problems: problems.length > 0 ? problems : ["agent-tool push-gate check failed"] };
 }
 

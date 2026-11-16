@@ -15,15 +15,35 @@ function patterns(value: unknown): string[] | undefined {
 }
 
 /**
- * Whether a GitHub branch filter matches `branch`. `*` stays within one path
- * segment and `**` crosses them; the last matching pattern decides, so a
- * later `!pattern` excludes what an earlier one included.
+ * A GitHub filter pattern as a regular expression, following GitHub's filter
+ * pattern cheat sheet: `*` stays within one path segment, `**` crosses them,
+ * `?` and `+` make the preceding character optional or repeatable, and `[...]`
+ * is a character class. A `?` or `+` with nothing to apply to is literal.
  */
+function filterPattern(filter: string): RegExp {
+  const tokens = filter.match(FILTER_TOKENS) ?? [];
+  return new RegExp(`^${tokens.map((token, index) => filterToken(token, tokens[index - 1])).join("")}$`);
+}
+
+/** Wildcards, character classes, and single characters, in order. */
+const FILTER_TOKENS = /\*\*|\*|\[[^\]]+\]|./gs;
+
+/** One filter token as regular-expression source; `previous` decides whether a `?` or `+` has a character to apply to. */
+function filterToken(token: string, previous: string | undefined): string {
+  if (token === "**") return ".*";
+  if (token === "*") return "[^/]*";
+  const quantifiable = previous !== undefined && !["*", "**", "?", "+"].includes(previous);
+  if ((token === "?" || token === "+") && quantifiable) return token;
+  if (token.length > 2 && token.startsWith("[")) return `[${token.slice(1, -1).replace(/[\\\]^]/g, "\\$&")}]`;
+  return token.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+}
+
+/** Whether GitHub branch filters match `branch`; the last matching pattern decides, so a later `!pattern` excludes what an earlier one included. */
 export function filterMatches(filters: string[], branch: string): boolean {
   let matched = false;
   for (const filter of filters) {
     const negated = filter.startsWith("!");
-    if (new Bun.Glob(negated ? filter.slice(1) : filter).match(branch)) matched = !negated;
+    if (filterPattern(negated ? filter.slice(1) : filter).test(branch)) matched = !negated;
   }
   return matched;
 }

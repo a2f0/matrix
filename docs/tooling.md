@@ -162,8 +162,9 @@ checks, Markdown and shell lint, and generated-file freshness. Tests of any
 kind, builds, coverage, dependency installs, browsers, simulators and
 emulators, model checking, and infrastructure plans run in CI only.
 `agent-tool push-gate check` rejects a step that resolves to a test runner or
-an install unless it carries an `allowSlow` reason. Before taking a check out
-of a hook, confirm that a required CI job runs it.
+an install unless it carries an `allowSlow` reason; the matrix audit rejects
+one even with a reason, so managed repositories do not use `allowSlow`. Before
+taking a check out of a hook, confirm that a required CI job runs it.
 
 After a push, wait for CI with `agent-tool pr checks --wait`. When a job
 fails, read it with `agent-tool pr logs` and push a reviewed fix commit to the
