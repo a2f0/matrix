@@ -341,27 +341,67 @@ function validatingNeed(id: string, job: Record<string, unknown>, required: stri
 }
 
 /** Status functions; a condition with none implicitly requires everything before it to succeed. */
-const STATUS_FUNCTION = /\b(?:success|failure|always|cancelled)\(\s*\)/;
+const STATUS_FUNCTION = /\b(?:success|failure|always|cancelled)\(\s*\)/i;
 
-/** One `&&` term that requires a needed job to have succeeded, capturing the job. */
-const NEEDS_SUCCESS = /^\(*\s*needs\.([\w-]+)\.result\s*==\s*['"]success['"]\s*\)*$/;
+/** One term that requires a needed job to have succeeded, capturing the job; GitHub compares strings without regard to case. */
+const NEEDS_SUCCESS = /^needs\.([\w-]+)\.result\s*==\s*'success'$/i;
+
+/** What a condition requires to have succeeded: everything before it, and particular needed jobs. */
+interface Requirement {
+  all: boolean;
+  readonly needs: Set<string>;
+}
+
+/**
+ * Read a plain `&&` chain of terms and parenthesized chains, collecting what
+ * they require; undefined at a negation, or when a group is compared or
+ * followed by anything but `&&`, as `(success() && false) == false` is, since
+ * those could invert or bypass a term.
+ */
+function readRequirement(cursor: Cursor): Requirement | undefined {
+  const found: Requirement = { all: false, needs: new Set() };
+  do {
+    if (accept(cursor, "!")) return undefined;
+    const part = accept(cursor, "(") ? readGroup(cursor) : termRequirement(readTerm(cursor).trim());
+    if (part === undefined) return undefined;
+    found.all ||= part.all;
+    for (const need of part.needs) found.needs.add(need);
+  } while (accept(cursor, "&&"));
+  return found;
+}
+
+/** A parenthesized chain, after its opening parenthesis, through its closing one. */
+function readGroup(cursor: Cursor): Requirement | undefined {
+  const inner = readRequirement(cursor);
+  return inner !== undefined && accept(cursor, ")") ? inner : undefined;
+}
+
+/** What one term requires: `success()` everything, `needs.<job>.result == 'success'` that job, anything else nothing. */
+function termRequirement(term: string): Requirement {
+  const need = NEEDS_SUCCESS.exec(term)?.[1];
+  return { all: /^success\(\s*\)$/i.test(term), needs: new Set(need === undefined ? [] : [need]) };
+}
 
 /**
  * What a job or step condition requires to have succeeded first, following
  * GitHub: without a status function it implicitly requires everything
- * (`"all"`). With one, only a plain `&&` of terms is read, where a
- * `success()` term requires everything and a `needs.<job>.result ==
- * 'success'` term requires that job; an `||` or a negation other than `!=`,
- * `!cancelled()`, and `!failure()` could invert or bypass a term, so such a
- * condition requires nothing.
+ * (`"all"`). With one, only a plain `&&` chain is read, parentheses
+ * included, where a `success()` term requires everything and a
+ * `needs.<job>.result == 'success'` term requires that job. An `||`, a
+ * compared group, or a negation other than `!=`, `!cancelled()`, and
+ * `!failure()` could invert or bypass a term, so such a condition requires
+ * nothing.
  */
 function successRequired(condition: unknown): "all" | Set<string> {
   if (typeof condition !== "string" || !STATUS_FUNCTION.test(condition)) return "all";
-  const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "").replace(/!\s*(?:failure|cancelled)\(\s*\)/g, "true");
-  if (plain.includes("||") || /!(?!=)/.test(plain)) return new Set();
-  const terms = plain.split("&&").map(term => term.trim());
-  if (terms.some(term => /^\(*\s*success\(\s*\)\s*\)*$/.test(term))) return "all";
-  return new Set(terms.flatMap(term => NEEDS_SUCCESS.exec(term)?.[1] ?? []));
+  const text = condition
+    .trim()
+    .replace(/^\$\{\{([\s\S]*)\}\}$/, "$1")
+    .replace(/!\s*(?:failure|cancelled)\(\s*\)/gi, "true");
+  const cursor: Cursor = { text, branch: "", at: 0 };
+  const found = readRequirement(cursor);
+  if (found === undefined || cursor.text.slice(cursor.at).trim() !== "") return new Set();
+  return found.all ? "all" : found.needs;
 }
 
 /**

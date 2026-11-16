@@ -87,7 +87,18 @@ describe("ungatedShippingJobs", () => {
       expect(deploy(condition)).toEqual(["deploy"]);
     expect(deploy("always() && needs.tests.result == 'success' && github.ref != 'refs/heads/x'")).toEqual([]);
     // Any status function drops GitHub's implicit success(); an explicit success() keeps every need.
-    for (const condition of ["!success()", "!failure() && always()", "success() || failure()"]) expect(deploy(condition)).toEqual(["deploy"]);
+    for (const condition of [
+      "!success()",
+      "!failure() && always()",
+      "success() || failure()",
+      // A compared group could invert what it holds.
+      "always() && (success() && false) == false",
+      "always() && (needs.tests.result == 'success') == false",
+      "always() && (needs.tests.result == 'success' || true)",
+    ])
+      expect(deploy(condition)).toEqual(["deploy"]);
+    for (const condition of ["always() && (needs.tests.result == 'success' && github.ref != 'x')", "ALWAYS() && needs.tests.result == 'SUCCESS'", "Success()"])
+      expect(deploy(condition)).toEqual([]);
     for (const condition of ["success()", "success() && github.ref == 'refs/heads/main'", "github.ref == 'refs/heads/main'"])
       expect(deploy(condition)).toEqual([]);
   });

@@ -163,7 +163,9 @@ kind, builds, coverage, dependency installs, browsers, simulators and
 emulators, model checking, and infrastructure plans run in CI only.
 `agent-tool push-gate check` rejects a step that resolves to a test runner or
 an install unless it carries an `allowSlow` reason; the matrix audit rejects
-one even with a reason, so managed repositories do not use `allowSlow`. Before
+one even with a reason, so managed repositories do not use `allowSlow`.
+Neither recognizes a build step yet, since agent-tool's resolver classifies only
+test runners and installs; keep builds out of a gate by review. Before
 taking a check out of a hook, confirm that a required CI job runs it.
 
 After a push, wait for CI with `agent-tool pr checks --wait`. When a job
