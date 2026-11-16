@@ -128,6 +128,9 @@ describe("ungatedShippingJobs", () => {
       { if: expression("Failure()") },
       { if: "CANCELLED()" },
       { if: "FALSE" },
+      // A compared or alternative status function may skip a passing run.
+      { if: "success() == false" },
+      { if: "always() || github.ref == 'refs/heads/x'" },
       { "continue-on-error": true },
       { "continue-on-error": expression("true") },
     ])
@@ -141,6 +144,17 @@ describe("ungatedShippingJobs", () => {
       expect(named("gate", { run: "bun test", ...excused }, ["gate"])).toEqual(["publish"]);
     }
     expect(named("test", { run: "bun run build" })).toEqual([]);
+    // A job named for validation whose command cannot fail it validates nothing.
+    expect(named("tests", { run: "npx --yes vitest run || true" })).toEqual(["publish"]);
+    expect(named("tests", { run: "./run-suite.sh || true" })).toEqual(["publish"]);
+    expect(named("tests", { run: "npx --yes vitest run" })).toEqual([]);
+    // A pipeline's status is its last command's, so a pipe from a command that only prints is safe.
+    expect(named("gate", { run: "printf '%s\\n' \"$NEEDS\" | bun run agent-tool ci gate -" })).toEqual([]);
+    expect(named("gate", { run: "bun run agent-tool ci gate - | tee gate.log" })).toEqual(["publish"]);
+    // Under shell: bash, GitHub sets pipefail, so any pipe fails on a failed command.
+    expect(named("tests", { run: "bun test | tee test.log", shell: "bash" })).toEqual([]);
+    expect(named("tests", { run: "bun test | tee test.log" })).toEqual(["publish"]);
+    expect(named("tests", { run: "echo start | bun test" })).toEqual([]);
     // The shipping job's own validation follows the same rule.
     const own = (testStep: Record<string, unknown>) => ungatedShippingJobs({ jobs: { publish: job({ steps: [testStep, { run: "npm publish" }] }) } }, []);
     expect(own({ run: "bun test" })).toEqual([]);
@@ -242,7 +256,14 @@ describe("ungatedShippingJobs", () => {
   test("finds shipping in the command a step runs, not in its arguments", () => {
     const ships = (...runs: Array<string | Record<string, unknown>>) =>
       ungatedShippingJobs({ jobs: { publish: job({ steps: runs.map(run => (typeof run === "string" ? { run } : run)) }) } }, []);
-    for (const neutral of ["cargo build --release", "echo Preparing release", "cd packages/release", "bun run agent-tool runs list"])
+    for (const neutral of [
+      "cargo build --release",
+      "echo Preparing release",
+      "cd packages/release",
+      "bun run agent-tool runs list",
+      // A package manager's run names only its script.
+      "bun run build --outdir dist/release",
+    ])
       expect(ships(neutral, "bun test", "npm publish")).toEqual([]);
     for (const shipping of [
       "npm publish",

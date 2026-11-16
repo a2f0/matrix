@@ -118,7 +118,10 @@ const VALIDATION_STEP =
  * a newline, `;`, or `&&`, past `NAME=value` assignments, with an optional
  * `npx`/`bunx` or path prefix. Group 1 is the command.
  */
-const VALIDATION_COMMAND = new RegExp(String.raw`(?:^|[;\n]|&&)[ \t]*(?:\w+=\S*[ \t]+)*((?:(?:npx|bunx)[ \t]+)?(?:\S*/)?(?:${VALIDATION_STEP.source}))`, "d");
+const VALIDATION_COMMAND = new RegExp(
+  String.raw`(?:^|[;\n]|&&)[ \t]*(?:\w+=\S*[ \t]+)*((?:(?:npx|bunx)(?:[ \t]+-\S+)*[ \t]+)?(?:\S*/)?(?:${VALIDATION_STEP.source}))`,
+  "d",
+);
 
 /**
  * A step's script, trimmed, with each line continuation (a backslash ending a
@@ -165,22 +168,28 @@ function steps(job: Record<string, unknown>): Record<string, unknown>[] {
 /** A step condition that never holds: a constant false. */
 const NEVER = /^\s*(?:\$\{\{\s*)?(?:false|0|''|"")(?:\s*\}\})?\s*$/i;
 
-/** Conditions that run a step only after an earlier one failed or the run was cancelled. */
-const ONLY_AFTER_FAILURE = /\b(?:failure|cancelled)\(\s*\)|!\s*(?:success|always)\(\s*\)/i;
-
 /**
- * Whether a step fails its job when its work fails: no `continue-on-error`
- * other than false, and no `if` that keeps it from running on a passing run,
- * a constant false, `failure()`, `cancelled()`, `!success()`, or `!always()`.
- * Other conditions cannot be evaluated from the file, so they are trusted: a
- * test step that shares the publish step's condition, as release workflows
- * do, still gates it.
+ * Whether a step with this condition runs on a passing run. A constant false
+ * does not. A condition with no status function is trusted, since the file
+ * cannot evaluate it: a test step that shares the publish step's condition,
+ * as release workflows do, still gates it. One with a status function must be
+ * a plain `&&` chain whose status terms are `success()` or `always()`;
+ * `failure()`, a negation, a comparison such as `success() == false`, or an
+ * `||` may skip it.
  */
+function runsWhenPassing(condition: unknown): boolean {
+  if (condition === false || condition === 0) return false;
+  if (typeof condition !== "string") return true;
+  if (NEVER.test(condition)) return false;
+  if (!STATUS_FUNCTION.test(condition)) return true;
+  const found = parseRequirement(condition);
+  return found !== undefined && !found.other;
+}
+
+/** Whether a step fails its job when its work fails: it runs on a passing run, and no `continue-on-error` other than false excuses it. */
 function blocking(step: Record<string, unknown>): boolean {
   const excused = step["continue-on-error"] !== undefined && step["continue-on-error"] !== false;
-  const condition = step.if;
-  const text = typeof condition === "string" ? condition.replace(/!\s*(?:failure|cancelled)\(\s*\)/gi, "") : "";
-  return !excused && condition !== false && !NEVER.test(text) && !ONLY_AFTER_FAILURE.test(text);
+  return !excused && runsWhenPassing(step.if);
 }
 
 /** Characters outside plain commands: pipes, `||`, background `&`, grouping, substitution, negation, and redirection. */
@@ -189,24 +198,37 @@ const SHELL_SYNTAX = /[|&`()!{}<>]/;
 /** Shell keywords and builtins that change control flow or error handling, where a command starts. */
 const SHELL_CONTROL = /(?:^|;)\s*(?:if|then|else|elif|fi|while|until|do|done|case|esac|for|select|function|trap|exit|return|eval|exec|source|set)(?=[\s;]|$)/m;
 
+/** A pipe from a command that only prints, such as `printf "%s" "$NEEDS" | tool`: the pipeline's status is the last command's, which this keeps. */
+const EMITTER_PIPE = /(^|[;\n])([ \t]*)(?:echo|printf|cat)\b[^;|\n]*\|(?!\|)/g;
+
 /**
  * Whether a script is plain commands, separated by newlines, `;`, or `&&`, so
  * its exit status follows its commands'. Anything else (conditionals, loops,
- * `||`, pipes, substitution, `set`) could keep a failure from failing the step,
- * and a file cannot show which, so such a script validates nothing.
- * Workflow expressions and `${NAME}` variables are plain words.
+ * `||`, substitution, `set`) could keep a failure from failing the step, and a
+ * file cannot show which, so such a script validates nothing. A pipe counts
+ * only from a command that only prints, or under `shell: bash`, which GitHub
+ * runs with `pipefail`. Single-quoted text, workflow expressions, and
+ * `${NAME}` variables are plain words.
  */
-function plainScript(run: string): boolean {
-  const text = run
+function plainScript(run: string, pipefail = false): boolean {
+  let text = run
+    .replace(/'[^'\n]*'/g, quoted => " ".repeat(quoted.length))
     .replace(/\$\{\{[\s\S]*?\}\}/g, "x")
     .replace(/\$\{\w+\}/g, "x")
-    .replace(/&&/g, ";");
+    .replace(/&&/g, ";")
+    .replace(EMITTER_PIPE, "$1$2");
+  if (pipefail) text = text.replace(/(?<!\|)\|(?!\|)/g, ";");
   return !SHELL_SYNTAX.test(text) && !SHELL_CONTROL.test(text);
 }
 
 /** Whether a step's resolved shell stops at the first failed command: GitHub's default bash and sh run with `-e`. */
 function stopsOnError(step: Record<string, unknown>): boolean {
   return step.shell === undefined || step.shell === "bash" || step.shell === "sh";
+}
+
+/** Whether a step's script fails its job when a command in it fails: it is blocking and plain commands, or it runs an action. */
+function failsOnError(step: Record<string, unknown>): boolean {
+  return typeof step.run !== "string" || (blocking(step) && plainScript(script(step), step.shell === "bash"));
 }
 
 /** Where a step's script runs a validation command, outside comments and quoted text, or -1, whether or not it can fail the step. */
@@ -224,7 +246,7 @@ function namedValidationAt(step: Record<string, unknown>): number {
 function validationAt(step: Record<string, unknown>): number {
   const at = namedValidationAt(step);
   const run = script(step);
-  if (at === -1 || !blocking(step) || !plainScript(run)) return -1;
+  if (at === -1 || !blocking(step) || !plainScript(run, step.shell === "bash")) return -1;
   if (!/[;\n]|&&/.test(run)) return at;
   if (!stopsOnError(step)) return -1;
   return run.includes("&&") && /[;\n]/.test(run.slice(at)) ? -1 : at;
@@ -278,8 +300,19 @@ function namesShipping(command: string): boolean {
   if (words.length === 0 || NEUTRAL_COMMANDS.has(words[0]!)) return false;
   // Options can come before a subcommand (`npm --prefix web publish`), so read the first non-option words.
   const plain = words.filter(word => !word.startsWith("-"));
-  const named = RUNNERS.has(plain[0]!) ? plain.slice(1).filter(word => !["run", "x", "exec", "dlx"].includes(word)) : plain;
-  return named.slice(0, 4).some(word => SHIPPING_WORD.test(word));
+  return shippingWords(plain).some(word => SHIPPING_WORD.test(word));
+}
+
+/**
+ * The non-option words that name what a command runs: for a package manager,
+ * the script after `run`, or the binary and its subcommand after `x`,
+ * `exec`, or `dlx`, or else its subcommand; for anything else, its first few.
+ */
+function shippingWords(plain: string[]): string[] {
+  if (!RUNNERS.has(plain[0]!)) return plain.slice(0, 4);
+  const at = plain.findIndex((word, index) => index > 0 && ["run", "x", "exec", "dlx"].includes(word));
+  if (at === -1) return plain.slice(1, 4);
+  return plain.slice(at + 1, plain[at] === "run" ? at + 2 : at + 3);
 }
 
 /** A script with comments blanked out and quoted text kept, every character where it was. */
@@ -349,8 +382,8 @@ function shipsAfter(validated: boolean, step: Record<string, unknown>, validatio
 function validatingNeed(id: string, job: Record<string, unknown>, required: string[]): boolean {
   if (job["continue-on-error"] !== undefined && job["continue-on-error"] !== false) return false;
   if (validates(job)) return true;
-  // A job whose validation cannot fail it validates nothing, whatever its name.
-  if (steps(job).some(step => namedValidationAt(step) !== -1)) return false;
+  // A job whose validation, or any command, cannot fail it validates nothing, whatever its name.
+  if (steps(job).some(step => namedValidationAt(step) !== -1 || !failsOnError(step))) return false;
   const name = jobName(id, job);
   return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name);
 }
@@ -365,6 +398,8 @@ const NEEDS_SUCCESS = /^needs\.([\w-]+)\.result\s*==\s*'success'$/i;
 interface Requirement {
   all: boolean;
   readonly needs: Set<string>;
+  /** A status term other than `success()` or `always()`, such as `failure()` or `success() == false`. */
+  other: boolean;
 }
 
 /**
@@ -374,12 +409,13 @@ interface Requirement {
  * those could invert or bypass a term.
  */
 function readRequirement(cursor: Cursor): Requirement | undefined {
-  const found: Requirement = { all: false, needs: new Set() };
+  const found: Requirement = { all: false, needs: new Set(), other: false };
   do {
     if (accept(cursor, "!")) return undefined;
     const part = accept(cursor, "(") ? readGroup(cursor) : termRequirement(readTerm(cursor).trim());
     if (part === undefined) return undefined;
     found.all ||= part.all;
+    found.other ||= part.other;
     for (const need of part.needs) found.needs.add(need);
   } while (accept(cursor, "&&"));
   return found;
@@ -394,7 +430,8 @@ function readGroup(cursor: Cursor): Requirement | undefined {
 /** What one term requires: `success()` everything, `needs.<job>.result == 'success'` that job, anything else nothing. */
 function termRequirement(term: string): Requirement {
   const need = NEEDS_SUCCESS.exec(term)?.[1];
-  return { all: /^success\(\s*\)$/i.test(term), needs: new Set(need === undefined ? [] : [need]) };
+  const other = STATUS_FUNCTION.test(term) && !/^(?:success|always)\(\s*\)$/i.test(term);
+  return { all: /^success\(\s*\)$/i.test(term), needs: new Set(need === undefined ? [] : [need]), other };
 }
 
 /**
@@ -409,14 +446,20 @@ function termRequirement(term: string): Requirement {
  */
 function successRequired(condition: unknown): "all" | Set<string> {
   if (typeof condition !== "string" || !STATUS_FUNCTION.test(condition)) return "all";
+  const found = parseRequirement(condition);
+  if (found === undefined) return new Set();
+  return found.all ? "all" : found.needs;
+}
+
+/** A whole condition read as a plain `&&` chain, with `!cancelled()` and `!failure()` as true; undefined when it is not one. */
+function parseRequirement(condition: string): Requirement | undefined {
   const text = condition
     .trim()
     .replace(/^\$\{\{([\s\S]*)\}\}$/, "$1")
     .replace(/!\s*(?:failure|cancelled)\(\s*\)/gi, "true");
   const cursor: Cursor = { text, branch: "", at: 0 };
   const found = readRequirement(cursor);
-  if (found === undefined || cursor.text.slice(cursor.at).trim() !== "") return new Set();
-  return found.all ? "all" : found.needs;
+  return found !== undefined && cursor.text.slice(cursor.at).trim() === "" ? found : undefined;
 }
 
 /**
