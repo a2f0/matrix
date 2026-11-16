@@ -217,7 +217,9 @@ describe("ungatedShippingJobs", () => {
     expect(publish("echo \\\nbun test")).toEqual(["publish"]);
     expect(publish("bun test \\\n  --coverage")).toEqual([]);
     expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "echo \\\nbun test\nnpm publish" }] }) } }, [])).toEqual(["publish"]);
-    // Shipping is what a command runs, not a word in its arguments.
+  });
+
+  test("finds shipping in the command a step runs, not in its arguments", () => {
     const ships = (...runs: Array<string | Record<string, unknown>>) =>
       ungatedShippingJobs({ jobs: { publish: job({ steps: runs.map(run => (typeof run === "string" ? { run } : run)) }) } }, []);
     for (const neutral of ["cargo build --release", "echo Preparing release", "cd packages/release", "bun run agent-tool runs list"])
@@ -234,6 +236,11 @@ describe("ungatedShippingJobs", () => {
     ])
       expect(ships(shipping, "bun test")).toEqual(["publish"]);
     expect(ships({ uses: "actions-rs/cargo@v1", with: { command: "build", args: "--release" } }, "bun test", "npm publish")).toEqual([]);
+    // Options can come before the subcommand.
+    for (const shipping of ["npm --prefix web publish", "bun --cwd web run deploy", "pnpm -C packages/client publish --no-git-checks"])
+      expect(ships(shipping, "bun test")).toEqual(["publish"]);
+    // Only command inputs name what an action runs.
+    expect(ships({ uses: "actions/download-artifact@v4", with: { name: "release-bundle", path: "dist/release" } }, "bun test", "npm publish")).toEqual([]);
     // Shipping words in comments or quoted text are not shipping.
     expect(
       ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "echo 'Preparing release'" }, { run: "bun test" }, { run: "npm publish" }] }) } }, []),

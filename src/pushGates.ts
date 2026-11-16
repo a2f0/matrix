@@ -262,17 +262,19 @@ const WRAPPERS = new Set(["npx", "bunx", "sudo", "exec", "time", "env"]);
 const RUNNERS = new Set(["bun", "npm", "pnpm", "yarn", "deno"]);
 
 /**
- * Whether one command deploys or publishes, by the two words that name what it
- * runs, past assignments, wrappers, and a package manager's `run`: `npm
- * publish`, `wrangler deploy`, `bun run deploy`, or a release script, but not
- * `cargo build --release` or `echo Preparing release`.
+ * Whether one command deploys or publishes, by the first words that name what
+ * it runs, past assignments, wrappers, options, and a package manager's
+ * `run`: `npm publish`, `wrangler deploy`, `bun run deploy`, or a release
+ * script, but not `cargo build --release` or `echo Preparing release`.
  */
 function namesShipping(command: string): boolean {
   let words = command.trim().split(/\s+/);
   while (words.length > 0 && (/^\w+=/.test(words[0]!) || WRAPPERS.has(words[0]!))) words = words.slice(1);
   if (words.length === 0 || NEUTRAL_COMMANDS.has(words[0]!)) return false;
-  if (RUNNERS.has(words[0]!) && ["run", "x", "exec", "dlx"].includes(words[1] ?? "")) words = words.slice(2);
-  return words.slice(0, 2).some(word => !word.startsWith("-") && SHIPPING_WORD.test(word));
+  // Options can come before a subcommand (`npm --prefix web publish`), so read the first non-option words.
+  const plain = words.filter(word => !word.startsWith("-"));
+  const named = RUNNERS.has(plain[0]!) ? plain.slice(1).filter(word => !["run", "x", "exec", "dlx"].includes(word)) : plain;
+  return named.slice(0, 4).some(word => SHIPPING_WORD.test(word));
 }
 
 /** Where a script's first shipping command starts, outside comments and quoted text, or -1. */
@@ -281,10 +283,13 @@ function shippingCommandAt(run: string): number {
   return -1;
 }
 
-/** Where a step deploys or publishes: a shipping command in its script, or anywhere when its action or an input's command does. */
+/** Action inputs that hold a command, such as wrangler-action's `command`. */
+const COMMAND_INPUT = /^(?:command|commands|script|run|cmd|args)$/i;
+
+/** Where a step deploys or publishes: a shipping command in its script, or anywhere when its action or a command input names one. */
 function shippingAt(step: Record<string, unknown>): number {
   if (typeof step.run === "string") return shippingCommandAt(script(step));
-  const inputs = Object.values(object(step.with) ?? {}).filter(value => typeof value === "string");
+  const inputs = Object.entries(object(step.with) ?? {}).flatMap(([key, value]) => (COMMAND_INPUT.test(key) && typeof value === "string" ? [value] : []));
   return (typeof step.uses === "string" && SHIPPING_WORD.test(step.uses)) || inputs.some(namesShipping) ? 0 : -1;
 }
 
@@ -444,19 +449,19 @@ function successNeeds(job: Record<string, unknown>): string[] {
 }
 
 /**
- * Of `checks`, those whose jobs in a parsed workflow a push to `branch` never
- * runs: every job whose name the check matches is skipped there, by its own
- * condition or a skipped job it needs. A check that matches no job, such as
- * one a reusable workflow names, cannot be judged here and is left out.
+ * Whether a push to `branch` runs a job behind required check `check` in a
+ * parsed workflow: undefined when no job there matches it (a reusable
+ * workflow's check cannot be judged here), false when the workflow does not
+ * run on that push or every matching job is skipped there, by its own
+ * condition or a skipped job it needs.
  */
-export function checksSkippedOnPush(workflow: unknown, checks: string[], branch: string): string[] {
+export function checkRunsOnPush(workflow: unknown, check: string, branch: string): boolean | undefined {
   const jobs = object(object(workflow)?.jobs) ?? {};
+  const matching = Object.keys(jobs).filter(id => isRequiredJob(jobName(id, object(jobs[id]) ?? {}), [check]));
+  if (matching.length === 0) return undefined;
+  if (!runsOnPushTo(workflow, branch)) return false;
   const skipped = skippedOnPush(jobs, branch);
-  const named = Object.entries(jobs).map(([id, value]) => ({ name: jobName(id, object(value) ?? {}), skipped: skipped.has(id) }));
-  return checks.filter(check => {
-    const matching = named.filter(job => isRequiredJob(job.name, [check]));
-    return matching.length > 0 && matching.every(job => job.skipped);
-  });
+  return matching.some(id => !skipped.has(id));
 }
 
 /** A job or step, with an `if` that cannot hold on a push to `branch` written as `false`. */

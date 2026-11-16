@@ -853,6 +853,19 @@ describe("audit", () => {
     for (const gateIf of ["", "needs.tests.result == 'success' && always()"])
       expect(aggregate(gateIf)).toBe("required check 'CI gate' never runs on a push to main; let its job run there");
     for (const gateIf of ["always()", "always() && needs.lint.result == 'success'"]) expect(aggregate(gateIf)).toBeUndefined();
+    // A required check named without its workflow is looked for in every workflow.
+    const bare = (prOnly: boolean, workflowOn = "on: [push, pull_request]") =>
+      failures(
+        checkout(`bare-${prOnly}-${Bun.hash(workflowOn)}`, {
+          "agent-tool.json": required(["Tests"]),
+          ".github/workflows/ci.yml": `name: CI\n${workflowOn}\njobs:\n  test:\n    name: Tests\n${prOnly ? "    if: github.event_name == 'pull_request'\n" : ""}    runs-on: x\n    steps:\n      - run: bun test\n`,
+          ".github/workflows/deploy.yml": "name: Deploy\non: push\njobs: {}\n",
+        }),
+        ["default-branch-ci"],
+      )["default-branch-ci"];
+    expect(bare(true)).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+    expect(bare(false, "on: pull_request")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+    expect(bare(false)).toBeUndefined();
   });
 
   test("requires deploy and publish jobs on the default branch to wait for validation", () => {
