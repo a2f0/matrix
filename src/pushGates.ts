@@ -309,13 +309,6 @@ function successRequired(condition: unknown): "all" | Set<string> {
   return new Set(terms.flatMap(term => NEEDS_SUCCESS.exec(term)?.[1] ?? []));
 }
 
-/** The jobs whose success a job waits for, as its condition allows. */
-function gatingNeeds(job: Record<string, unknown>): string[] {
-  const needs = patterns(job.needs) ?? [];
-  const required = successRequired(job.if);
-  return required === "all" ? needs : needs.filter(need => required.has(need));
-}
-
 /**
  * Whether shipping job `id` validates before it ships, or needs, directly or
  * through other jobs, a required check, a job named for validation, or a job
@@ -327,14 +320,14 @@ function waitsForChecks(jobs: Record<string, unknown>, id: string, required: str
   if (!shipping) return false;
   if (validatesBeforeShipping(shipping)) return true;
   const seen = new Set<string>([id]);
-  const queue = gatingNeeds(shipping);
+  const queue = successNeeds(shipping);
   while (queue.length > 0) {
     const current = queue.pop()!;
     const job = object(jobs[current]);
     if (seen.has(current) || !job) continue;
     seen.add(current);
     if (validatingNeed(current, job, required)) return true;
-    queue.push(...gatingNeeds(job));
+    queue.push(...successNeeds(job));
   }
   return false;
 }
@@ -372,18 +365,45 @@ function neverOnPush(condition: unknown, branch: string): boolean {
 }
 
 /**
+ * The jobs a push to `branch` skips: those whose `if` that push cannot
+ * satisfy, and, as GitHub skips a job whose needs were skipped, those whose
+ * condition requires the success of a skipped job.
+ */
+function skippedOnPush(jobs: Record<string, unknown>, branch: string): Set<string> {
+  const skipped = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = (id: string): boolean => {
+    const job = object(jobs[id]);
+    if (skipped.has(id)) return true;
+    if (!job || visiting.has(id)) return false;
+    visiting.add(id);
+    const skip = neverOnPush(job.if, branch) || successNeeds(job).some(visit);
+    if (skip) skipped.add(id);
+    return skip;
+  };
+  for (const id of Object.keys(jobs)) visit(id);
+  return skipped;
+}
+
+/** The needs whose success a job's condition requires; the job does not run when one is skipped. */
+function successNeeds(job: Record<string, unknown>): string[] {
+  const needs = patterns(job.needs) ?? [];
+  const required = successRequired(job.if);
+  return required === "all" ? needs : needs.filter(need => required.has(need));
+}
+
+/**
  * Of `checks`, those whose jobs in a parsed workflow a push to `branch` never
- * runs: every job whose name the check matches has an `if` that push cannot
- * satisfy. A check that matches no job, such as one a reusable workflow
- * names, cannot be judged here and is left out.
+ * runs: every job whose name the check matches is skipped there, by its own
+ * condition or a skipped job it needs. A check that matches no job, such as
+ * one a reusable workflow names, cannot be judged here and is left out.
  */
 export function checksSkippedOnPush(workflow: unknown, checks: string[], branch: string): string[] {
-  const jobs = Object.entries(object(object(workflow)?.jobs) ?? {}).map(([id, value]) => {
-    const job = object(value) ?? {};
-    return { name: jobName(id, job), skipped: neverOnPush(job.if, branch) };
-  });
+  const jobs = object(object(workflow)?.jobs) ?? {};
+  const skipped = skippedOnPush(jobs, branch);
+  const named = Object.entries(jobs).map(([id, value]) => ({ name: jobName(id, object(value) ?? {}), skipped: skipped.has(id) }));
   return checks.filter(check => {
-    const matching = jobs.filter(job => isRequiredJob(job.name, [check]));
+    const matching = named.filter(job => isRequiredJob(job.name, [check]));
     return matching.length > 0 && matching.every(job => job.skipped);
   });
 }

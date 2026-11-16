@@ -839,6 +839,18 @@ describe("audit", () => {
     expect(gated("github.ref != 'refs/heads/main'")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
     for (const condition of ["always()", "github.event_name == 'push' || github.event_name == 'pull_request'", "vars.ENABLED == 'true'"])
       expect(gated(condition)).toBeUndefined();
+    // GitHub also skips a job whose needs were skipped, unless its condition says otherwise.
+    const aggregate = (gateIf: string) =>
+      failures(
+        checkout(`aggregate-${Bun.hash(gateIf)}`, {
+          "agent-tool.json": required([{ name: "CI gate", workflow: "CI" }]),
+          ".github/workflows/ci.yml": `name: CI\non: [push, pull_request]\njobs:\n  tests:\n    if: github.event_name == 'pull_request'\n    runs-on: x\n    steps:\n      - run: bun test\n  lint:\n    runs-on: x\n    steps:\n      - run: bun run lint\n  gate:\n    name: CI gate\n    needs: [lint, tests]\n${gateIf ? `    if: ${gateIf}\n` : ""}    runs-on: x\n    steps:\n      - run: "true"\n`,
+        }),
+        ["default-branch-ci"],
+      )["default-branch-ci"];
+    for (const gateIf of ["", "needs.tests.result == 'success' && always()"])
+      expect(aggregate(gateIf)).toBe("required check 'CI gate' never runs on a push to main; let its job run there");
+    for (const gateIf of ["always()", "always() && needs.lint.result == 'success'"]) expect(aggregate(gateIf)).toBeUndefined();
   });
 
   test("requires deploy and publish jobs on the default branch to wait for validation", () => {
