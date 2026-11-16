@@ -159,6 +159,10 @@ describe("ungatedShippingJobs", () => {
     expect(named("tests", { run: "./run-suite.sh; echo done", shell: "bash {0}" })).toEqual(["publish"]);
     expect(named("tests", { run: "./run-suite.sh; echo done" })).toEqual([]);
     expect(named("tests", { run: "./run-suite.sh && echo ok; echo done" })).toEqual(["publish"]);
+    // An action whose failure is excused, or that a passing run skips, may be the tests.
+    for (const excused of [{ "continue-on-error": true }, { if: "false" }, { if: "failure()" }])
+      expect(named("tests", { uses: "acme/run-tests@v1", ...excused })).toEqual(["publish"]);
+    expect(named("tests", { uses: "acme/run-tests@v1" })).toEqual([]);
     // The shipping job's own validation follows the same rule.
     const own = (testStep: Record<string, unknown>) => ungatedShippingJobs({ jobs: { publish: job({ steps: [testStep, { run: "npm publish" }] }) } }, []);
     expect(own({ run: "bun test" })).toEqual([]);
@@ -269,8 +273,10 @@ describe("ungatedShippingJobs", () => {
       "echo Preparing release",
       "cd packages/release",
       "bun run agent-tool runs list",
-      // A package manager's run names only its script.
+      // A package manager's run names only its script, and installing a package publishes nothing.
       "bun run build --outdir dist/release",
+      "npm install semantic-release",
+      "bun add -d release-it",
     ])
       expect(ships(neutral, "bun test", "npm publish")).toEqual([]);
     for (const shipping of [

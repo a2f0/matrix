@@ -238,9 +238,9 @@ function stopsAtFailure(step: Record<string, unknown>, run: string, from: number
   return stopsOnError(step) && !/&&[\s\S]*[;\n]/.test(run.slice(from));
 }
 
-/** Whether a step fails its job when any command in it fails: it is blocking and stops at a failure, or it runs an action. */
+/** Whether a step fails its job when its work fails: it is blocking, and its script, if it runs one, stops at a failure. */
 function failsOnError(step: Record<string, unknown>): boolean {
-  return typeof step.run !== "string" || (blocking(step) && stopsAtFailure(step, script(step), 0));
+  return blocking(step) && (typeof step.run !== "string" || stopsAtFailure(step, script(step), 0));
 }
 
 /** Where a step's script runs a validation command, outside comments and quoted text, or -1, whether or not it can fail the step. */
@@ -284,6 +284,34 @@ const NEUTRAL_COMMANDS = new Set([
 /** Words that run the command after them. */
 const WRAPPERS = new Set(["npx", "bunx", "sudo", "exec", "time", "env"]);
 
+/** Package manager subcommands that never publish, such as `install` in `npm install semantic-release`. */
+const PACKAGE_SUBCOMMANDS = new Set([
+  "install",
+  "i",
+  "add",
+  "ci",
+  "remove",
+  "rm",
+  "uninstall",
+  "update",
+  "upgrade",
+  "link",
+  "audit",
+  "outdated",
+  "ls",
+  "list",
+  "why",
+  "pack",
+  "init",
+  "create",
+  "test",
+  "build",
+  "config",
+  "cache",
+  "info",
+  "view",
+]);
+
 /** Package managers whose `run`, `x`, `exec`, or `dlx` names the command or script after it. */
 const RUNNERS = new Set(["bun", "npm", "pnpm", "yarn", "deno"]);
 
@@ -314,7 +342,8 @@ function namesShipping(command: string): boolean {
 function shippingWords(plain: string[]): string[] {
   if (!RUNNERS.has(plain[0]!)) return plain.slice(0, 4);
   const at = plain.findIndex((word, index) => index > 0 && ["run", "x", "exec", "dlx"].includes(word));
-  if (at === -1) return plain.slice(1, 4);
+  // A subcommand that manages packages names what it does, so its arguments are package names.
+  if (at === -1) return PACKAGE_SUBCOMMANDS.has(plain[1] ?? "") ? [] : plain.slice(1, 3);
   return plain.slice(at + 1, plain[at] === "run" ? at + 2 : at + 3);
 }
 
