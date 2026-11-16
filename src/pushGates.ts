@@ -160,13 +160,34 @@ function blocking(step: Record<string, unknown>): boolean {
   return !excused && condition !== false && !NEVER.test(text) && !ONLY_AFTER_FAILURE.test(text);
 }
 
-/** Shell that can keep a failed command from failing its step: `||`, a pipe, or `set +e`. */
+/** Shell that keeps a failed command from failing its step whatever comes after: `||`, a pipe, or `set +e`. */
 const MASKS_FAILURE = /\||\bset\s+\+e\b/;
 
-/** Where a blocking step's command runs validation, or -1; a command that can mask a failure validates nothing. */
+/**
+ * Whether a command can carry on past a failed validation at `at`: masking
+ * shell, or an `&&` list followed by more commands, since `-e` ignores a
+ * failure inside a list that is not the script's last command.
+ */
+function masksFailure(run: string, at: number): boolean {
+  const text = run.trim();
+  return MASKS_FAILURE.test(text) || (text.includes("&&") && /[;\n]/.test(text.slice(at)));
+}
+
+/** Whether a step runs under GitHub's default shells, which stop at the first failed command (`-e`). */
+function stopsOnError(step: Record<string, unknown>): boolean {
+  return step.shell === undefined || step.shell === "bash" || step.shell === "sh";
+}
+
+/** Where a step's command names validation, or -1, whether or not it can fail the step. */
+function namedValidationAt(step: Record<string, unknown>): number {
+  return typeof step.run === "string" ? step.run.search(VALIDATION_STEP) : -1;
+}
+
+/** Where a step's command runs validation whose failure fails the step, or -1. */
 function validationAt(step: Record<string, unknown>): number {
-  const run = step.run;
-  return blocking(step) && typeof run === "string" && !MASKS_FAILURE.test(run) ? run.search(VALIDATION_STEP) : -1;
+  const at = namedValidationAt(step);
+  if (at === -1 || !blocking(step) || !stopsOnError(step)) return -1;
+  return masksFailure(step.run as string, at) ? -1 : at;
 }
 
 /** Text in a step that deploys or publishes: its command, action, or inputs. */
@@ -209,14 +230,17 @@ function shipsAfter(validated: boolean, step: Record<string, unknown>, validatio
 }
 
 /**
- * Whether a job that a shipping job needs validates: it is a required check,
- * is named for validation, or runs validation, and its failure is not
- * excused by `continue-on-error`.
+ * Whether a job that a shipping job needs validates: it runs validation that
+ * can fail it, or, running none that cannot, is a required check or is named
+ * for validation; and `continue-on-error` does not excuse its failure.
  */
 function validatingNeed(id: string, job: Record<string, unknown>, required: string[]): boolean {
   if (job["continue-on-error"] !== undefined && job["continue-on-error"] !== false) return false;
+  if (validates(job)) return true;
+  // A job whose validation cannot fail it validates nothing, whatever its name.
+  if (steps(job).some(step => namedValidationAt(step) !== -1)) return false;
   const name = jobName(id, job);
-  return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name) || validates(job);
+  return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name);
 }
 
 /** Status functions; a condition with none implicitly requires everything before it to succeed. */

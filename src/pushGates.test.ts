@@ -118,6 +118,14 @@ describe("ungatedShippingJobs", () => {
     ])
       expect(publish({ run: "bun test", ...skipped })).toEqual(["publish"]);
     expect(publish({ run: "bun test" }, { "continue-on-error": true })).toEqual(["publish"]);
+    // A job named for validation, or required, whose only validation cannot fail it validates nothing.
+    const named = (id: string, testStep: Record<string, unknown>, required: string[] = []) =>
+      ungatedShippingJobs({ jobs: { [id]: job({ steps: [testStep] }), publish: job({ needs: id }) } }, required);
+    for (const excused of [{ "continue-on-error": true }, { if: "false" }, { run: "bun test || true" }]) {
+      expect(named("test", { run: "bun test", ...excused })).toEqual(["publish"]);
+      expect(named("gate", { run: "bun test", ...excused }, ["gate"])).toEqual(["publish"]);
+    }
+    expect(named("test", { run: "bun run build" })).toEqual([]);
     // The shipping job's own validation follows the same rule.
     const own = (testStep: Record<string, unknown>) => ungatedShippingJobs({ jobs: { publish: job({ steps: [testStep, { run: "npm publish" }] }) } }, []);
     expect(own({ run: "bun test" })).toEqual([]);
@@ -145,6 +153,14 @@ describe("ungatedShippingJobs", () => {
       expect(publish(masked)).toEqual(["publish"]);
     expect(publish("bun test || true", "npm publish")).toEqual(["publish"]);
     expect(publish("bun test; npm publish")).toEqual([]);
+    // Under -e, a failure inside an && list that more commands follow does not stop the script.
+    for (const masked of ["bun test && echo ok; npm publish", "bun test && echo ok\nnpm publish"]) expect(publish(masked)).toEqual(["publish"]);
+    expect(publish("bun test && echo ok", "npm publish")).toEqual([]);
+    expect(publish("bun test && npm publish\n")).toEqual([]);
+    expect(publish("bun run lint && bun run test", "npm publish")).toEqual([]);
+    // A custom shell may not stop at the first failure.
+    expect(publish({ run: "bun test", shell: "bash {0}" }, "npm publish")).toEqual(["publish"]);
+    expect(publish({ run: "bun test", shell: "bash" }, "npm publish")).toEqual([]);
   });
 
   test("counts validation scripts but not installs that share their names", () => {
