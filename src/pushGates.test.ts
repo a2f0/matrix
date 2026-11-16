@@ -68,6 +68,26 @@ describe("ungatedShippingJobs", () => {
       expect(shipping(undefined, condition)).toEqual(["publish"]);
     }
     expect(shipping("always() && needs.pack.result == 'success'")).toEqual([]);
+    expect(shipping("needs.pack.result == 'success' || always()")).toEqual(["publish"]);
+    // Only the needs whose success the condition requires count.
+    const deploy = (condition: string) =>
+      ungatedShippingJobs(
+        { jobs: { tests: job({ steps: [{ run: "bun test" }] }), build: job({}), deploy: job({ needs: ["tests", "build"], if: condition }) } },
+        [],
+      );
+    expect(deploy("always() && needs.build.result == 'success'")).toEqual(["deploy"]);
+    expect(deploy("always() && needs.tests.result == 'success'")).toEqual([]);
+  });
+
+  test("counts validation in the shipping job only before it ships", () => {
+    const publish = (...runs: Array<string | Record<string, unknown>>) =>
+      ungatedShippingJobs({ jobs: { publish: job({ steps: runs.map(run => (typeof run === "string" ? { run } : run)) }) } }, []);
+    expect(publish("bun test", "npm publish")).toEqual([]);
+    expect(publish("bun test && npm publish")).toEqual([]);
+    expect(publish("npm publish", "bun test")).toEqual(["publish"]);
+    expect(publish("npm publish && bun test")).toEqual(["publish"]);
+    expect(publish({ uses: "cloudflare/wrangler-action@v3", with: { command: "deploy" } }, "bun test")).toEqual(["publish"]);
+    expect(publish("bun test", { uses: "cloudflare/wrangler-action@v3", with: { command: "deploy" } })).toEqual([]);
   });
 
   test("counts validation scripts but not installs that share their names", () => {

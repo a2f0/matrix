@@ -133,13 +133,41 @@ function isRequiredJob(name: string, required: string[]): boolean {
   );
 }
 
-/** Whether any of a job's steps runs validation. */
+/** A job's steps as objects. */
+function steps(job: Record<string, unknown>): Record<string, unknown>[] {
+  if (!Array.isArray(job.steps)) return [];
+  return job.steps.map(object).filter(step => step !== undefined);
+}
+
+/** Where a step's command runs validation, or -1. */
+function validationAt(step: Record<string, unknown>): number {
+  return typeof step.run === "string" ? step.run.search(VALIDATION_STEP) : -1;
+}
+
+/** Text in a step that deploys or publishes: its command, action, or inputs. */
+const SHIPPING_STEP = /deploy|publish|release/i;
+
+/** Where a step deploys or publishes: in its command, or anywhere when an action or its inputs do. */
+function shippingAt(step: Record<string, unknown>): number {
+  const run = typeof step.run === "string" ? step.run.search(SHIPPING_STEP) : -1;
+  if (run !== -1) return run;
+  return SHIPPING_STEP.test(JSON.stringify([step.uses ?? null, step.with ?? null])) ? 0 : -1;
+}
+
+/** Whether any of a needed job's steps runs validation; the shipping job waits for the whole job to succeed. */
 function validates(job: Record<string, unknown>): boolean {
-  const steps = Array.isArray(job.steps) ? job.steps : [];
-  return steps.some(step => {
-    const run = object(step)?.run;
-    return typeof run === "string" && VALIDATION_STEP.test(run);
-  });
+  return steps(job).some(step => validationAt(step) !== -1);
+}
+
+/** Whether a shipping job validates in an earlier step, or earlier in the step that ships, before it deploys or publishes. */
+function validatesBeforeShipping(job: Record<string, unknown>): boolean {
+  for (const step of steps(job)) {
+    const validation = validationAt(step);
+    const shipping = shippingAt(step);
+    if (validation !== -1 && (shipping === -1 || validation < shipping)) return true;
+    if (shipping !== -1) return false;
+  }
+  return false;
 }
 
 /** Whether a job that a shipping job needs is a required check or is named for validation. */
@@ -151,39 +179,42 @@ function validationJob(id: string, job: Record<string, unknown>, required: strin
 /** Status functions that let a job run after a job it needs fails. */
 const RUNS_AFTER_FAILURE = /\b(?:always|failure|cancelled)\(\s*\)/;
 
-/** A condition that still requires a needed job to have succeeded. */
-const NEEDS_SUCCESS = /\bneeds\.[\w-]+\.result\s*==\s*['"]success['"]/;
+/** A comparison requiring a needed job to have succeeded, capturing the job. */
+const NEEDS_SUCCESS = /\bneeds\.([\w-]+)\.result\s*==\s*['"]success['"]/g;
 
 /**
- * Whether a job's `needs` holds it back until those jobs succeed: true unless
- * its `if` uses `always()`, `failure()`, or `cancelled()` without comparing a
- * needed job's result to success.
+ * The jobs whose success a job waits for. By default that is all of its
+ * `needs`; an `if` using `always()`, `failure()`, or `cancelled()` lets it run
+ * after they fail, so then only the jobs whose success the condition compares
+ * count, and none when an `||` could bypass the comparison.
  */
-function needsMustSucceed(job: Record<string, unknown>): boolean {
-  const condition = typeof job.if === "string" ? job.if : "";
-  return !RUNS_AFTER_FAILURE.test(condition) || NEEDS_SUCCESS.test(condition);
-}
-
-/** The jobs whose success a job waits for. */
 function gatingNeeds(job: Record<string, unknown>): string[] {
-  return needsMustSucceed(job) ? (patterns(job.needs) ?? []) : [];
+  const needs = patterns(job.needs) ?? [];
+  const condition = typeof job.if === "string" ? job.if : "";
+  if (!RUNS_AFTER_FAILURE.test(condition)) return needs;
+  if (condition.includes("||")) return [];
+  const succeeded = new Set([...condition.matchAll(NEEDS_SUCCESS)].map(match => match[1]));
+  return needs.filter(need => succeeded.has(need));
 }
 
 /**
- * Whether shipping job `id` validates first, or needs, directly or through
- * other jobs, a required check, a job named for validation, or a job whose
- * steps validate. A job that can run after its needs fail does not pass
- * their validation on.
+ * Whether shipping job `id` validates before it ships, or needs, directly or
+ * through other jobs, a required check, a job named for validation, or a job
+ * whose steps validate. A job that can run after a need fails does not pass
+ * that need's validation on.
  */
 function waitsForChecks(jobs: Record<string, unknown>, id: string, required: string[]): boolean {
-  const seen = new Set<string>();
-  const queue = [id];
+  const shipping = object(jobs[id]);
+  if (!shipping) return false;
+  if (validatesBeforeShipping(shipping)) return true;
+  const seen = new Set<string>([id]);
+  const queue = gatingNeeds(shipping);
   while (queue.length > 0) {
     const current = queue.pop()!;
     const job = object(jobs[current]);
     if (seen.has(current) || !job) continue;
     seen.add(current);
-    if ((current !== id && validationJob(current, job, required)) || validates(job)) return true;
+    if (validationJob(current, job, required) || validates(job)) return true;
     queue.push(...gatingNeeds(job));
   }
   return false;
