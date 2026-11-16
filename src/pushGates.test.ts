@@ -124,6 +124,10 @@ describe("ungatedShippingJobs", () => {
       { if: "cancelled()" },
       { if: "!success()" },
       { if: "!always()" },
+      // GitHub reads function names and literals without regard to case.
+      { if: expression("Failure()") },
+      { if: "CANCELLED()" },
+      { if: "FALSE" },
       { "continue-on-error": true },
       { "continue-on-error": expression("true") },
     ])
@@ -247,6 +251,10 @@ describe("ungatedShippingJobs", () => {
       "NODE_ENV=production bun run release:prod",
       "bash scripts/release/publishNpmPackage.sh client",
       "gh release create v1",
+      // Quoting a command does not hide what it runs.
+      'bash "scripts/publish.sh"',
+      "'npm' publish",
+      'npm "publish"',
       { uses: "softprops/action-gh-release@v2" },
       { uses: "cloudflare/wrangler-action@v3", with: { command: "deploy" } },
     ])

@@ -163,10 +163,10 @@ function steps(job: Record<string, unknown>): Record<string, unknown>[] {
 }
 
 /** A step condition that never holds: a constant false. */
-const NEVER = /^\s*(?:\$\{\{\s*)?(?:false|0|''|"")(?:\s*\}\})?\s*$/;
+const NEVER = /^\s*(?:\$\{\{\s*)?(?:false|0|''|"")(?:\s*\}\})?\s*$/i;
 
 /** Conditions that run a step only after an earlier one failed or the run was cancelled. */
-const ONLY_AFTER_FAILURE = /\b(?:failure|cancelled)\(\s*\)|!\s*(?:success|always)\(\s*\)/;
+const ONLY_AFTER_FAILURE = /\b(?:failure|cancelled)\(\s*\)|!\s*(?:success|always)\(\s*\)/i;
 
 /**
  * Whether a step fails its job when its work fails: no `continue-on-error`
@@ -179,7 +179,7 @@ const ONLY_AFTER_FAILURE = /\b(?:failure|cancelled)\(\s*\)|!\s*(?:success|always
 function blocking(step: Record<string, unknown>): boolean {
   const excused = step["continue-on-error"] !== undefined && step["continue-on-error"] !== false;
   const condition = step.if;
-  const text = typeof condition === "string" ? condition.replace(/!\s*(?:failure|cancelled)\(\s*\)/g, "") : "";
+  const text = typeof condition === "string" ? condition.replace(/!\s*(?:failure|cancelled)\(\s*\)/gi, "") : "";
   return !excused && condition !== false && !NEVER.test(text) && !ONLY_AFTER_FAILURE.test(text);
 }
 
@@ -269,7 +269,11 @@ const RUNNERS = new Set(["bun", "npm", "pnpm", "yarn", "deno"]);
  * script, but not `cargo build --release` or `echo Preparing release`.
  */
 function namesShipping(command: string): boolean {
-  let words = command.trim().split(/\s+/);
+  // Quotes group words for the shell; what they hold still names the command.
+  let words = command
+    .trim()
+    .split(/\s+/)
+    .map(word => word.replace(/['"]/g, ""));
   while (words.length > 0 && (/^\w+=/.test(words[0]!) || WRAPPERS.has(words[0]!))) words = words.slice(1);
   if (words.length === 0 || NEUTRAL_COMMANDS.has(words[0]!)) return false;
   // Options can come before a subcommand (`npm --prefix web publish`), so read the first non-option words.
@@ -278,9 +282,20 @@ function namesShipping(command: string): boolean {
   return named.slice(0, 4).some(word => SHIPPING_WORD.test(word));
 }
 
-/** Where a script's first shipping command starts, outside comments and quoted text, or -1. */
+/** A script with comments blanked out and quoted text kept, every character where it was. */
+function uncommented(run: string): string {
+  return run.replace(/'[^']*'|"(?:[^"\\]|\\.)*"|(^|[ \t])#.*$/gm, (text, lead: string | undefined) =>
+    lead === undefined ? text : lead + " ".repeat(text.length - lead.length),
+  );
+}
+
+/**
+ * Where a script's first shipping command starts, outside comments, or -1.
+ * Quoted words count, since `bash "scripts/publish.sh"` publishes; erring this
+ * way can only make the rule stricter.
+ */
 function shippingCommandAt(run: string): number {
-  for (const command of executable(run).matchAll(/[^;\n|&]+/g)) if (namesShipping(command[0])) return command.index;
+  for (const command of uncommented(run).matchAll(/[^;\n|&]+/g)) if (namesShipping(command[0])) return command.index;
   return -1;
 }
 
