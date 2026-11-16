@@ -119,6 +119,15 @@ const VALIDATION_STEP =
  */
 const VALIDATION_COMMAND = new RegExp(String.raw`(?:^|[;\n]|&&)[ \t]*(?:\w+=\S*[ \t]+)*((?:(?:npx|bunx)[ \t]+)?(?:\S*/)?(?:${VALIDATION_STEP.source}))`, "d");
 
+/**
+ * A step's script, trimmed, with each line continuation (a backslash ending a
+ * line) joined into one line as the shell reads it, keeping every other
+ * character where it was.
+ */
+function script(step: Record<string, unknown>): string {
+  return typeof step.run === "string" ? step.run.trim().replace(/\\\r?\n/g, text => " ".repeat(text.length)) : "";
+}
+
 /** A script with quoted text and comments blanked out, keeping every other character where it was. */
 function executable(run: string): string {
   const blank = (text: string) => " ".repeat(text.length);
@@ -202,7 +211,7 @@ function stopsOnError(step: Record<string, unknown>): boolean {
 /** Where a step's script runs a validation command, outside comments and quoted text, or -1, whether or not it can fail the step. */
 function namedValidationAt(step: Record<string, unknown>): number {
   if (typeof step.run !== "string") return -1;
-  return VALIDATION_COMMAND.exec(executable(step.run.trim()))?.indices?.[1]?.[0] ?? -1;
+  return VALIDATION_COMMAND.exec(executable(script(step)))?.indices?.[1]?.[0] ?? -1;
 }
 
 /**
@@ -213,7 +222,7 @@ function namedValidationAt(step: Record<string, unknown>): number {
  */
 function validationAt(step: Record<string, unknown>): number {
   const at = namedValidationAt(step);
-  const run = typeof step.run === "string" ? step.run.trim() : "";
+  const run = script(step);
   if (at === -1 || !blocking(step) || !plainScript(run)) return -1;
   if (!/[;\n]|&&/.test(run)) return at;
   if (!stopsOnError(step)) return -1;
@@ -225,7 +234,7 @@ const SHIPPING_STEP = /deploy|publish|release/i;
 
 /** Where a step deploys or publishes: in its command, or anywhere when an action or its inputs do. */
 function shippingAt(step: Record<string, unknown>): number {
-  const run = typeof step.run === "string" ? executable(step.run.trim()).search(SHIPPING_STEP) : -1;
+  const run = typeof step.run === "string" ? executable(script(step)).search(SHIPPING_STEP) : -1;
   if (run !== -1) return run;
   return SHIPPING_STEP.test(JSON.stringify([step.uses ?? null, step.with ?? null])) ? 0 : -1;
 }
@@ -360,6 +369,23 @@ function neverOnPush(condition: unknown, branch: string): boolean {
   const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "");
   if (/!(?!=)/.test(plain)) return false;
   return plain.split("||").every(alternative => alternative.split("&&").some(term => falseOnPush(term, branch)));
+}
+
+/**
+ * Of `checks`, those whose jobs in a parsed workflow a push to `branch` never
+ * runs: every job whose name the check matches has an `if` that push cannot
+ * satisfy. A check that matches no job, such as one a reusable workflow
+ * names, cannot be judged here and is left out.
+ */
+export function checksSkippedOnPush(workflow: unknown, checks: string[], branch: string): string[] {
+  const jobs = Object.entries(object(object(workflow)?.jobs) ?? {}).map(([id, value]) => {
+    const job = object(value) ?? {};
+    return { name: jobName(id, job), skipped: neverOnPush(job.if, branch) };
+  });
+  return checks.filter(check => {
+    const matching = jobs.filter(job => isRequiredJob(job.name, [check]));
+    return matching.length > 0 && matching.every(job => job.skipped);
+  });
 }
 
 /** A job or step, with an `if` that cannot hold on a push to `branch` written as `false`. */

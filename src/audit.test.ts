@@ -826,6 +826,19 @@ describe("audit", () => {
     expect(failures(checkout("unnamed", unnamed), ["default-branch-ci"])).toEqual({});
     // Required checks without workflows fall back to any workflow on every push.
     expect(failures(checkout("bare-checks", { ...files, "agent-tool.json": required(["CI gate"]) }), ["default-branch-ci"])).toEqual({});
+    // A required check whose job a push to the default branch skips leaves merges untested there.
+    const gated = (condition: string) =>
+      failures(
+        checkout(`skips-${Bun.hash(condition)}`, {
+          "agent-tool.json": required([{ name: "Tests", workflow: "CI" }]),
+          ".github/workflows/ci.yml": `name: CI\non: [push, pull_request]\njobs:\n  test:\n    name: Tests\n    if: ${condition}\n    runs-on: x\n    steps:\n      - run: bun test\n`,
+        }),
+        ["default-branch-ci"],
+      )["default-branch-ci"];
+    expect(gated("github.event_name == 'pull_request'")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+    expect(gated("github.ref != 'refs/heads/main'")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+    for (const condition of ["always()", "github.event_name == 'push' || github.event_name == 'pull_request'", "vars.ENABLED == 'true'"])
+      expect(gated(condition)).toBeUndefined();
   });
 
   test("requires deploy and publish jobs on the default branch to wait for validation", () => {

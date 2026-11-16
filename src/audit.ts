@@ -6,7 +6,7 @@ import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
-import { type PushGateResult, runsOnEveryPush, runsOnPushTo, ungatedShippingJobs, workflowName } from "./pushGates";
+import { checksSkippedOnPush, type PushGateResult, runsOnEveryPush, runsOnPushTo, ungatedShippingJobs, workflowName } from "./pushGates";
 import { supersededGuidance } from "./superseded";
 import { plural } from "./text";
 
@@ -121,9 +121,20 @@ function defaultBranchCi(checkout: Checkout): string | undefined {
   if (named.length === 0)
     return parsed.some(({ workflow }) => runsOnEveryPush(workflow, branch)) ? undefined : `no workflow runs on every push to ${branch}; ${fix}`;
   const missing = named.filter(name => !parsed.some(({ file, workflow }) => workflowName(workflow, file) === name && runsOnEveryPush(workflow, branch)));
-  if (missing.length === 0) return undefined;
-  const quoted = missing.map(name => `'${name}'`).join(" and ");
-  return `${quoted}, which merge.requiredChecks names, ${missing.length === 1 ? "does" : "do"} not run on every push to ${branch}; ${fix}`;
+  if (missing.length > 0) {
+    const quoted = missing.map(name => `'${name}'`).join(" and ");
+    return `${quoted}, which merge.requiredChecks names, ${missing.length === 1 ? "does" : "do"} not run on every push to ${branch}; ${fix}`;
+  }
+  const skipped = parsed.flatMap(({ file, workflow }) => {
+    const checks = requiredChecks(checkout).filter(check => check.workflow === workflowName(workflow, file));
+    return checksSkippedOnPush(
+      workflow,
+      checks.map(check => check.name),
+      branch,
+    );
+  });
+  if (skipped.length === 0) return undefined;
+  return `required check ${skipped.map(name => `'${name}'`).join(" and ")} never ${skipped.length === 1 ? "runs" : "run"} on a push to ${branch}; let its job run there`;
 }
 
 /** Whether a checkout has a pre-push hook or a declared push gate, so the audit spawns `push-gate check` only where it can find something. */

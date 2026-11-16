@@ -210,6 +210,10 @@ describe("ungatedShippingJobs", () => {
     ])
       expect(publish(run)).toEqual([]);
     expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "# bun test\nnpm publish" }] }) } }, [])).toEqual(["publish"]);
+    // A line continuation joins lines into one command, as the shell reads them.
+    expect(publish("echo \\\nbun test")).toEqual(["publish"]);
+    expect(publish("bun test \\\n  --coverage")).toEqual([]);
+    expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "echo \\\nbun test\nnpm publish" }] }) } }, [])).toEqual(["publish"]);
     // Shipping words in comments or quoted text are not shipping.
     expect(
       ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "echo 'Preparing release'" }, { run: "bun test" }, { run: "npm publish" }] }) } }, []),
