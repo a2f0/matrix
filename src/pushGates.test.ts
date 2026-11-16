@@ -273,6 +273,10 @@ describe("ungatedShippingJobs", () => {
       "(github.event_name == 'pull_request' || vars.A) && vars.B",
       "contains(github.ref, 'main') || github.event_name == 'pull_request'",
       "github.event_name == 'pull_request')",
+      // GitHub compares strings without regard to case.
+      "github.event_name == 'PUSH'",
+      "github.ref == 'refs/heads/MAIN'",
+      "github.ref_name != 'Develop'",
     ])
       expect(publish(condition)).toEqual([]);
     expect(publish("github.ref_name == 'release'", "release")).toEqual([]);

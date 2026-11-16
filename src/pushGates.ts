@@ -401,7 +401,9 @@ function falseOnPush(term: string, branch: string): boolean {
   if (!match) return false;
   const [, field, operator, value] = match;
   const actual = field === "event_name" ? "push" : field === "ref" ? `refs/heads/${branch}` : branch;
-  return operator === "==" ? value !== actual : value === actual;
+  // GitHub compares strings without regard to case.
+  const equal = value!.toLowerCase() === actual.toLowerCase();
+  return operator === "==" ? !equal : equal;
 }
 
 /** A position in a condition being read, and the branch the push targets. */
