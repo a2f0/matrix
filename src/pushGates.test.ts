@@ -155,6 +155,10 @@ describe("ungatedShippingJobs", () => {
     expect(named("tests", { run: "bun test | tee test.log", shell: "bash" })).toEqual([]);
     expect(named("tests", { run: "bun test | tee test.log" })).toEqual(["publish"]);
     expect(named("tests", { run: "echo start | bun test" })).toEqual([]);
+    // A job trusted by its name must stop at any failed command, under its shell.
+    expect(named("tests", { run: "./run-suite.sh; echo done", shell: "bash {0}" })).toEqual(["publish"]);
+    expect(named("tests", { run: "./run-suite.sh; echo done" })).toEqual([]);
+    expect(named("tests", { run: "./run-suite.sh && echo ok; echo done" })).toEqual(["publish"]);
     // The shipping job's own validation follows the same rule.
     const own = (testStep: Record<string, unknown>) => ungatedShippingJobs({ jobs: { publish: job({ steps: [testStep, { run: "npm publish" }] }) } }, []);
     expect(own({ run: "bun test" })).toEqual([]);
@@ -182,6 +186,10 @@ describe("ungatedShippingJobs", () => {
       expect(publish(masked)).toEqual(["publish"]);
     expect(publish("bun test || true", "npm publish")).toEqual(["publish"]);
     expect(publish("bun test; npm publish")).toEqual([]);
+    // Pipeline stages run at once, so a test piped into a publish does not gate it.
+    expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "bun test | npm publish", shell: "bash" }] }) } }, [])).toEqual(["publish"]);
+    // Under -e, a validation that ends its && list still stops the script.
+    expect(publish("cd packages/client && bun test; npm publish")).toEqual([]);
     // Under -e, a failure inside an && list that more commands follow does not stop the script.
     for (const masked of ["bun test && echo ok; npm publish", "bun test && echo ok\nnpm publish"]) expect(publish(masked)).toEqual(["publish"]);
     expect(publish("bun test && echo ok", "npm publish")).toEqual([]);

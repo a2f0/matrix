@@ -226,9 +226,21 @@ function stopsOnError(step: Record<string, unknown>): boolean {
   return step.shell === undefined || step.shell === "bash" || step.shell === "sh";
 }
 
-/** Whether a step's script fails its job when a command in it fails: it is blocking and plain commands, or it runs an action. */
+/**
+ * Whether a step's script stops at a failed command from position `from` on:
+ * plain commands, and either one command (a pipeline's status is its last
+ * command's) or a shell that stops at the first failure with no `&&` list
+ * that more commands follow, since `-e` ignores failures inside one.
+ */
+function stopsAtFailure(step: Record<string, unknown>, run: string, from: number): boolean {
+  if (!plainScript(run, step.shell === "bash")) return false;
+  if (!/[;\n]|&&/.test(run)) return true;
+  return stopsOnError(step) && !/&&[\s\S]*[;\n]/.test(run.slice(from));
+}
+
+/** Whether a step fails its job when any command in it fails: it is blocking and stops at a failure, or it runs an action. */
 function failsOnError(step: Record<string, unknown>): boolean {
-  return typeof step.run !== "string" || (blocking(step) && plainScript(script(step), step.shell === "bash"));
+  return typeof step.run !== "string" || (blocking(step) && stopsAtFailure(step, script(step), 0));
 }
 
 /** Where a step's script runs a validation command, outside comments and quoted text, or -1, whether or not it can fail the step. */
@@ -237,19 +249,10 @@ function namedValidationAt(step: Record<string, unknown>): number {
   return VALIDATION_COMMAND.exec(executable(script(step)))?.indices?.[1]?.[0] ?? -1;
 }
 
-/**
- * Where a step's command runs validation whose failure fails the step, or -1.
- * A plain script of one command fails its step in any shell; with more, the
- * shell must stop at the first failure, and the validation must not sit in an
- * `&&` list that more commands follow, since `-e` ignores failures there.
- */
+/** Where a step's command runs validation whose failure fails the step, or -1. */
 function validationAt(step: Record<string, unknown>): number {
   const at = namedValidationAt(step);
-  const run = script(step);
-  if (at === -1 || !blocking(step) || !plainScript(run, step.shell === "bash")) return -1;
-  if (!/[;\n]|&&/.test(run)) return at;
-  if (!stopsOnError(step)) return -1;
-  return run.includes("&&") && /[;\n]/.test(run.slice(at)) ? -1 : at;
+  return at !== -1 && blocking(step) && stopsAtFailure(step, script(step), at) ? at : -1;
 }
 
 /** Words that name deploying or publishing. */
@@ -369,9 +372,14 @@ function validatesBeforeShipping(job: Record<string, unknown>): boolean {
   return shipped || validated;
 }
 
-/** Whether a shipping step ships only after validation: an earlier step's, which its condition waits for, or its own, earlier in its command. */
+/**
+ * Whether a shipping step ships only after validation: an earlier step's,
+ * which its condition waits for, or its own, earlier in its command and not in
+ * the same pipeline, whose stages run at once.
+ */
 function shipsAfter(validated: boolean, step: Record<string, unknown>, validation: number, shipping: number): boolean {
-  return (validated && successRequired(step.if) === "all") || (validation !== -1 && validation < shipping);
+  const earlier = validation !== -1 && validation < shipping && !/(?<!\|)\|(?!\|)/.test(script(step).slice(validation, shipping));
+  return (validated && successRequired(step.if) === "all") || earlier;
 }
 
 /**
