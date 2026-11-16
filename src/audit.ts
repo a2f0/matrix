@@ -559,7 +559,7 @@ export const RULES: readonly Rule[] = [
       const required = requiredChecks(checkout).map(check => check.name);
       const ungated = parsedWorkflows(checkout)
         .filter(({ workflow }) => runsOnPushTo(workflow, checkout.defaultBranch))
-        .flatMap(({ file, workflow }) => ungatedShippingJobs(workflow, required).map(job => `${file} ${job}`));
+        .flatMap(({ file, workflow }) => ungatedShippingJobs(workflow, required, checkout.defaultBranch).map(job => `${file} ${job}`));
       if (ungated.length === 0) return pass;
       const verb = ungated.length === 1 ? "starts" : "start";
       return fail(`${ungated.join(", ")} ${verb} without needing a required check or a job that runs tests`);

@@ -225,7 +225,7 @@ const SHIPPING_STEP = /deploy|publish|release/i;
 
 /** Where a step deploys or publishes: in its command, or anywhere when an action or its inputs do. */
 function shippingAt(step: Record<string, unknown>): number {
-  const run = typeof step.run === "string" ? step.run.search(SHIPPING_STEP) : -1;
+  const run = typeof step.run === "string" ? executable(step.run.trim()).search(SHIPPING_STEP) : -1;
   if (run !== -1) return run;
   return SHIPPING_STEP.test(JSON.stringify([step.uses ?? null, step.with ?? null])) ? 0 : -1;
 }
@@ -244,7 +244,10 @@ function validates(job: Record<string, unknown>): boolean {
 function validatesBeforeShipping(job: Record<string, unknown>): boolean {
   let validated = false;
   let shipped = false;
-  for (const step of steps(job)) {
+  // A step that cannot run on this push neither ships nor validates, so a job whose shipping steps all cannot ships nothing.
+  const runnable = steps(job).filter(step => step.if !== false);
+  if (runnable.length < steps(job).length && !runnable.some(step => shippingAt(step) !== -1) && steps(job).some(step => shippingAt(step) !== -1)) return true;
+  for (const step of runnable) {
     const validation = validationAt(step);
     const shipping = shippingAt(step);
     if (shipping !== -1 && !shipsAfter(validated, step, validation, shipping)) return false;
@@ -332,14 +335,47 @@ function defaultShell(scope: Record<string, unknown> | undefined): unknown {
   return object(object(scope?.defaults)?.run)?.shell;
 }
 
+/** One `&&` term comparing the event or ref to a literal: field, operator, value. */
+const CONTEXT_TERM = /^\(*\s*github\.(event_name|ref|ref_name)\s*(==|!=)\s*'([^']*)'\s*\)*$/;
+
+/** Whether one `&&` term is false on a push to `branch`. */
+function falseOnPush(term: string, branch: string): boolean {
+  const match = CONTEXT_TERM.exec(term.trim());
+  if (!match) return false;
+  const [, field, operator, value] = match;
+  const actual = field === "event_name" ? "push" : field === "ref" ? `refs/heads/${branch}` : branch;
+  return operator === "==" ? value !== actual : value === actual;
+}
+
 /**
- * A workflow's jobs with each step's effective shell written on it: its own,
+ * Whether a condition cannot hold on a push to `branch`, the only run this
+ * audit reads: constant false, or every `||` alternative has an `&&` term
+ * comparing `github.event_name`, `github.ref`, or `github.ref_name` to a value
+ * the push does not have. A negation could invert a term, so a condition with
+ * one is not read.
+ */
+function neverOnPush(condition: unknown, branch: string): boolean {
+  if (condition === false) return true;
+  if (typeof condition !== "string") return false;
+  const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "");
+  if (/!(?!=)/.test(plain)) return false;
+  return plain.split("||").every(alternative => alternative.split("&&").some(term => falseOnPush(term, branch)));
+}
+
+/** A job or step, with an `if` that cannot hold on a push to `branch` written as `false`. */
+function onPush(item: Record<string, unknown>, branch: string): Record<string, unknown> {
+  return neverOnPush(item.if, branch) ? { ...item, if: false } : item;
+}
+
+/**
+ * A workflow's jobs as a push to `branch` runs them: conditions that cannot
+ * hold there written as `false`, and each step's effective shell written on it: its own,
  * its job's or workflow's `defaults.run.shell`, or `pwsh`, GitHub's default
  * on a Windows runner, which does not stop at a failed command. A runner given
  * by an expression, such as `${{ matrix.os }}`, may be Windows, so its default
  * shell is `unresolved` and treated the same way.
  */
-function withShells(workflow: Record<string, unknown> | undefined): Record<string, unknown> {
+function pushedJobs(workflow: Record<string, unknown> | undefined, branch: string): Record<string, unknown> {
   const jobs = object(workflow?.jobs) ?? {};
   return Object.fromEntries(
     Object.entries(jobs).map(([id, value]) => {
@@ -348,22 +384,24 @@ function withShells(workflow: Record<string, unknown> | undefined): Record<strin
       const runner = JSON.stringify(job["runs-on"] ?? "");
       const fallback = /windows/i.test(runner) ? "pwsh" : runner.includes("${{") ? "unresolved" : undefined;
       const shell = defaultShell(job) ?? defaultShell(workflow) ?? fallback;
-      return [id, { ...job, steps: steps(job).map(step => (step.shell === undefined && shell !== undefined ? { ...step, shell } : step)) }];
+      const resolved = steps(job).map(step => onPush(step.shell === undefined && shell !== undefined ? { ...step, shell } : step, branch));
+      return [id, { ...onPush(job, branch), steps: resolved }];
     }),
   );
 }
 
 /**
- * Deploy and publish jobs in a parsed workflow that start without waiting for
- * validation, named as `id` or `id (name)`. Names and commands are all a
+ * Deploy and publish jobs that a push to `branch` can start without waiting
+ * for validation, named as `id` or `id (name)`. Names and commands are all a
  * workflow shows, so this catches a shipping job that waits for nothing, not
  * one that waits for a job running too little.
  */
-export function ungatedShippingJobs(workflow: unknown, required: string[]): string[] {
-  const jobs = withShells(object(workflow));
+export function ungatedShippingJobs(workflow: unknown, required: string[], branch = "main"): string[] {
+  const jobs = pushedJobs(object(workflow), branch);
   return Object.entries(jobs).flatMap(([id, value]) => {
-    const name = jobName(id, object(value) ?? {});
-    if (!SHIPPING_JOB.test(`${id} ${name}`) || waitsForChecks(jobs, id, required)) return [];
+    const job = object(value) ?? {};
+    const name = jobName(id, job);
+    if (job.if === false || !SHIPPING_JOB.test(`${id} ${name}`) || waitsForChecks(jobs, id, required)) return [];
     return [name === id ? id : `${id} (${name})`];
   });
 }

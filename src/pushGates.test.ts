@@ -210,6 +210,39 @@ describe("ungatedShippingJobs", () => {
     ])
       expect(publish(run)).toEqual([]);
     expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "# bun test\nnpm publish" }] }) } }, [])).toEqual(["publish"]);
+    // Shipping words in comments or quoted text are not shipping.
+    expect(
+      ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "echo 'Preparing release'" }, { run: "bun test" }, { run: "npm publish" }] }) } }, []),
+    ).toEqual([]);
+  });
+
+  test("reads conditions as a push to the default branch evaluates them", () => {
+    const publish = (testIf: unknown, branch = "main", extra: Record<string, unknown> = {}) =>
+      ungatedShippingJobs({ jobs: { publish: job({ ...extra, steps: [{ run: "bun test", if: testIf }, { run: "npm publish" }] }) } }, [], branch);
+    // Validation that a push to main never runs does not gate the publish.
+    for (const condition of [
+      "github.event_name == 'pull_request'",
+      "github.event_name != 'push'",
+      "github.ref == 'refs/heads/develop'",
+      "github.ref_name != 'main'",
+      "github.event_name == 'pull_request' || github.event_name == 'schedule'",
+      expression("github.event_name == 'workflow_dispatch' && inputs.full"),
+    ])
+      expect(publish(condition)).toEqual(["publish"]);
+    // Conditions a push to main can satisfy, or that cannot be read, are trusted.
+    for (const condition of [
+      "github.event_name == 'push'",
+      "github.ref == 'refs/heads/main'",
+      "github.event_name == 'pull_request' || inputs.full",
+      "!(github.event_name == 'pull_request')",
+      "steps.version.outputs.publish == 'true'",
+    ])
+      expect(publish(condition)).toEqual([]);
+    expect(publish("github.ref_name == 'release'", "release")).toEqual([]);
+    // A shipping job or step that a push to main never runs needs nothing.
+    expect(publish("false", "main", { if: "github.event_name == 'workflow_dispatch'" })).toEqual([]);
+    const step = ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "npm publish", if: "github.event_name == 'release'" }] }) } }, []);
+    expect(step).toEqual([]);
   });
 
   test("counts validation scripts but not installs that share their names", () => {
