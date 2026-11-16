@@ -6,7 +6,7 @@ import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
-import { type PushGateResult, runsOnEveryPush } from "./pushGates";
+import { type PushGateResult, runsOnEveryPush, runsOnPushTo, ungatedShippingJobs, workflowName } from "./pushGates";
 import { supersededGuidance } from "./superseded";
 import { plural } from "./text";
 
@@ -80,6 +80,43 @@ function otherPushHook(checkout: Checkout): string | undefined {
   const installed = installedPushHook(checkout);
   if (typeof installed === "string" && installed !== PUSH_GATE_HOOK) return installed;
   return checkout.tracked(".husky/pre-push")[0];
+}
+
+/** Each tracked workflow file, parsed; a file YAML cannot read parses as undefined. */
+function parsedWorkflows(checkout: Checkout): Array<{ file: string; workflow: unknown }> {
+  return checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => {
+    try {
+      return { file, workflow: Bun.YAML.parse(checkout.read(file) ?? "") };
+    } catch {
+      return { file, workflow: undefined };
+    }
+  });
+}
+
+/** The checks `merge.requiredChecks` in agent-tool.json requires, with the workflows that run them. */
+function requiredChecks(checkout: Checkout): Array<{ name: string; workflow?: string }> {
+  const checks = object(checkout.agentToolJson?.merge)?.requiredChecks;
+  return (Array.isArray(checks) ? checks : []).flatMap(check => {
+    if (typeof check === "string") return [{ name: check }];
+    const record = object(check);
+    if (typeof record?.name !== "string") return [];
+    return [typeof record.workflow === "string" ? { name: record.name, workflow: record.workflow } : { name: record.name }];
+  });
+}
+
+/** Why the workflows that run the required checks, or any workflow when none are declared, miss some pushes to the default branch. */
+function defaultBranchCi(checkout: Checkout): string | undefined {
+  const parsed = parsedWorkflows(checkout);
+  if (parsed.length === 0) return "no GitHub Actions workflow";
+  const branch = checkout.defaultBranch;
+  const fix = "add a push trigger for it with no paths filter";
+  const named = [...new Set(requiredChecks(checkout).flatMap(check => check.workflow ?? []))];
+  if (named.length === 0)
+    return parsed.some(({ workflow }) => runsOnEveryPush(workflow, branch)) ? undefined : `no workflow runs on every push to ${branch}; ${fix}`;
+  const missing = named.filter(name => !parsed.some(({ file, workflow }) => workflowName(workflow, file) === name && runsOnEveryPush(workflow, branch)));
+  if (missing.length === 0) return undefined;
+  const quoted = missing.map(name => `'${name}'`).join(" and ");
+  return `${quoted}, which merge.requiredChecks names, ${missing.length === 1 ? "does" : "do"} not run on every push to ${branch}; ${fix}`;
 }
 
 /** Whether a checkout has a pre-push hook or a declared push gate, so the audit spawns `push-gate check` only where it can find something. */
@@ -481,7 +518,13 @@ export const RULES: readonly Rule[] = [
     source: "docs/tooling.md#push-gates",
     remote: true,
     check: (checkout, context) => {
-      const found = context.strictFreshness(checkout.repo, checkout.defaultBranch);
+      let found: string[];
+      try {
+        found = context.strictFreshness(checkout.repo, checkout.defaultBranch);
+      } catch (error) {
+        // One unreadable repository fails its own rule instead of ending the audit.
+        return fail(`could not read ${checkout.defaultBranch}'s protection: ${(error as Error).message.trim().split("\n")[0]}`);
+      }
       return found.length === 0
         ? pass
         : fail(`${found.join(" and ")} require${found.length === 1 ? "s" : ""} an up-to-date branch on ${checkout.defaultBranch}`);
@@ -489,21 +532,25 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "default-branch-ci",
-    summary: "A workflow runs on every push to the default branch",
+    summary: "The workflows that run the required checks (any workflow without them) run on every push to the default branch",
     source: "docs/tooling.md#push-gates",
     check: checkout => {
-      const files = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml");
-      if (files.length === 0) return fail("no GitHub Actions workflow");
-      const parsed = files.map(file => {
-        try {
-          return Bun.YAML.parse(checkout.read(file) ?? "");
-        } catch {
-          return undefined;
-        }
-      });
-      return parsed.some(workflow => runsOnEveryPush(workflow, checkout.defaultBranch))
-        ? pass
-        : fail(`no workflow runs on every push to ${checkout.defaultBranch}; add a push trigger for it with no paths filter`);
+      const problem = defaultBranchCi(checkout);
+      return problem === undefined ? pass : fail(problem);
+    },
+  },
+  {
+    id: "deploys-need-checks",
+    summary: "Deploy and publish jobs that pushes to the default branch start need a required check or a job that runs tests",
+    source: "docs/tooling.md#base-freshness",
+    check: checkout => {
+      const required = requiredChecks(checkout).map(check => check.name);
+      const ungated = parsedWorkflows(checkout)
+        .filter(({ workflow }) => runsOnPushTo(workflow, checkout.defaultBranch))
+        .flatMap(({ file, workflow }) => ungatedShippingJobs(workflow, required).map(job => `${file} ${job}`));
+      if (ungated.length === 0) return pass;
+      const verb = ungated.length === 1 ? "starts" : "start";
+      return fail(`${ungated.join(", ")} ${verb} without needing a required check or a job that runs tests`);
     },
   },
   {

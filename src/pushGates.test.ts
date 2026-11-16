@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { filterMatches, strictFreshness } from "./pushGates";
+import { filterMatches, strictFreshness, ungatedShippingJobs } from "./pushGates";
 
 describe("filterMatches", () => {
   test("reads GitHub branch filters, with the last matching pattern deciding", () => {
@@ -23,6 +23,30 @@ describe("filterMatches", () => {
     expect(filterMatches(["main.x"], "mainyx")).toBe(false);
     expect(filterMatches(["?main", "+main"], "main")).toBe(false);
     expect(filterMatches(["?main"], "?main")).toBe(true);
+  });
+});
+
+describe("ungatedShippingJobs", () => {
+  const job = (fields: Record<string, unknown>) => ({ "runs-on": "x", steps: [{ run: "true" }], ...fields });
+  test("matches required checks by name, matrix suffix, reusable-workflow prefix, and expression prefix", () => {
+    const required = ["build (ubuntu-latest)", "windows / Windows CEF persistence", "Smoke (node 20)"];
+    const workflow = (name: string) => ({ jobs: { pre: job({ name }), deploy: job({ needs: "pre" }) } });
+    // A GitHub expression, built so it is not mistaken for a template placeholder.
+    const expression = (text: string) => `$\{{ ${text} }}`;
+    for (const name of ["build", "windows", `Smoke (node ${expression("matrix.node")})`]) expect(ungatedShippingJobs(workflow(name), required)).toEqual([]);
+    expect(ungatedShippingJobs(workflow("Package"), required)).toEqual(["deploy"]);
+    expect(ungatedShippingJobs(workflow(expression("matrix.name")), required)).toEqual(["deploy"]);
+  });
+
+  test("follows needs through other jobs and survives cycles", () => {
+    const jobs = {
+      a: job({ needs: "b" }),
+      b: job({ needs: ["a"] }),
+      publish: job({ needs: ["a"] }),
+    };
+    expect(ungatedShippingJobs({ jobs }, [])).toEqual(["publish"]);
+    expect(ungatedShippingJobs({ jobs: { ...jobs, b: job({ needs: ["a", "unit-tests"] }), "unit-tests": job({}) } }, [])).toEqual([]);
+    expect(ungatedShippingJobs(undefined, [])).toEqual([]);
   });
 });
 

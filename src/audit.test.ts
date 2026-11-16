@@ -739,6 +739,18 @@ describe("audit", () => {
     ]);
     expect(asked).toEqual(["a2f0/protected@main"]);
     expect(failures(repo, ["base-freshness-settings"], true)).toEqual({});
+    // A GitHub error fails that checkout's rule and leaves the rest of the audit running.
+    const broken: AuditContext = {
+      ...context,
+      strictFreshness: () => {
+        throw new Error("gh: HTTP 502: Bad Gateway\n(details)");
+      },
+    };
+    const result = audit(root, [repo, checkout("other")], selectRules(["base-freshness-settings"], true), statusOf, broken);
+    expect(result.checkouts.map(entry => entry.failed)).toEqual([
+      [{ rule: "base-freshness-settings", detail: "could not read main's protection: gh: HTTP 502: Bad Gateway" }],
+      [{ rule: "base-freshness-settings", detail: "could not read main's protection: gh: HTTP 502: Bad Gateway" }],
+    ]);
   });
 
   test("requires a workflow that runs on every push to the default branch", () => {
@@ -770,6 +782,56 @@ describe("audit", () => {
     expect(failures(checkout("no-ci", { ".github/workflows/ci.yml": null }), ["default-branch-ci"])).toEqual({
       "default-branch-ci": "no GitHub Actions workflow",
     });
+  });
+
+  test("requires the workflows that run the required checks to run on every push", () => {
+    const required = (checks: unknown[]) => JSON.stringify({ schemaVersion: 1, merge: { requiredChecks: checks } });
+    const files = {
+      ".github/workflows/ci.yml": "name: CI\non:\n  pull_request:\n  push:\n    branches: [main]\n    paths: [src/**]\njobs: {}\n",
+      ".github/workflows/deploy.yml": "name: Deploy\non: push\njobs: {}\n",
+    };
+    // A deploy-only workflow on every push does not stand in for the required checks.
+    expect(failures(checkout("deploy-only", { ...files, "agent-tool.json": required([{ name: "CI gate", workflow: "CI" }]) }), ["default-branch-ci"])).toEqual({
+      "default-branch-ci": "'CI', which merge.requiredChecks names, does not run on every push to main; add a push trigger for it with no paths filter",
+    });
+    // A workflow without a name is matched by its path.
+    const unnamed = { ".github/workflows/ci.yml": "on: push\njobs: {}\n", "agent-tool.json": required([{ name: "t", workflow: ".github/workflows/ci.yml" }]) };
+    expect(failures(checkout("unnamed", unnamed), ["default-branch-ci"])).toEqual({});
+    // Required checks without workflows fall back to any workflow on every push.
+    expect(failures(checkout("bare-checks", { ...files, "agent-tool.json": required(["CI gate"]) }), ["default-branch-ci"])).toEqual({});
+  });
+
+  test("requires deploy and publish jobs on the default branch to wait for validation", () => {
+    const config = { "agent-tool.json": JSON.stringify({ schemaVersion: 1, merge: { requiredChecks: [{ name: "CI gate", workflow: "CI" }] } }) };
+    const deploys = (jobs: string, on = "on:\n  push:\n    branches: [main]\n    paths: [package.json]") =>
+      failures(checkout(`deploy-${Bun.hash(jobs + on)}`, { ...config, ".github/workflows/ship.yml": `name: Ship\n${on}\njobs:\n${jobs}` }), [
+        "deploys-need-checks",
+      ])["deploys-need-checks"];
+    const step = (run: string) => `    runs-on: x\n    steps:\n      - run: ${run}\n`;
+    // Waiting for a required check, a job named for validation, or a job whose steps validate.
+    for (const jobs of [
+      `  gate:\n    name: CI gate\n${step("true")}  deploy:\n    needs: gate\n${step("wrangler deploy")}`,
+      `  build:\n${step("bun run build")}  ci:\n${step("sh wait.sh")}  publish:\n    needs: [build, ci]\n${step("npm publish")}`,
+      `  prepare:\n${step("bun run verify")}  publish:\n    needs: prepare\n${step("npm publish")}`,
+      `  prepare:\n${step("cargo test --all")}  pack:\n    needs: prepare\n${step("npm pack")}  publish:\n    needs: pack\n${step("npm publish")}`,
+      `  deploy:\n${step("bun test && wrangler deploy")}`,
+      `  lint:\n${step("bun run lint")}`,
+    ])
+      expect(deploys(jobs)).toBeUndefined();
+    // Shipping jobs that wait for nothing that validates.
+    expect(deploys(`  deploy:\n${step("wrangler deploy")}`)).toBe(
+      ".github/workflows/ship.yml deploy starts without needing a required check or a job that runs tests",
+    );
+    expect(
+      deploys(
+        `  build:\n${step("bun run build")}  publish:\n    name: Publish pkg\n    needs: build\n${step("npm publish")}  deploy-docs:\n    needs: [missing]\n${step("x")}`,
+      ),
+    ).toBe(
+      ".github/workflows/ship.yml publish (Publish pkg), .github/workflows/ship.yml deploy-docs start without needing a required check or a job that runs tests",
+    );
+    // Workflows that pushes to the default branch never start are out of scope.
+    expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on:\n  push:\n    branches: [staging]")).toBeUndefined();
+    expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on: workflow_dispatch")).toBeUndefined();
   });
 
   test("rejects unknown rules", () => {

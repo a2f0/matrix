@@ -75,7 +75,17 @@ function pushTrigger(workflow: unknown): Record<string, unknown> | undefined {
 
 /** Whether a push trigger's filters let every push to `branch` through. */
 function pushFiltersAllow(push: Record<string, unknown>, branch: string): boolean {
-  if ("paths" in push || "paths-ignore" in push) return false;
+  return !("paths" in push || "paths-ignore" in push) && branchesAllow(push, branch);
+}
+
+/** Whether pushes to `branch` can start a parsed workflow at all, whatever its path filters. */
+export function runsOnPushTo(workflow: unknown, branch: string): boolean {
+  const push = pushTrigger(workflow);
+  return push !== undefined && branchesAllow(push, branch);
+}
+
+/** Whether a push trigger's branch and tag filters admit pushes to `branch`. */
+function branchesAllow(push: Record<string, unknown>, branch: string): boolean {
   const branches = patterns(push.branches);
   const ignored = patterns(push["branches-ignore"]);
   // A tag filter alone limits the trigger to tags.
@@ -83,6 +93,89 @@ function pushFiltersAllow(push: Record<string, unknown>, branch: string): boolea
   if (branches !== undefined) return filterMatches(branches, branch);
   if (ignored !== undefined) return !filterMatches(ignored, branch);
   return true;
+}
+
+/** A workflow's name as GitHub and `merge.requiredChecks` give it: its `name`, or its path without one. */
+export function workflowName(workflow: unknown, file: string): string {
+  const name = object(workflow)?.name;
+  return typeof name === "string" ? name : file;
+}
+
+/** Jobs that deploy or publish, by their id or name. */
+const SHIPPING_JOB = /deploy|publish/i;
+
+/** Steps that run a test runner, or a package script named for validation, which conventionally runs the tests. */
+const VALIDATION_STEP =
+  /\b(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|verify|ci)\b|\bbun\s+test\b|\b(?:pytest|vitest|jest)\b|\b(?:cargo|go|swift|dotnet)\s+test\b|\bgradlew\b.*\btest|\bxcodebuild\b.*\btest\b|\bturbo\s+(?:run\s+)?test/;
+
+/** Jobs named for validation, such as `test`, `CI gate`, or `wait for CI`. */
+const VALIDATION_JOB = /\b(?:tests?|checks?|verify|ci|gate)\b/i;
+
+/** The name GitHub shows for a job's check: its `name`, or its id. */
+function jobName(id: string, job: Record<string, unknown>): string {
+  return typeof job.name === "string" ? job.name : id;
+}
+
+/**
+ * Whether a job's check is one of `required`. A matrix job's check adds
+ * ` (<values>)` and a reusable workflow's adds ` / <job>`; a name holding an
+ * expression matches on the text before it.
+ */
+function isRequiredJob(name: string, required: string[]): boolean {
+  const fixed = name.split("${{")[0]!.trim();
+  const exact = !name.includes("${{");
+  return required.some(check =>
+    exact ? check === fixed || check.startsWith(`${fixed} (`) || check.startsWith(`${fixed} / `) : fixed !== "" && check.startsWith(fixed),
+  );
+}
+
+/** Whether any of a job's steps runs validation. */
+function validates(job: Record<string, unknown>): boolean {
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  return steps.some(step => {
+    const run = object(step)?.run;
+    return typeof run === "string" && VALIDATION_STEP.test(run);
+  });
+}
+
+/** Whether a job that a shipping job needs is a required check or is named for validation. */
+function validationJob(id: string, job: Record<string, unknown>, required: string[]): boolean {
+  const name = jobName(id, job);
+  return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name);
+}
+
+/**
+ * Whether shipping job `id` validates first, or needs, directly or through
+ * other jobs, a required check, a job named for validation, or a job whose
+ * steps validate.
+ */
+function waitsForChecks(jobs: Record<string, unknown>, id: string, required: string[]): boolean {
+  const seen = new Set<string>();
+  const queue = [id];
+  while (queue.length > 0) {
+    const current = queue.pop()!;
+    const job = object(jobs[current]);
+    if (seen.has(current) || !job) continue;
+    seen.add(current);
+    if ((current !== id && validationJob(current, job, required)) || validates(job)) return true;
+    queue.push(...(patterns(job.needs) ?? []));
+  }
+  return false;
+}
+
+/**
+ * Deploy and publish jobs in a parsed workflow that start without waiting for
+ * validation, named as `id` or `id (name)`. Names and commands are all a
+ * workflow shows, so this catches a shipping job that waits for nothing, not
+ * one that waits for a job running too little.
+ */
+export function ungatedShippingJobs(workflow: unknown, required: string[]): string[] {
+  const jobs = object(object(workflow)?.jobs) ?? {};
+  return Object.entries(jobs).flatMap(([id, value]) => {
+    const name = jobName(id, object(value) ?? {});
+    if (!SHIPPING_JOB.test(`${id} ${name}`) || waitsForChecks(jobs, id, required)) return [];
+    return [name === id ? id : `${id} (${name})`];
+  });
 }
 
 /** What `agent-tool push-gate check` reports for a checkout, reduced to what the audit needs. */

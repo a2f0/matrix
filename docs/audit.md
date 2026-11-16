@@ -43,7 +43,8 @@ first and check `branch` for checkouts that are not on their default branch.
 | `push-gate` | With a pre-push hook or a `pushGate` section: the hook is `scripts/git/hooks/pre-push`, not a hook manager's or one `hooks.files` installs from elsewhere, and agent-tool's `push-gate check` passes (the canonical hook, declared in `hooks.files`, with no step that runs tests or installs, even one with an `allowSlow` reason) | [Push gates](tooling.md#push-gates) |
 | `base-freshness` | `agent-tool.json` does not set `merge.requireStrictBaseFreshness` | [Base freshness](tooling.md#base-freshness) |
 | `base-freshness-settings` | With `--remote`: neither classic protection nor an active ruleset requires an up-to-date branch to merge into the default branch | [Base freshness](tooling.md#base-freshness) |
-| `default-branch-ci` | A workflow runs on every push to the default branch: a push trigger whose branch filters include it, with no paths filter | [Base freshness](tooling.md#base-freshness) |
+| `default-branch-ci` | Each workflow `merge.requiredChecks` names, or any workflow when it names none, runs on every push to the default branch: a push trigger whose branch filters include it, with no paths filter | [Base freshness](tooling.md#base-freshness) |
+| `deploys-need-checks` | A job named for deploying or publishing, in a workflow that pushes to the default branch start, runs a test runner or a `test`, `check`, `verify`, or `ci` script, or needs, directly or through other jobs, a required check, a job whose id or name says test, check, verify, ci, or gate, or a job whose steps do | [Base freshness](tooling.md#base-freshness) |
 | `superseded-guidance` | No tracked Markdown, outside managed skills (and agent-tool's `skills/` sources of them), names a command a shared command replaced | [Superseded guidance](#superseded-guidance) |
 
 A rule checks the evidence a standard leaves in files. It does not prove the

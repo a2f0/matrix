@@ -181,9 +181,11 @@ back to integrate, and so does a `versions check` that fails against the live
 base.
 
 Two PRs that pass CI separately can break the default branch together; that
-is accepted. Every repository runs CI on each push to its default branch so a
-break shows up, and its deploy and publish jobs on that branch depend on its
-tests so a break fails before it ships. The `ship-pr` skill starts with
+is accepted. Every repository runs the workflows behind its required checks on
+each push to its default branch so a break shows up, and its deploy and publish
+jobs on that branch depend on its tests so a break fails before it ships: a
+publish workflow of its own runs them in a job its publish job `needs`, or
+waits for CI on the same commit. The `ship-pr` skill starts with
 `agent-tool repo base-health`: a red default branch is repaired, and the test
 that would have caught the combination added or hardened, before or alongside
 the requested change. A sweep runs it for each target as it starts
@@ -198,7 +200,10 @@ Change GitHub only after the repository's `agent-tool.json` stops requiring
 strictness, or `pr merge` refuses there.
 
 The audit checks this with `push-gate`, `base-freshness`, `default-branch-ci`,
-and, with `--remote`, `base-freshness-settings`.
+`deploys-need-checks`, and, with `--remote`, `base-freshness-settings`. A
+workflow shows job names and commands, not what a script runs, so
+`deploys-need-checks` catches a deploy that waits for nothing; confirm that the
+job it waits for runs the tests.
 
 ## Brand images
 
