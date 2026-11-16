@@ -75,11 +75,18 @@ function installedPushHook(checkout: Checkout): unknown {
   return (Array.isArray(files) ? files : []).map(object).find(file => file?.target === "pre-push")?.source;
 }
 
-/** A pre-push hook other than the push gate's path: one `hooks.files` installs from elsewhere, or a hook manager's. */
-function otherPushHook(checkout: Checkout): string | undefined {
+/**
+ * What files alone show is wrong with a pre-push hook, before asking
+ * agent-tool, which reads only the push gate's path: `hooks.files` installing
+ * an untracked source or one from elsewhere, or a hook manager's hook.
+ */
+function localPushHookProblem(checkout: Checkout): string | undefined {
   const installed = installedPushHook(checkout);
-  if (typeof installed === "string" && installed !== PUSH_GATE_HOOK) return installed;
-  return checkout.tracked(".husky/pre-push")[0];
+  const fix = `replace it with \`agent-tool push-gate hook\` at ${PUSH_GATE_HOOK}`;
+  if (typeof installed === "string" && checkout.tracked(installed).length === 0)
+    return `hooks.files installs ${installed} as pre-push, but it is not tracked; ${installed === PUSH_GATE_HOOK ? "commit the output of `agent-tool push-gate hook` there" : fix}`;
+  const other = typeof installed === "string" && installed !== PUSH_GATE_HOOK ? installed : checkout.tracked(".husky/pre-push")[0];
+  return other === undefined ? undefined : `${other} is a pre-push hook outside the push gate; ${fix}`;
 }
 
 /** Each tracked workflow file, parsed; a file YAML cannot read parses as undefined. */
@@ -497,10 +504,15 @@ export const RULES: readonly Rule[] = [
     source: "docs/tooling.md#push-gates",
     check: (checkout, context) => {
       if (!hasPushHook(checkout)) return skip("no pre-push hook");
-      const other = otherPushHook(checkout);
-      if (other !== undefined)
-        return fail(`${other} is a pre-push hook outside the push gate; replace it with \`agent-tool push-gate hook\` at ${PUSH_GATE_HOOK}`);
-      const result = context.pushGate(checkout.directory);
+      const local = localPushHookProblem(checkout);
+      if (local !== undefined) return fail(local);
+      let result: PushGateResult;
+      try {
+        result = context.pushGate(checkout.directory);
+      } catch (error) {
+        // One checkout agent-tool cannot inspect fails its own rule instead of ending the audit.
+        return fail(`could not run agent-tool push-gate check: ${(error as Error).message.trim().split("\n")[0]}`);
+      }
       if (result.status === "none") return skip(result.detail);
       return result.status === "conforms" ? pass : problems(result.problems);
     },

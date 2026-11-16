@@ -688,7 +688,10 @@ describe("audit", () => {
     expect(failures(checkout("hookless"), ["push-gate"])).toEqual({});
     expect(directories).toEqual([]);
     const hooked: Array<Record<string, string>> = [
-      { "agent-tool.json": JSON.stringify({ schemaVersion: 1, hooks: { files: [{ source: "scripts/git/hooks/pre-push", target: "pre-push" }] } }) },
+      {
+        "agent-tool.json": JSON.stringify({ schemaVersion: 1, hooks: { files: [{ source: "scripts/git/hooks/pre-push", target: "pre-push" }] } }),
+        "scripts/git/hooks/pre-push": "#!/bin/sh\n",
+      },
       { "agent-tool.json": JSON.stringify({ schemaVersion: 1, pushGate: { steps: [] } }) },
     ];
     for (const files of hooked) {
@@ -706,13 +709,37 @@ describe("audit", () => {
 
   test("fails a pre-push hook that push-gate check cannot see", () => {
     const fix = "replace it with `agent-tool push-gate hook` at scripts/git/hooks/pre-push";
-    const elsewhere = checkout("elsewhere", {
-      "agent-tool.json": JSON.stringify({ schemaVersion: 1, hooks: { files: [{ source: "hooks/push", target: "pre-push" }] } }),
-    });
+    const installs = (source: string) => JSON.stringify({ schemaVersion: 1, hooks: { files: [{ source, target: "pre-push" }] } });
+    const elsewhere = checkout("elsewhere", { "agent-tool.json": installs("hooks/push"), "hooks/push": "bun test\n" });
     expect(failures(elsewhere, ["push-gate"])).toEqual({ "push-gate": `hooks/push is a pre-push hook outside the push gate; ${fix}` });
+    // A declared source that is not tracked: agent-tool would report no gate, so the audit says what is missing.
+    expect(failures(checkout("untracked-elsewhere", { "agent-tool.json": installs("hooks/push") }), ["push-gate"])).toEqual({
+      "push-gate": `hooks.files installs hooks/push as pre-push, but it is not tracked; ${fix}`,
+    });
+    expect(failures(checkout("untracked-gate", { "agent-tool.json": installs("scripts/git/hooks/pre-push") }), ["push-gate"])).toEqual({
+      "push-gate": "hooks.files installs scripts/git/hooks/pre-push as pre-push, but it is not tracked; commit the output of `agent-tool push-gate hook` there",
+    });
     expect(failures(checkout("husky", { ".husky/pre-push": "bun test\n" }), ["push-gate"])).toEqual({
       "push-gate": `.husky/pre-push is a pre-push hook outside the push gate; ${fix}`,
     });
+  });
+
+  test("fails push-gate for a checkout agent-tool cannot inspect and audits the rest", () => {
+    const hooked = (name: string) => checkout(name, { "scripts/git/hooks/pre-push": "#!/bin/sh\n" });
+    const asked: string[] = [];
+    const broken: AuditContext = {
+      ...context,
+      pushGate: directory => {
+        asked.push(path.basename(directory));
+        throw new Error("agent-tool push-gate check printed no report: boom\nmore");
+      },
+    };
+    const result = audit(root, [hooked("first-broken"), hooked("second-broken")], selectRules(["push-gate"], false), statusOf, broken);
+    expect(asked).toEqual(["first-broken", "second-broken"]);
+    expect(result.checkouts.map(entry => entry.failed)).toEqual([
+      [{ rule: "push-gate", detail: "could not run agent-tool push-gate check: agent-tool push-gate check printed no report: boom" }],
+      [{ rule: "push-gate", detail: "could not run agent-tool push-gate check: agent-tool push-gate check printed no report: boom" }],
+    ]);
   });
 
   test("fails a checkout whose agent-tool.json requires an up-to-date branch", () => {

@@ -48,6 +48,12 @@ describe("ungatedShippingJobs", () => {
     expect(ungatedShippingJobs({ jobs: { ...jobs, b: job({ needs: ["a", "unit-tests"] }), "unit-tests": job({}) } }, [])).toEqual([]);
     expect(ungatedShippingJobs(undefined, [])).toEqual([]);
   });
+
+  test("counts validation scripts but not installs that share their names", () => {
+    const shipping = (run: string) => ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run }, { run: "npm publish" }] }) } }, []);
+    for (const run of ["npm ci", "pnpm ci", "yarn ci", "bun ci", "npm install"]) expect(shipping(run)).toEqual(["publish"]);
+    for (const run of ["npm run ci", "bun run check", "npm test", "bun test", "pnpm run test:unit", "cargo test --all"]) expect(shipping(run)).toEqual([]);
+  });
 });
 
 describe("strictFreshness", () => {
