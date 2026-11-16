@@ -189,6 +189,27 @@ describe("ungatedShippingJobs", () => {
     expect(shipping({}, { "runs-on": "windows-latest" })).toEqual(["publish"]);
     expect(shipping({}, { "runs-on": "windows-latest" }, "bun test")).toEqual([]);
     expect(shipping({}, { "runs-on": "windows-latest", defaults: { run: { shell: "bash" } } })).toEqual([]);
+    // A runner given by an expression may be Windows.
+    expect(shipping({}, { "runs-on": expression("matrix.os") })).toEqual(["publish"]);
+    expect(shipping({}, { "runs-on": [expression("matrix.os")] }, "bun test")).toEqual([]);
+    expect(shipping({ defaults: { run: { shell: "bash" } } }, { "runs-on": expression("matrix.os") })).toEqual([]);
+  });
+
+  test("finds validation only where a command starts, outside comments and quoted text", () => {
+    const publish = (run: string) => ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run }, { run: "npm publish" }] }) } }, []);
+    for (const run of ["# bun test", "echo 'bun test'", 'echo "run bun test first"', "echo bun test", "true # then bun test", "bun run build"])
+      expect(publish(run)).toEqual(["publish"]);
+    for (const run of [
+      "CI=1 bun test",
+      "cd packages/client\nbun test",
+      "./gradlew test",
+      "npx vitest run",
+      "bun test # all suites",
+      "bun run test:unit",
+      "pytest",
+    ])
+      expect(publish(run)).toEqual([]);
+    expect(ungatedShippingJobs({ jobs: { publish: job({ steps: [{ run: "# bun test\nnpm publish" }] }) } }, [])).toEqual(["publish"]);
   });
 
   test("counts validation scripts but not installs that share their names", () => {

@@ -112,6 +112,19 @@ const SHIPPING_JOB = /deploy|publish/i;
 const VALIDATION_STEP =
   /\b(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|verify)\b|\b(?:bun|npm|pnpm|yarn)\s+run\s+ci\b|\bbun\s+test\b|\b(?:pytest|vitest|jest)\b|\b(?:cargo|go|swift|dotnet)\s+test\b|\bgradlew\b.*\btest|\bxcodebuild\b.*\btest\b|\bturbo\s+(?:run\s+)?test/;
 
+/**
+ * A validation command where a command starts: at the script's start or after
+ * a newline, `;`, or `&&`, past `NAME=value` assignments, with an optional
+ * `npx`/`bunx` or path prefix. Group 1 is the command.
+ */
+const VALIDATION_COMMAND = new RegExp(String.raw`(?:^|[;\n]|&&)[ \t]*(?:\w+=\S*[ \t]+)*((?:(?:npx|bunx)[ \t]+)?(?:\S*/)?(?:${VALIDATION_STEP.source}))`, "d");
+
+/** A script with quoted text and comments blanked out, keeping every other character where it was. */
+function executable(run: string): string {
+  const blank = (text: string) => " ".repeat(text.length);
+  return run.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, blank).replace(/(^|[ \t])#.*$/gm, (text, lead: string) => lead + blank(text.slice(lead.length)));
+}
+
 /** Jobs named for validation, such as `test`, `CI gate`, or `wait for CI`. */
 const VALIDATION_JOB = /\b(?:tests?|checks?|verify|ci|gate)\b/i;
 
@@ -186,9 +199,10 @@ function stopsOnError(step: Record<string, unknown>): boolean {
   return step.shell === undefined || step.shell === "bash" || step.shell === "sh";
 }
 
-/** Where a step's command names validation, or -1, whether or not it can fail the step. */
+/** Where a step's script runs a validation command, outside comments and quoted text, or -1, whether or not it can fail the step. */
 function namedValidationAt(step: Record<string, unknown>): number {
-  return typeof step.run === "string" ? step.run.search(VALIDATION_STEP) : -1;
+  if (typeof step.run !== "string") return -1;
+  return VALIDATION_COMMAND.exec(executable(step.run.trim()))?.indices?.[1]?.[0] ?? -1;
 }
 
 /**
@@ -321,7 +335,9 @@ function defaultShell(scope: Record<string, unknown> | undefined): unknown {
 /**
  * A workflow's jobs with each step's effective shell written on it: its own,
  * its job's or workflow's `defaults.run.shell`, or `pwsh`, GitHub's default
- * on a Windows runner, which does not stop at a failed command.
+ * on a Windows runner, which does not stop at a failed command. A runner given
+ * by an expression, such as `${{ matrix.os }}`, may be Windows, so its default
+ * shell is `unresolved` and treated the same way.
  */
 function withShells(workflow: Record<string, unknown> | undefined): Record<string, unknown> {
   const jobs = object(workflow?.jobs) ?? {};
@@ -329,8 +345,9 @@ function withShells(workflow: Record<string, unknown> | undefined): Record<strin
     Object.entries(jobs).map(([id, value]) => {
       const job = object(value);
       if (!job) return [id, value];
-      const windows = /windows/i.test(JSON.stringify(job["runs-on"] ?? ""));
-      const shell = defaultShell(job) ?? defaultShell(workflow) ?? (windows ? "pwsh" : undefined);
+      const runner = JSON.stringify(job["runs-on"] ?? "");
+      const fallback = /windows/i.test(runner) ? "pwsh" : runner.includes("${{") ? "unresolved" : undefined;
+      const shell = defaultShell(job) ?? defaultShell(workflow) ?? fallback;
       return [id, { ...job, steps: steps(job).map(step => (step.shell === undefined && shell !== undefined ? { ...step, shell } : step)) }];
     }),
   );
