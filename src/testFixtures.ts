@@ -99,6 +99,7 @@ export function checkoutFixture(directory: string, agentTool: string, files: Rec
     }),
     ".agents/skills/ship-pr/SKILL.md": "Reply via POST /repos/o/r/pulls/1/comments/2/replies.\n",
     ".agents/skills/explicit-state-machines/SKILL.md": "# Explicit State Machines\n",
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\n  pull_request:\njobs: {}\n",
     ...files,
   };
   mkdirSync(directory, { recursive: true });

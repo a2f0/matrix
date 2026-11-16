@@ -17,6 +17,8 @@ const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: stri
   { id: "push-head-upstream", pattern: "git push (-u|--set-upstream) origin HEAD", replacement: "agent-tool branch push <reviewed-head> --remote origin" },
   // A leased deletion is the stronger cleanup some checkouts require, not the hook-running push it replaced.
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
+  // agent-tool's push gate records each push's step timings as a run-group report (a2f0/matrix#86).
+  { id: "push-gate-timings", pattern: "showPushGateTimings", replacement: "agent-tool runs list" },
   // Rewriting GitHub SSH URLs to HTTPS reaches the keychain credential helper (a2f0/matrix#61).
   {
     id: "https-insteadof",

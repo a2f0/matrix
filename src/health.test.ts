@@ -45,6 +45,7 @@ test("reports nothing to do for a healthy matrix", () => {
       "- Audit (1 rule): every checkout passes.",
       "- Disk: 69 GiB free of 926 GiB.",
       "- Discovery: not checked; run with --remote.",
+      "- Default branches: not checked; run with --remote.",
       "- Sweeps: 0 ledgers read; no unresolved recurring friction; nothing unfinished.",
       "",
       "## Next steps",
@@ -155,6 +156,7 @@ test("reports leftover processes, Git transport, unaudited checkouts, and lost r
       "- Git: 1 way to leave SSH for GitHub.",
       "- Running: teardown fails in a2f0/one.",
       "- Discovery: 0 new repositories, 1 no longer found.",
+      "- Default branches: not checked; run with --remote.",
       "- Sweeps: 0 ledgers read; no unresolved recurring friction; 1 unfinished.",
       "",
       "## Next steps",
@@ -186,6 +188,7 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
       "- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.",
       "- Running: nothing left running.",
       "- Discovery: matrix.json matches the owner's repositories.",
+      "- Default branches: not checked; run with --remote.",
       "- Sweeps: 0 ledgers read; no unresolved recurring friction; nothing unfinished.",
       "",
       "## Next steps",
@@ -193,5 +196,37 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
       "Nothing to do.",
       "",
     ].join("\n"),
+  );
+});
+
+test("reports default-branch CI and asks for a red branch's repair before standards", () => {
+  const health = assessHealth({
+    statuses: [status("a2f0/one"), status("a2f0/two"), status("a2f0/three"), status("a2f0/four"), status("a2f0/five")],
+    unmanaged: [],
+    audit: { ...cleanAudit, ok: false, failures: { "agents-md": ["a2f0/four"] } },
+    retro: quietRetro,
+    discovery: { added: [], notDiscovered: [] },
+    defaultBranches: [
+      { repo: "a2f0/one", status: "green" },
+      { repo: "a2f0/two", status: "red", detail: "CI gate failing since #12, #13" },
+      { repo: "a2f0/three", status: "pending" },
+      { repo: "a2f0/four", status: "no-ci" },
+      { repo: "a2f0/five", status: "unknown", detail: "gh: HTTP 502" },
+    ],
+  });
+  expect(health.defaultBranches).toEqual({
+    green: ["a2f0/one"],
+    pending: ["a2f0/three"],
+    noCi: ["a2f0/four"],
+    red: [{ repo: "a2f0/two", detail: "CI gate failing since #12, #13" }],
+    unknown: [{ repo: "a2f0/five", detail: "gh: HTTP 502" }],
+  });
+  expect(health.suggestions).toEqual([
+    "Repair a2f0/two's default branch: CI gate failing since #12, #13. The next `ship-pr` there starts with it; see docs/tooling.md#base-freshness.",
+    "Check a2f0/five's default-branch CI by hand: gh: HTTP 502.",
+    "Fix `agents-md` in 1 checkout (a2f0/four); `bun run audit --rule agents-md` has the details.",
+  ]);
+  expect(markdownHealth(health)).toContain(
+    "- Default branches: 1 green, red in a2f0/two, running in a2f0/three, no push CI in a2f0/four, unread in a2f0/five.",
   );
 });

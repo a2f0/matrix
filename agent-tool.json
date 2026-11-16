@@ -44,6 +44,7 @@
           "src/cycleGuards.ts",
           "src/discover.ts",
           "src/gitTransport.ts",
+          "src/pushGates.ts",
           "src/secrets.ts",
           "src/superseded.ts",
           "src/sweepLedger.ts",

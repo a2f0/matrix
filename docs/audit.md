@@ -2,8 +2,9 @@
 
 `bun run audit` checks every managed checkout's files against the standards
 that [AGENTS.md](../AGENTS.md) and these docs define, so drift shows up without
-anyone remembering to look. It reads local files and Git only; `--remote` adds
-rules that ask the npm registry.
+anyone remembering to look. It reads local files and Git, and runs the
+workspace's pinned agent-tool for `push-gate check`; `--remote` adds rules that
+ask the npm registry and GitHub.
 
 ```sh
 bun run audit [repo...] [--rule <id>]... [--remote]
@@ -39,6 +40,11 @@ first and check `branch` for checkouts that are not on their default branch.
 | `import-cycle-guard` | TypeScript sources have Biome `noImportCycles` at `error` with `ignoreTypes: false`, a type-aware error-level dependency-cruiser `no-circular` rule, agent-tool `graph check` configured and run by a package script, run group, workflow step, or runner under `scripts/`, or a module-graph test; a Python package has `test_module_graph.py` | [Import cycles and layering](tooling.md#import-cycles-and-layering) |
 | `mise-lock` | With tools in a root `mise.toml` or `.mise.toml`: no `lockfile = false`, a tracked `mise.lock` in format 4 or later with an entry for each declared tool, and every `jdx/mise-action` `version` pinned in a workflow or composite action at mise 2026.11.1 or later | [Toolchain lockfiles](dependency-upgrades.md#toolchain-lockfiles) |
 | `origin-ssh` | `origin` fetches and pushes over SSH (`git@github.com:`, or `ssh.github.com` on port 443), after `insteadOf` rewrites | [GitHub over SSH](health.md#github-over-ssh) |
+| `push-gate` | With a pre-push hook or a `pushGate` section: the hook is a tracked `scripts/git/hooks/pre-push`, not a hook manager's or one `hooks.files` installs from elsewhere, and agent-tool's `push-gate check` passes (the canonical hook, declared in `hooks.files`, with no step that runs tests or installs, even one with an `allowSlow` reason) | [Push gates](tooling.md#push-gates) |
+| `base-freshness` | `agent-tool.json` does not set `merge.requireStrictBaseFreshness` | [Base freshness](tooling.md#base-freshness) |
+| `base-freshness-settings` | With `--remote`: neither classic protection nor an active ruleset requires an up-to-date branch to merge into the default branch | [Base freshness](tooling.md#base-freshness) |
+| `default-branch-ci` | Each workflow `merge.requiredChecks` names, or any workflow when it names none, runs on every push to the default branch: a push trigger whose branch filters include it, with no paths filter, and no required check's jobs, in its workflow or, for a check named without one, in any workflow, all skip some push there, by a workflow that does not run on every push, comparing `github.event_name`, `github.ref`, or `github.ref_name` or by needing a job that does | [Base freshness](tooling.md#base-freshness) |
+| `deploys-need-checks` | A job named for deploying or publishing, in a workflow that pushes to the default branch start, runs a test runner or a `test`, `check`, `verify`, or `ci` script, where a command starts outside comments, quoted text, and line continuations, before every step that ships (one whose command, not an argument, names deploying, publishing, or a release), and not in the same pipeline, or needs, directly or through other jobs, a required check, a job whose id or name says test, check, verify, ci, or gate, or a job whose steps run one; a condition with a status function holds a job or step behind what precedes it only through a plain `&&` with `success()` or `needs.<job>.result == 'success'`, without `||` or negation; validation excused by `continue-on-error`, skipped by a constant-false or `failure()` condition, or in a script that is not plain commands (conditionals, `||`, substitution, `set`, or a pipe, except from `echo`, `printf`, or `cat` or under `shell: bash`), or that runs several commands under a shell that does not stop at a failure (a custom shell, or a Windows or expression runner's default) or inside an `&&` list more commands follow, does not count, nor does the name of a job whose validation, or any step or command, is one of those; a job or step whose `if` compares `github.event_name`, `github.ref`, or `github.ref_name` so that a push to the default branch cannot satisfy it neither ships nor validates | [Base freshness](tooling.md#base-freshness) |
 | `superseded-guidance` | No tracked Markdown, outside managed skills (and agent-tool's `skills/` sources of them), names a command a shared command replaced | [Superseded guidance](#superseded-guidance) |
 
 A rule checks the evidence a standard leaves in files. It does not prove the
@@ -59,6 +65,7 @@ which the agent-tool pin updates:
 | The legacy squashMerge action, removed in agent-tool 0.1.50 | `agent-tool pr merge <subject> <reviewed-head> <base-branch>` |
 | `git push -u origin HEAD` | `agent-tool branch push <reviewed-head> --remote origin` |
 | `git push ... --delete`, except a `--force-with-lease` deletion that a checkout requires | `agent-tool repo cleanup` |
+| `showPushGateTimings`, the hand-written push timing log | `agent-tool runs list`, which lists each push gate's run-group report |
 | `url.https://github.com/.insteadOf`, which sends GitHub SSH URLs to HTTPS and its keychain helper | SSH through `ssh.github.com:443` ([GitHub over SSH](health.md#github-over-ssh)) |
 
 ## Changing the audit

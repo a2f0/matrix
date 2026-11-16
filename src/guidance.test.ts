@@ -135,6 +135,11 @@ describe("guidance", () => {
       releases: () => {
         throw new Error("remote rules do not run here");
       },
+      // Matrix has no pre-push hook; agent-tool's push-gate check has its own tests.
+      pushGate: () => ({ status: "none", detail: "no pre-push hook" }) as const,
+      strictFreshness: () => {
+        throw new Error("remote rules do not run here");
+      },
     };
     const failures = RULES
       // Matrix, like agent-tool, is agent tooling, so its README describes the skills it installs.

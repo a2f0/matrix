@@ -1,14 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, statfsSync, writeSync } from "node:fs";
 import path from "node:path";
-import { audit, registryReleases, selectRules } from "./audit";
+import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
 import { type Gh, runGh } from "./gh";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
-import { assessHealth, type DiskSpace, markdownHealth } from "./health";
+import { assessHealth, type DefaultBranchHealth, type DiskSpace, markdownHealth } from "./health";
 import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
+import { object } from "./packageJson";
+import { type PushGateResult, strictFreshness } from "./pushGates";
 import { deployAll, secretsRoot } from "./secrets";
 import { listSweeps } from "./sweepLedger";
 import { knownCauses, recordResolution, retro } from "./sweepRetro";
@@ -62,6 +64,12 @@ export interface Services {
   warn(text: string): void;
   listOwnerRepos(discover: Manifest["discover"]): string[];
   registryReleases(name: string): Record<string, string>;
+  /** agent-tool's `push-gate check` for one checkout, run with the workspace's pinned agent-tool. */
+  pushGate(root: string, directory: string): PushGateResult;
+  /** Where GitHub requires an up-to-date branch before merging into `branch` of `repo`. */
+  strictFreshness(repo: string, branch: string): string[];
+  /** agent-tool's `repo base-health` for one checkout's repository, run with the workspace's pinned agent-tool. */
+  baseHealth(root: string, repo: string, directory: string): DefaultBranchHealth;
   diskSpace(directory: string): DiskSpace;
   /** agent-tool's `teardown` for one repository, run with the workspace's pinned agent-tool. */
   teardown(root: string, directory: string, apply: boolean): AgentToolTeardown;
@@ -90,6 +98,98 @@ function teardown(root: string, directory: string, apply: boolean): AgentToolTea
   return report;
 }
 
+/** Reduce `push-gate check`'s report to what the audit needs; it exits 1 when the gate does not conform. */
+function pushGate(root: string, directory: string): PushGateResult {
+  const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), ["--repo", directory, "push-gate", "check"], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error) throw new Error(`agent-tool push-gate check could not run: ${result.error.message}`);
+  let report: Record<string, unknown> | undefined;
+  try {
+    report = JSON.parse(result.stdout) as Record<string, unknown>;
+  } catch {
+    report = undefined;
+  }
+  if (report === undefined || (result.status !== 0 && result.status !== 1))
+    throw new Error(`agent-tool push-gate check printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
+  return parsePushGateReport(report, result.status === 0);
+}
+
+/** The string entries of a report list. */
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter(entry => typeof entry === "string") : [];
+}
+
+/** The object entries of a report list. */
+function records(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(object).filter(entry => entry !== undefined);
+}
+
+/**
+ * `push-gate check`'s report (agent-tool 0.1.58): a checkout with neither a
+ * tracked hook nor a `pushGate` section has no gate; otherwise `errors` holds
+ * every problem, including each step that reaches a test run or install.
+ * agent-tool lets an `allowSlow` reason excuse such a step; the matrix
+ * standard keeps tests and installs out of every gate, so this does not.
+ */
+export function parsePushGateReport(report: Record<string, unknown>, ok: boolean): PushGateResult {
+  if (object(report.pushGate)?.declared !== true && object(report.hook)?.tracked !== true)
+    return { status: "none", detail: strings(report.notes)[0] ?? "no push gate" };
+  const excused = records(report.steps).flatMap(step =>
+    typeof step.allowSlow === "string"
+      ? records(step.findings).map(
+          finding =>
+            `Step '${String(step.label)}' runs ${finding.kind === "install" ? "a dependency install" : "a test run"} (${String(finding.runner)}) under allowSlow; move it to CI`,
+        )
+      : [],
+  );
+  if (ok && excused.length === 0) return { status: "conforms" };
+  const problems = [...strings(report.errors), ...excused];
+  return { status: "fails", problems: problems.length > 0 ? problems : ["agent-tool push-gate check failed"] };
+}
+
+/** Summarize `repo base-health`; a report it cannot produce is `unknown`, so one unreadable repository does not stop health. */
+function baseHealth(root: string, repo: string, directory: string): DefaultBranchHealth {
+  const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), ["--repo", directory, "repo", "base-health"], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  let report: Record<string, unknown> | undefined;
+  try {
+    report = JSON.parse(result.stdout) as Record<string, unknown>;
+  } catch {
+    report = undefined;
+  }
+  if (result.error || report === undefined)
+    return {
+      repo,
+      status: "unknown",
+      detail: result.error?.message ?? ((result.stderr || result.stdout).trim().split("\n").at(-1) || `exit ${result.status}`),
+    };
+  return parseBaseHealthReport(repo, report);
+}
+
+/** `repo base-health`'s report (agent-tool 0.1.58), reduced to a status and, when red, what broke and since when. */
+export function parseBaseHealthReport(repo: string, report: Record<string, unknown>): DefaultBranchHealth {
+  const status = report.status;
+  if (status === "green" || status === "pending" || status === "no-ci") return { repo, status };
+  if (status !== "red") return { repo, status: "unknown", detail: `base-health reported ${JSON.stringify(status)}` };
+  return { repo, status: "red", detail: redDetail(report) };
+}
+
+/** Failing jobs, the merged PRs since the last green commit, and any open repair PR. */
+function redDetail(report: Record<string, unknown>): string {
+  const jobs = records(report.failingJobs).map(job => strings([job.workflow, job.job]).join(" / "));
+  const failed = jobs.length > 0 ? `${[...new Set(jobs)].join(", ")} failing` : "checks failing";
+  const range = object(report.breakingRange);
+  const prs = records(range?.merges).flatMap(merge => object(merge.pr)?.number ?? []);
+  const since = prs.length > 0 ? ` since #${prs.join(", #")}${range?.truncated === true ? " and earlier merges" : ""}` : "";
+  const repairs = records(report.openRepairs).flatMap(pr => pr.number ?? []);
+  return `${failed}${since}${repairs.length > 0 ? `; repair open in #${repairs.join(", #")}` : ""}`;
+}
+
 function stateMachines(root: string, directories: string[], flags: string[]): number {
   const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), ["state-machines", ...directories, ...flags], { stdio: "inherit" });
   if (result.error) throw new Error(`agent-tool state-machines could not run: ${result.error.message}`);
@@ -110,6 +210,9 @@ const SERVICES: Services = {
   },
   listOwnerRepos,
   registryReleases,
+  pushGate,
+  strictFreshness: (repo, branch) => strictFreshness(repo, branch),
+  baseHealth,
   diskSpace,
   teardown,
   gitTransport: root => inspectGitTransport(root),
@@ -134,10 +237,14 @@ function statusReader(root: string, manifest: Manifest): (repo: string) => Check
   return repo => cache.get(repo) ?? cache.set(repo, checkoutStatus(root, repo, cloneUrl(repo, manifest.protocol))).get(repo)!;
 }
 
-/** Ask the registry once per package, and only when a remote rule needs it. */
-function registry(services: Services): { releases(name: string): Record<string, string> } {
+/** The audit's view of the outside: the registry once per package, and GitHub and agent-tool only when a rule asks. */
+function auditContext(root: string, services: Services): AuditContext {
   const releases = new Map<string, Record<string, string>>();
-  return { releases: name => releases.get(name) ?? releases.set(name, services.registryReleases(name)).get(name)! };
+  return {
+    releases: name => releases.get(name) ?? releases.set(name, services.registryReleases(name)).get(name)!,
+    pushGate: directory => services.pushGate(root, directory),
+    strictFreshness: (repo, branch) => services.strictFreshness(repo, branch),
+  };
 }
 
 function usage(condition: boolean, message: string): void {
@@ -327,7 +434,7 @@ const COMMANDS = new Map<string, Handler>([
     (args, { root, manifest, services, output }) => {
       const { positional, lists, booleans } = parseOptions(args, { rule: "list", remote: "boolean" }, "audit");
       const rules = selectRules(lists.rule ?? [], booleans.has("remote"));
-      const result = audit(root, selectRepos(manifest, positional), rules, statusReader(root, manifest), registry(services));
+      const result = audit(root, selectRepos(manifest, positional), rules, statusReader(root, manifest), auditContext(root, services));
       output(result);
       return result.ok ? 0 : 1;
     },
@@ -342,12 +449,15 @@ const COMMANDS = new Map<string, Handler>([
       const health = assessHealth({
         statuses: manifest.repos.map(statusOf),
         unmanaged: unmanagedCheckouts(root, manifest.repos),
-        audit: audit(root, manifest.repos, selectRules([], remote), statusOf, registry(services)),
+        audit: audit(root, manifest.repos, selectRules([], remote), statusOf, auditContext(root, services)),
         retro: retro(root),
         disk: services.diskSpace(root),
         git: services.gitTransport(root),
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
-        ...(remote && { discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)) }),
+        ...(remote && {
+          discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
+          defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),
+        }),
       });
       if (booleans.has("markdown")) services.write(markdownHealth(health));
       else output(health);

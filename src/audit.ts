@@ -6,6 +6,7 @@ import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
+import { checkRunsOnPush, type PushGateResult, runsOnEveryPush, runsOnPushTo, ungatedShippingJobs, workflowName } from "./pushGates";
 import { supersededGuidance } from "./superseded";
 import { plural } from "./text";
 
@@ -32,6 +33,10 @@ export interface AuditContext {
   releases(name: string): Record<string, string>;
   /** The time release ages are measured against; defaults to now. */
   readonly now?: Date;
+  /** agent-tool's `push-gate check` for a checkout directory, run with the workspace's pinned agent-tool. */
+  pushGate(directory: string): PushGateResult;
+  /** Where GitHub requires an up-to-date branch before merging into `branch`; only remote rules call it. */
+  strictFreshness(repo: string, branch: string): string[];
 }
 
 export interface Rule {
@@ -59,6 +64,92 @@ function compareVersions(left: string, right: string): number {
   const b = right.split(".").map(Number);
   for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index]! - b[index]!;
   return 0;
+}
+
+/** Where agent-tool's push gate lives; `push-gate check` reads only this path. */
+const PUSH_GATE_HOOK = "scripts/git/hooks/pre-push";
+
+/** The source `hooks.files` installs as `pre-push`, if any. */
+function installedPushHook(checkout: Checkout): unknown {
+  const files = object(checkout.agentToolJson?.hooks)?.files;
+  return (Array.isArray(files) ? files : []).map(object).find(file => file?.target === "pre-push")?.source;
+}
+
+/**
+ * What files alone show is wrong with a pre-push hook, before asking
+ * agent-tool, which reads only the push gate's path: `hooks.files` installing
+ * an untracked source or one from elsewhere, or a hook manager's hook.
+ */
+function localPushHookProblem(checkout: Checkout): string | undefined {
+  const installed = installedPushHook(checkout);
+  const fix = `replace it with \`agent-tool push-gate hook\` at ${PUSH_GATE_HOOK}`;
+  if (typeof installed === "string" && checkout.tracked(installed).length === 0)
+    return `hooks.files installs ${installed} as pre-push, but it is not tracked; ${installed === PUSH_GATE_HOOK ? "commit the output of `agent-tool push-gate hook` there" : fix}`;
+  const other = typeof installed === "string" && installed !== PUSH_GATE_HOOK ? installed : checkout.tracked(".husky/pre-push")[0];
+  return other === undefined ? undefined : `${other} is a pre-push hook outside the push gate; ${fix}`;
+}
+
+/** Each tracked workflow file, parsed; a file YAML cannot read parses as undefined. */
+function parsedWorkflows(checkout: Checkout): Array<{ file: string; workflow: unknown }> {
+  return checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml").map(file => {
+    try {
+      return { file, workflow: Bun.YAML.parse(checkout.read(file) ?? "") };
+    } catch {
+      return { file, workflow: undefined };
+    }
+  });
+}
+
+/** The checks `merge.requiredChecks` in agent-tool.json requires, with the workflows that run them. */
+function requiredChecks(checkout: Checkout): Array<{ name: string; workflow?: string }> {
+  const checks = object(checkout.agentToolJson?.merge)?.requiredChecks;
+  return (Array.isArray(checks) ? checks : []).flatMap(check => {
+    if (typeof check === "string") return [{ name: check }];
+    const record = object(check);
+    if (typeof record?.name !== "string") return [];
+    return [typeof record.workflow === "string" ? { name: record.name, workflow: record.workflow } : { name: record.name }];
+  });
+}
+
+/** Whether some push to the default branch runs no job behind a required check: in its named workflow or, without one, in any workflow that has its job. */
+function checkSkipped(check: { name: string; workflow?: string }, parsed: Array<{ file: string; workflow: unknown }>, branch: string): boolean {
+  const runs = parsed
+    .filter(({ file, workflow }) => check.workflow === undefined || workflowName(workflow, file) === check.workflow)
+    .flatMap(({ workflow }) => checkRunsOnPush(workflow, check.name, branch) ?? []);
+  return runs.length > 0 && !runs.includes(true);
+}
+
+/** The named required-check workflows that miss some pushes to `branch`, or a note when no workflow is named and none runs on every push. */
+function workflowsMissingPushes(checkout: Checkout, parsed: Array<{ file: string; workflow: unknown }>, branch: string): string | undefined {
+  const fix = "add a push trigger for it with no paths filter";
+  const named = [...new Set(requiredChecks(checkout).flatMap(check => check.workflow ?? []))];
+  if (named.length === 0)
+    return parsed.some(({ workflow }) => runsOnEveryPush(workflow, branch)) ? undefined : `no workflow runs on every push to ${branch}; ${fix}`;
+  const missing = named.filter(name => !parsed.some(({ file, workflow }) => workflowName(workflow, file) === name && runsOnEveryPush(workflow, branch)));
+  if (missing.length === 0) return undefined;
+  const quoted = missing.map(name => `'${name}'`).join(" and ");
+  return `${quoted}, which merge.requiredChecks names, ${missing.length === 1 ? "does" : "do"} not run on every push to ${branch}; ${fix}`;
+}
+
+/** Why the workflows that run the required checks, or any workflow when none are declared, miss some pushes to the default branch. */
+function defaultBranchCi(checkout: Checkout): string | undefined {
+  const parsed = parsedWorkflows(checkout);
+  if (parsed.length === 0) return "no GitHub Actions workflow";
+  const branch = checkout.defaultBranch;
+  const missing = workflowsMissingPushes(checkout, parsed, branch);
+  if (missing !== undefined) return missing;
+  const skipped = requiredChecks(checkout)
+    .filter(check => checkSkipped(check, parsed, branch))
+    .map(check => `'${check.name}'`);
+  if (skipped.length === 0) return undefined;
+  return `required check ${skipped.join(" and ")} ${skipped.length === 1 ? "does" : "do"} not run on every push to ${branch}; let ${skipped.length === 1 ? "its job" : "their jobs"} run on each one`;
+}
+
+/** Whether a checkout has a pre-push hook or a declared push gate, so the audit spawns `push-gate check` only where it can find something. */
+function hasPushHook(checkout: Checkout): boolean {
+  return (
+    installedPushHook(checkout) !== undefined || "pushGate" in (checkout.agentToolJson ?? {}) || checkout.tracked(PUSH_GATE_HOOK, ".husky/pre-push").length > 0
+  );
 }
 
 const OUTPUT_CAPTURE_SCRIPTS = ["agent:run", "agent:logs"];
@@ -427,6 +518,73 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "push-gate",
+    summary: "A tracked pre-push hook is agent-tool's push gate, declared in agent-tool.json, with no tests, builds, or installs",
+    source: "docs/tooling.md#push-gates",
+    check: (checkout, context) => {
+      if (!hasPushHook(checkout)) return skip("no pre-push hook");
+      const local = localPushHookProblem(checkout);
+      if (local !== undefined) return fail(local);
+      let result: PushGateResult;
+      try {
+        result = context.pushGate(checkout.directory);
+      } catch (error) {
+        // One checkout agent-tool cannot inspect fails its own rule instead of ending the audit.
+        return fail(`could not run agent-tool push-gate check: ${(error as Error).message.trim().split("\n")[0]}`);
+      }
+      if (result.status === "none") return skip(result.detail);
+      return result.status === "conforms" ? pass : problems(result.problems);
+    },
+  },
+  {
+    id: "base-freshness",
+    summary: "agent-tool.json does not require an up-to-date branch to merge",
+    source: "docs/tooling.md#push-gates",
+    check: checkout =>
+      object(checkout.agentToolJson?.merge)?.requireStrictBaseFreshness === true ? fail("merge.requireStrictBaseFreshness is true; set it to false") : pass,
+  },
+  {
+    id: "base-freshness-settings",
+    summary: "With --remote: no classic protection or active ruleset requires an up-to-date branch to merge into the default branch",
+    source: "docs/tooling.md#push-gates",
+    remote: true,
+    check: (checkout, context) => {
+      let found: string[];
+      try {
+        found = context.strictFreshness(checkout.repo, checkout.defaultBranch);
+      } catch (error) {
+        // One unreadable repository fails its own rule instead of ending the audit.
+        return fail(`could not read ${checkout.defaultBranch}'s protection: ${(error as Error).message.trim().split("\n")[0]}`);
+      }
+      return found.length === 0
+        ? pass
+        : fail(`${found.join(" and ")} require${found.length === 1 ? "s" : ""} an up-to-date branch on ${checkout.defaultBranch}`);
+    },
+  },
+  {
+    id: "default-branch-ci",
+    summary: "The workflows that run the required checks (any workflow without them) run on every push to the default branch",
+    source: "docs/tooling.md#push-gates",
+    check: checkout => {
+      const problem = defaultBranchCi(checkout);
+      return problem === undefined ? pass : fail(problem);
+    },
+  },
+  {
+    id: "deploys-need-checks",
+    summary: "Deploy and publish jobs that pushes to the default branch start need a required check or a job that runs tests",
+    source: "docs/tooling.md#base-freshness",
+    check: checkout => {
+      const required = requiredChecks(checkout).map(check => check.name);
+      const ungated = parsedWorkflows(checkout)
+        .filter(({ workflow }) => runsOnPushTo(workflow, checkout.defaultBranch))
+        .flatMap(({ file, workflow }) => ungatedShippingJobs(workflow, required, checkout.defaultBranch).map(job => `${file} ${job}`));
+      if (ungated.length === 0) return pass;
+      const verb = ungated.length === 1 ? "starts" : "start";
+      return fail(`${ungated.join(", ")} ${verb} without needing a required check or a job that runs tests`);
+    },
+  },
+  {
     id: "superseded-guidance",
     summary: "Markdown outside managed skills names no command a shared command replaced",
     source: "docs/audit.md#superseded-guidance",
@@ -478,7 +636,7 @@ function auditCheckout(root: string, repo: string, rules: Rule[], status: Checko
   const base = { repo, path: status.path, failed: [], skipped: [] };
   if (status.error) return { ...base, error: status.error };
   if (!status.present) return { ...base, error: "checkout missing; run sync" };
-  const checkout = openCheckout(repo, checkoutPath(root, repo));
+  const checkout = openCheckout(repo, checkoutPath(root, repo), status.defaultBranch);
   const result: CheckoutAudit = { ...base, branch: status.branch, head: status.head, failed: [], skipped: [] };
   for (const rule of rules) {
     const outcome = rule.check(checkout, context);

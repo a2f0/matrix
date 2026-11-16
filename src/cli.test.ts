@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { MINIMUM_AGENT_TOOL } from "./audit";
-import { main, type Services } from "./cli";
+import { main, parseBaseHealthReport, parsePushGateReport, type Services } from "./cli";
 import { checkoutFixture, gitIn, gitInit, tempDir } from "./testFixtures";
 
 let root: string;
@@ -67,6 +67,9 @@ function fakeServices(overrides: Partial<Services> = {}) {
       calls.registry++;
       return { "0.1.21": "2026-01-01T00:00:00.000Z", "0.1.23": "2026-02-01T00:00:00.000Z" };
     },
+    pushGate: () => ({ status: "none", detail: "no pre-push hook" }),
+    strictFreshness: () => [],
+    baseHealth: repo => ({ repo, status: "green" }),
     diskSpace: () => ({ free: 200 * GIB, total: 500 * GIB }),
     teardown: () => CLEAN_TEARDOWN,
     gitTransport: () => SSH_ONLY,
@@ -89,6 +92,7 @@ test("health reports findings without the network unless asked, and exits zero",
   const report = JSON.parse(offline.writes.join("")) as Record<string, unknown>;
   expect(report).toMatchObject({ ok: false, remote: false, checkouts: { total: 2, ready: 1 }, audit: { failures: {}, unaudited: ["a2f0/missing"] } });
   expect(report).not.toHaveProperty("discovery");
+  expect(report).not.toHaveProperty("defaultBranches");
   expect(report.disk).toEqual({ free: 200 * GIB, total: 500 * GIB, low: false });
   expect(report.suggestions).toEqual([
     "Inspect a2f0/missing before the next sweep: checkout missing; run sync.",
@@ -104,8 +108,10 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(markdown).toContain(
     "1. Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB; `bun run space` lists what is safe to remove.",
   );
-  expect(markdown).toContain("- Audit (19 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain("- Audit (24 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
+  // Only present checkouts are asked about; a2f0/missing has none.
+  expect(markdown).toContain("- Default branches: 1 green.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
   expect(markdown).toContain("- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.");
 });
@@ -284,4 +290,89 @@ test("state-machines scans the workspace and each present checkout, or the named
   ]);
   expect(() => main(["state-machines", "missing"], root, undefined, services)).toThrow("None of the named checkouts is present");
   expect(() => main(["state-machines", "--fix"], root, undefined, services)).toThrow("Unknown state-machines option '--fix'.");
+});
+
+test("summarizes agent-tool's push-gate and base-health reports", () => {
+  // Shapes as agent-tool 0.1.58 prints them.
+  const absent = {
+    ok: true,
+    hook: { path: "scripts/git/hooks/pre-push", tracked: false, canonical: null, installed: false },
+    pushGate: { declared: false, budgetSeconds: null },
+    steps: [],
+    errors: [],
+    notes: ["No push gate: agent-tool.json has no pushGate section and scripts/git/hooks/pre-push is not tracked."],
+  };
+  expect(parsePushGateReport(absent, true)).toEqual({ status: "none", detail: absent.notes[0]! });
+  const gated = {
+    ...absent,
+    hook: { ...absent.hook, tracked: true, canonical: true, installed: true },
+    pushGate: { declared: true, budgetSeconds: 120 },
+    notes: [],
+  };
+  expect(parsePushGateReport(gated, true)).toEqual({ status: "conforms" });
+  const slow = "Step 'tests' runs a test run (bun test): bun test. Move it to CI, or give the step an allowSlow reason.";
+  expect(parsePushGateReport({ ...gated, ok: false, errors: [slow] }, false)).toEqual({ status: "fails", problems: [slow] });
+  const undeclared = "scripts/git/hooks/pre-push is tracked, but agent-tool.json declares no pushGate section; declare one, even with no steps.";
+  expect(parsePushGateReport({ ...gated, ok: false, pushGate: absent.pushGate, errors: [undeclared] }, false)).toEqual({
+    status: "fails",
+    problems: [undeclared],
+  });
+  expect(parsePushGateReport({ ...gated, ok: false }, false)).toEqual({ status: "fails", problems: ["agent-tool push-gate check failed"] });
+  // agent-tool passes a test step with an allowSlow reason; the matrix standard does not.
+  const excused = {
+    ...gated,
+    steps: [
+      { label: "lint", command: ["bun", "run", "lint"], allowSlow: null, ok: true, findings: [], errors: [] },
+      {
+        label: "tests",
+        command: ["bun", "run", "test"],
+        allowSlow: "fast unit tests",
+        ok: true,
+        findings: [
+          { kind: "test", runner: "bun test", chain: ["package.json scripts.test: bun test", "bun test"] },
+          { kind: "install", runner: "bun install", chain: ["bun install"] },
+        ],
+        errors: [],
+      },
+    ],
+  };
+  expect(parsePushGateReport(excused, true)).toEqual({
+    status: "fails",
+    problems: [
+      "Step 'tests' runs a test run (bun test) under allowSlow; move it to CI",
+      "Step 'tests' runs a dependency install (bun install) under allowSlow; move it to CI",
+    ],
+  });
+
+  expect(parseBaseHealthReport("a2f0/x", { status: "green", failingJobs: [] })).toEqual({ repo: "a2f0/x", status: "green" });
+  expect(parseBaseHealthReport("a2f0/x", { status: "no-ci" })).toEqual({ repo: "a2f0/x", status: "no-ci" });
+  const red = {
+    status: "red",
+    failingJobs: [
+      { workflow: "CI", runId: 1, job: "test", conclusion: "failure" },
+      { workflow: "CI", runId: 1, job: "test", conclusion: "failure" },
+      { workflow: "Deploy", runId: 2, job: "deploy", conclusion: "failure" },
+    ],
+    breakingRange: {
+      from: "a",
+      to: "b",
+      truncated: false,
+      merges: [
+        { oid: "b", subject: "feat: x", pr: { number: 12 } },
+        { oid: "c", subject: "direct", pr: null },
+      ],
+    },
+    openRepairs: [],
+  };
+  expect(parseBaseHealthReport("a2f0/x", red)).toEqual({ repo: "a2f0/x", status: "red", detail: "CI / test, Deploy / deploy failing since #12" });
+  expect(
+    parseBaseHealthReport("a2f0/x", {
+      ...red,
+      failingJobs: [],
+      breakingRange: { ...red.breakingRange, truncated: true },
+      openRepairs: [{ number: 14, title: "fix: x", url: "u", references: [12] }],
+    }),
+  ).toEqual({ repo: "a2f0/x", status: "red", detail: "checks failing since #12 and earlier merges; repair open in #14" });
+  expect(parseBaseHealthReport("a2f0/x", { status: "red", breakingRange: null })).toEqual({ repo: "a2f0/x", status: "red", detail: "checks failing" });
+  expect(parseBaseHealthReport("a2f0/x", { status: "broken" })).toEqual({ repo: "a2f0/x", status: "unknown", detail: 'base-health reported "broken"' });
 });

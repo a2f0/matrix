@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import path from "node:path";
 import { AGENT_TOOL_GRACE_DAYS, AGENTS_MD_MAX_CHARS, type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
+import type { PushGateResult } from "./pushGates";
 import { checkoutFixture, GUIDANCE, gitIn, README, tempDir } from "./testFixtures";
 
 let root: string;
@@ -12,7 +13,12 @@ const RELEASES = {
   "0.1.22": "2026-10-20T00:00:00.000Z",
   "0.1.23": "2026-10-27T00:00:00.000Z",
 };
-const context: AuditContext = { releases: () => RELEASES, now: new Date("2026-10-28T12:00:00.000Z") };
+const context: AuditContext = {
+  releases: () => RELEASES,
+  now: new Date("2026-10-28T12:00:00.000Z"),
+  pushGate: () => ({ status: "none", detail: "no pre-push hook" }),
+  strictFreshness: () => [],
+};
 
 /** A checkout that meets every standard, with overrides; a null value deletes the file. */
 function checkout(name: string, files: Record<string, string | null> = {}): string {
@@ -60,6 +66,7 @@ describe("audit", () => {
         { rule: "screenshots-gallery", detail: "no website that shows captured screenshots" },
         { rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" },
         { rule: "mise-lock", detail: "declares no mise tools" },
+        { rule: "push-gate", detail: "no pre-push hook" },
       ],
     });
     expect(result.checkouts[1]).toMatchObject({ repo: "a2f0/missing", error: "checkout missing; run sync" });
@@ -162,6 +169,7 @@ describe("audit", () => {
     expect(failures(repo, ["agent-tool-latest"])["agent-tool-latest"]).toBe(expected);
     expect(() =>
       audit(root, [repo], selectRules([], true), statusOf, {
+        ...context,
         releases: () => {
           throw new Error("offline");
         },
@@ -190,6 +198,7 @@ describe("audit", () => {
       "package.json": JSON.stringify({ scripts: { "agent:run": "x", "agent:logs": "y" }, devDependencies: { "@a2f0/agent-tool": "0.1.20" } }),
     });
     const backported = audit(root, [backport], selectRules(["agent-tool-latest"], true), statusOf, {
+      ...context,
       releases: () => ({ "0.1.20": "2026-10-01T00:00:00.000Z", "0.1.20-1": "x", "0.1.21": "2026-10-27T00:00:00.000Z", "0.2.0": "2026-10-10T00:00:00.000Z" }),
       now: context.now,
     });
@@ -201,6 +210,7 @@ describe("audit", () => {
       { rule: "agent-tool-latest", detail: "pins 0.1.230, which the registry has not published" },
     ]);
     const undated = audit(root, [trailing], selectRules(["agent-tool-latest"], true), statusOf, {
+      ...context,
       releases: () => ({ "0.1.22": "2026-10-01T00:00:00.000Z", "0.1.23": "soon" }),
     });
     expect(undated.checkouts[0]!.failed).toEqual([
@@ -607,6 +617,7 @@ describe("audit", () => {
       "docs/cleanup.md": "Delete atomically: `git push --force-with-lease=refs/heads/x:abc --delete origin x`.\n",
       "scripts/ship.sh": "gh pr checks --watch\n",
       "docs/network.md": "Force HTTPS: `GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:`.\n",
+      "docs/timings.md": "Read the last push with `sh scripts/git/showPushGateTimings.sh`.\n",
     });
     expect(failures(repo)["superseded-guidance"]).toBe(
       [
@@ -615,6 +626,7 @@ describe("audit", () => {
         "squash-merge-action at docs/shipping.md:3 (use agent-tool pr merge <subject> <reviewed-head> <base-branch>)",
         "push-head-upstream at docs/shipping.md:1 (use agent-tool branch push <reviewed-head> --remote origin)",
         "push-delete at docs/shipping.md:2 (use agent-tool repo cleanup)",
+        "push-gate-timings at docs/timings.md:1 (use agent-tool runs list)",
         "https-insteadof at docs/network.md:1 (use SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh))",
       ].join("; "),
     );
@@ -652,6 +664,245 @@ describe("audit", () => {
     });
     gitIn(directory, "remote", "remove", "origin");
     expect(failures(repo, ["origin-ssh"])).toEqual({ "origin-ssh": "no origin fetch URL; no origin push URL" });
+  });
+
+  test("reports agent-tool's push-gate check, skipping a checkout with no gate", () => {
+    const repo = checkout("gated", { "scripts/git/hooks/pre-push": "#!/bin/sh\n" });
+    const directories: string[] = [];
+    const run = (result: PushGateResult) =>
+      audit(root, [repo], selectRules(["push-gate"], false), statusOf, {
+        ...context,
+        pushGate: directory => {
+          directories.push(directory);
+          return result;
+        },
+      }).checkouts[0]!;
+    expect(run({ status: "conforms" })).toMatchObject({ failed: [], skipped: [] });
+    expect(directories).toEqual([path.join(root, "checkouts", "gated")]);
+    expect(run({ status: "fails", problems: ["step tests runs bun test", "pre-push is not the canonical hook"] }).failed).toEqual([
+      { rule: "push-gate", detail: "step tests runs bun test; pre-push is not the canonical hook" },
+    ]);
+    expect(run({ status: "none", detail: "no gate declared" }).skipped).toEqual([{ rule: "push-gate", detail: "no gate declared" }]);
+    // Without a hook or a declared gate there is nothing to ask agent-tool about.
+    directories.length = 0;
+    expect(failures(checkout("hookless"), ["push-gate"])).toEqual({});
+    expect(directories).toEqual([]);
+    const hooked: Array<Record<string, string>> = [
+      {
+        "agent-tool.json": JSON.stringify({ schemaVersion: 1, hooks: { files: [{ source: "scripts/git/hooks/pre-push", target: "pre-push" }] } }),
+        "scripts/git/hooks/pre-push": "#!/bin/sh\n",
+      },
+      { "agent-tool.json": JSON.stringify({ schemaVersion: 1, pushGate: { steps: [] } }) },
+    ];
+    for (const files of hooked) {
+      const asked: string[] = [];
+      audit(root, [checkout(`hooked-${Bun.hash(JSON.stringify(files))}`, files)], selectRules(["push-gate"], false), statusOf, {
+        ...context,
+        pushGate: directory => {
+          asked.push(directory);
+          return { status: "conforms" };
+        },
+      });
+      expect(asked).toHaveLength(1);
+    }
+  });
+
+  test("fails a pre-push hook that push-gate check cannot see", () => {
+    const fix = "replace it with `agent-tool push-gate hook` at scripts/git/hooks/pre-push";
+    const installs = (source: string) => JSON.stringify({ schemaVersion: 1, hooks: { files: [{ source, target: "pre-push" }] } });
+    const elsewhere = checkout("elsewhere", { "agent-tool.json": installs("hooks/push"), "hooks/push": "bun test\n" });
+    expect(failures(elsewhere, ["push-gate"])).toEqual({ "push-gate": `hooks/push is a pre-push hook outside the push gate; ${fix}` });
+    // A declared source that is not tracked: agent-tool would report no gate, so the audit says what is missing.
+    expect(failures(checkout("untracked-elsewhere", { "agent-tool.json": installs("hooks/push") }), ["push-gate"])).toEqual({
+      "push-gate": `hooks.files installs hooks/push as pre-push, but it is not tracked; ${fix}`,
+    });
+    expect(failures(checkout("untracked-gate", { "agent-tool.json": installs("scripts/git/hooks/pre-push") }), ["push-gate"])).toEqual({
+      "push-gate": "hooks.files installs scripts/git/hooks/pre-push as pre-push, but it is not tracked; commit the output of `agent-tool push-gate hook` there",
+    });
+    expect(failures(checkout("husky", { ".husky/pre-push": "bun test\n" }), ["push-gate"])).toEqual({
+      "push-gate": `.husky/pre-push is a pre-push hook outside the push gate; ${fix}`,
+    });
+  });
+
+  test("fails push-gate for a checkout agent-tool cannot inspect and audits the rest", () => {
+    const hooked = (name: string) => checkout(name, { "scripts/git/hooks/pre-push": "#!/bin/sh\n" });
+    const asked: string[] = [];
+    const broken: AuditContext = {
+      ...context,
+      pushGate: directory => {
+        asked.push(path.basename(directory));
+        throw new Error("agent-tool push-gate check printed no report: boom\nmore");
+      },
+    };
+    const result = audit(root, [hooked("first-broken"), hooked("second-broken")], selectRules(["push-gate"], false), statusOf, broken);
+    expect(asked).toEqual(["first-broken", "second-broken"]);
+    expect(result.checkouts.map(entry => entry.failed)).toEqual([
+      [{ rule: "push-gate", detail: "could not run agent-tool push-gate check: agent-tool push-gate check printed no report: boom" }],
+      [{ rule: "push-gate", detail: "could not run agent-tool push-gate check: agent-tool push-gate check printed no report: boom" }],
+    ]);
+  });
+
+  test("fails a checkout whose agent-tool.json requires an up-to-date branch", () => {
+    const strict = checkout("strict", { "agent-tool.json": JSON.stringify({ schemaVersion: 1, merge: { requireStrictBaseFreshness: true } }) });
+    const relaxed = checkout("relaxed", { "agent-tool.json": JSON.stringify({ schemaVersion: 1, merge: { requireStrictBaseFreshness: false } }) });
+    expect(failures(strict, ["base-freshness"])).toEqual({ "base-freshness": "merge.requireStrictBaseFreshness is true; set it to false" });
+    expect(failures(relaxed, ["base-freshness"])).toEqual({});
+  });
+
+  test("asks GitHub about the default branch's freshness settings only for remote rules", () => {
+    const repo = checkout("protected");
+    const asked: string[] = [];
+    const strict: AuditContext = {
+      ...context,
+      strictFreshness: (name, branch) => {
+        asked.push(`${name}@${branch}`);
+        return ["classic branch protection", "ruleset 7"];
+      },
+    };
+    expect(audit(root, [repo], selectRules([], false), statusOf, strict).checkouts[0]!.failed).toEqual([]);
+    expect(asked).toEqual([]);
+    expect(audit(root, [repo], selectRules(["base-freshness-settings"], true), statusOf, strict).checkouts[0]!.failed).toEqual([
+      { rule: "base-freshness-settings", detail: "classic branch protection and ruleset 7 require an up-to-date branch on main" },
+    ]);
+    expect(asked).toEqual(["a2f0/protected@main"]);
+    expect(failures(repo, ["base-freshness-settings"], true)).toEqual({});
+    // A GitHub error fails that checkout's rule and leaves the rest of the audit running.
+    const broken: AuditContext = {
+      ...context,
+      strictFreshness: () => {
+        throw new Error("gh: HTTP 502: Bad Gateway\n(details)");
+      },
+    };
+    const result = audit(root, [repo, checkout("other")], selectRules(["base-freshness-settings"], true), statusOf, broken);
+    expect(result.checkouts.map(entry => entry.failed)).toEqual([
+      [{ rule: "base-freshness-settings", detail: "could not read main's protection: gh: HTTP 502: Bad Gateway" }],
+      [{ rule: "base-freshness-settings", detail: "could not read main's protection: gh: HTTP 502: Bad Gateway" }],
+    ]);
+  });
+
+  test("requires a workflow that runs on every push to the default branch", () => {
+    const workflow = (on: string) => ({ ".github/workflows/ci.yml": `name: CI\n${on}\njobs: {}\n` });
+    const runs = (on: string) => failures(checkout(`ci-${Bun.hash(on)}`, workflow(on)), ["default-branch-ci"])["default-branch-ci"];
+    const missing = "no workflow runs on every push to main; add a push trigger for it with no paths filter";
+    // Forms that run on every push to main.
+    for (const on of [
+      "on: push",
+      "on: [push, pull_request]",
+      "on:\n  push:",
+      'on:\n  push:\n    branches: "**"',
+      "on:\n  push:\n    branches: [main]",
+      "on:\n  push:\n    branches: ['*', '!release/*']",
+      "on:\n  push:\n    branches-ignore: [gh-pages]",
+    ])
+      expect(runs(on)).toBeUndefined();
+    // Forms that leave some pushes to main without a run.
+    for (const on of [
+      "on: pull_request",
+      "on:\n  push:\n    branches: [main]\n    paths: [src/**]",
+      "on:\n  push:\n    paths-ignore: [docs/**]",
+      "on:\n  push:\n    branches: [staging]",
+      "on:\n  push:\n    branches: ['*', '!main']",
+      "on:\n  push:\n    branches-ignore: [main]",
+      "on:\n  push:\n    tags: ['v*']",
+    ])
+      expect(runs(on)).toBe(missing);
+    expect(failures(checkout("no-ci", { ".github/workflows/ci.yml": null }), ["default-branch-ci"])).toEqual({
+      "default-branch-ci": "no GitHub Actions workflow",
+    });
+  });
+
+  test("requires the workflows that run the required checks to run on every push", () => {
+    const required = (checks: unknown[]) => JSON.stringify({ schemaVersion: 1, merge: { requiredChecks: checks } });
+    const files = {
+      ".github/workflows/ci.yml": "name: CI\non:\n  pull_request:\n  push:\n    branches: [main]\n    paths: [src/**]\njobs: {}\n",
+      ".github/workflows/deploy.yml": "name: Deploy\non: push\njobs: {}\n",
+    };
+    // A deploy-only workflow on every push does not stand in for the required checks.
+    expect(failures(checkout("deploy-only", { ...files, "agent-tool.json": required([{ name: "CI gate", workflow: "CI" }]) }), ["default-branch-ci"])).toEqual({
+      "default-branch-ci": "'CI', which merge.requiredChecks names, does not run on every push to main; add a push trigger for it with no paths filter",
+    });
+    // A workflow without a name is matched by its path.
+    const unnamed = { ".github/workflows/ci.yml": "on: push\njobs: {}\n", "agent-tool.json": required([{ name: "t", workflow: ".github/workflows/ci.yml" }]) };
+    expect(failures(checkout("unnamed", unnamed), ["default-branch-ci"])).toEqual({});
+    // Required checks without workflows fall back to any workflow on every push.
+    expect(failures(checkout("bare-checks", { ...files, "agent-tool.json": required(["CI gate"]) }), ["default-branch-ci"])).toEqual({});
+    // A required check whose job a push to the default branch skips leaves merges untested there.
+    const gated = (condition: string) =>
+      failures(
+        checkout(`skips-${Bun.hash(condition)}`, {
+          "agent-tool.json": required([{ name: "Tests", workflow: "CI" }]),
+          ".github/workflows/ci.yml": `name: CI\non: [push, pull_request]\njobs:\n  test:\n    name: Tests\n    if: ${condition}\n    runs-on: x\n    steps:\n      - run: bun test\n`,
+        }),
+        ["default-branch-ci"],
+      )["default-branch-ci"];
+    expect(gated("github.event_name == 'pull_request'")).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
+    expect(gated("github.ref != 'refs/heads/main'")).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
+    for (const disabled of ["false", `$\{{ false }}`, "0", "github.event_name == 'push' && false"])
+      expect(gated(disabled)).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
+    for (const condition of ["always()", "github.event_name == 'push' || github.event_name == 'pull_request'", "vars.ENABLED == 'true'"])
+      expect(gated(condition)).toBeUndefined();
+    // GitHub also skips a job whose needs were skipped, unless its condition says otherwise.
+    const aggregate = (gateIf: string) =>
+      failures(
+        checkout(`aggregate-${Bun.hash(gateIf)}`, {
+          "agent-tool.json": required([{ name: "CI gate", workflow: "CI" }]),
+          ".github/workflows/ci.yml": `name: CI\non: [push, pull_request]\njobs:\n  tests:\n    if: github.event_name == 'pull_request'\n    runs-on: x\n    steps:\n      - run: bun test\n  lint:\n    runs-on: x\n    steps:\n      - run: bun run lint\n  gate:\n    name: CI gate\n    needs: [lint, tests]\n${gateIf ? `    if: ${gateIf}\n` : ""}    runs-on: x\n    steps:\n      - run: "true"\n`,
+        }),
+        ["default-branch-ci"],
+      )["default-branch-ci"];
+    for (const gateIf of ["", "needs.tests.result == 'success' && always()"])
+      expect(aggregate(gateIf)).toBe("required check 'CI gate' does not run on every push to main; let its job run on each one");
+    for (const gateIf of ["always()", "always() && needs.lint.result == 'success'"]) expect(aggregate(gateIf)).toBeUndefined();
+    // A required check named without its workflow is looked for in every workflow.
+    const bare = (prOnly: boolean, workflowOn = "on: [push, pull_request]") =>
+      failures(
+        checkout(`bare-${prOnly}-${Bun.hash(workflowOn)}`, {
+          "agent-tool.json": required(["Tests"]),
+          ".github/workflows/ci.yml": `name: CI\n${workflowOn}\njobs:\n  test:\n    name: Tests\n${prOnly ? "    if: github.event_name == 'pull_request'\n" : ""}    runs-on: x\n    steps:\n      - run: bun test\n`,
+          ".github/workflows/deploy.yml": "name: Deploy\non: push\njobs: {}\n",
+        }),
+        ["default-branch-ci"],
+      )["default-branch-ci"];
+    expect(bare(true)).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
+    expect(bare(false, "on: pull_request")).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
+    expect(bare(false)).toBeUndefined();
+    // Its only workflow must run on every push, whatever other workflows do.
+    expect(bare(false, "on:\n  push:\n    paths: [src/**]\n  pull_request:")).toBe(
+      "required check 'Tests' does not run on every push to main; let its job run on each one",
+    );
+  });
+
+  test("requires deploy and publish jobs on the default branch to wait for validation", () => {
+    const config = { "agent-tool.json": JSON.stringify({ schemaVersion: 1, merge: { requiredChecks: [{ name: "CI gate", workflow: "CI" }] } }) };
+    const deploys = (jobs: string, on = "on:\n  push:\n    branches: [main]\n    paths: [package.json]") =>
+      failures(checkout(`deploy-${Bun.hash(jobs + on)}`, { ...config, ".github/workflows/ship.yml": `name: Ship\n${on}\njobs:\n${jobs}` }), [
+        "deploys-need-checks",
+      ])["deploys-need-checks"];
+    const step = (run: string) => `    runs-on: x\n    steps:\n      - run: ${run}\n`;
+    // Waiting for a required check, a job named for validation, or a job whose steps validate.
+    for (const jobs of [
+      `  gate:\n    name: CI gate\n${step("true")}  deploy:\n    needs: gate\n${step("wrangler deploy")}`,
+      `  build:\n${step("bun run build")}  ci:\n${step("sh wait.sh")}  publish:\n    needs: [build, ci]\n${step("npm publish")}`,
+      `  prepare:\n${step("bun run verify")}  publish:\n    needs: prepare\n${step("npm publish")}`,
+      `  prepare:\n${step("cargo test --all")}  pack:\n    needs: prepare\n${step("npm pack")}  publish:\n    needs: pack\n${step("npm publish")}`,
+      `  deploy:\n${step("bun test && wrangler deploy")}`,
+      `  lint:\n${step("bun run lint")}`,
+    ])
+      expect(deploys(jobs)).toBeUndefined();
+    // Shipping jobs that wait for nothing that validates.
+    expect(deploys(`  deploy:\n${step("wrangler deploy")}`)).toBe(
+      ".github/workflows/ship.yml deploy starts without needing a required check or a job that runs tests",
+    );
+    expect(
+      deploys(
+        `  build:\n${step("bun run build")}  publish:\n    name: Publish pkg\n    needs: build\n${step("npm publish")}  deploy-docs:\n    needs: [missing]\n${step("x")}`,
+      ),
+    ).toBe(
+      ".github/workflows/ship.yml publish (Publish pkg), .github/workflows/ship.yml deploy-docs start without needing a required check or a job that runs tests",
+    );
+    // Workflows that pushes to the default branch never start are out of scope.
+    expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on:\n  push:\n    branches: [staging]")).toBeUndefined();
+    expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on: workflow_dispatch")).toBeUndefined();
   });
 
   test("rejects unknown rules", () => {
