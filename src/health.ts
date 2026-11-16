@@ -18,6 +18,15 @@ export interface DiskSpace {
 const MIN_FREE_DISK_GIB = 50;
 const GIB = 1024 ** 3;
 
+/**
+ * A default branch's CI, from agent-tool's `repo base-health`: `red` names the
+ * failing checks and the merges since they last passed, and `unknown` says why
+ * GitHub could not be read.
+ */
+export type DefaultBranchHealth =
+  | { readonly repo: string; readonly status: "green" | "pending" | "no-ci" }
+  | { readonly repo: string; readonly status: "red" | "unknown"; readonly detail: string };
+
 export interface HealthInputs {
   readonly statuses: CheckoutStatus[];
   readonly unmanaged: string[];
@@ -31,6 +40,8 @@ export interface HealthInputs {
   readonly running?: Teardown;
   /** How Git and gh reach GitHub on this machine. */
   readonly git?: GitTransport;
+  /** Present only with --remote: each checkout's default-branch CI. */
+  readonly defaultBranches?: DefaultBranchHealth[];
 }
 
 export interface Health {
@@ -52,6 +63,14 @@ export interface Health {
   readonly running?: { readonly leftover: string[] };
   /** Ways this machine's Git or gh can leave SSH for GitHub. */
   readonly git?: GitTransport;
+  /** With --remote: default branches by CI result; `red` and `unknown` carry why. */
+  readonly defaultBranches?: {
+    readonly green: string[];
+    readonly pending: string[];
+    readonly noCi: string[];
+    readonly red: Array<{ repo: string; detail: string }>;
+    readonly unknown: Array<{ repo: string; detail: string }>;
+  };
   readonly sweeps: {
     readonly read: string[];
     readonly recurring: Array<Pick<Recurrence, "kind" | "cause" | "repos" | "sweeps">>;
@@ -86,10 +105,21 @@ function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string
   return suggestions;
 }
 
+/** A red default branch blocks shipping there, so its repair comes with the checkout's state. */
+function defaultBranchSuggestions(branches: DefaultBranchHealth[]): string[] {
+  return branches.flatMap(branch => {
+    if (branch.status === "red")
+      return [`Repair ${branch.repo}'s default branch: ${branch.detail}. The next \`ship-pr\` there starts with it; see docs/tooling.md#base-freshness.`];
+    if (branch.status === "unknown") return [`Check ${branch.repo}'s default-branch CI by hand: ${branch.detail}.`];
+    return [];
+  });
+}
+
 /** Suggestions about the checkouts themselves: their state, installs, and repositories discovery adds or loses. */
 function checkoutSuggestions(inputs: HealthInputs, notReadyList: Array<{ repo: string; reason: string }>, stale: string[]): string[] {
   const suggestions: string[] = [];
   for (const { repo, reason } of notReadyList) suggestions.push(`Inspect ${repo} before the next sweep: ${reason}.`);
+  suggestions.push(...defaultBranchSuggestions(inputs.defaultBranches ?? []));
   if (stale.length > 0) suggestions.push(`Reinstall dependencies in ${list(stale)}; their node_modules hold a different agent-tool than they pin.`);
   for (const repo of inputs.discovery?.added ?? []) suggestions.push(`Onboard ${repo}: \`bun run discover --apply\`, then the onboarding steps in AGENTS.md.`);
   for (const repo of inputs.discovery?.notDiscovered ?? [])
@@ -114,6 +144,12 @@ function followUpSuggestions(inputs: HealthInputs): string[] {
     );
   if (inputs.unmanaged.length > 0) suggestions.push(`Remove or manage ${list(inputs.unmanaged)}; matrix leaves unmanaged entries alone.`);
   return suggestions;
+}
+
+function groupDefaultBranches(branches: DefaultBranchHealth[]): NonNullable<Health["defaultBranches"]> {
+  const named = (status: DefaultBranchHealth["status"]) => branches.filter(branch => branch.status === status).map(branch => branch.repo);
+  const detailed = (status: "red" | "unknown") => branches.flatMap(branch => (branch.status === status ? [{ repo: branch.repo, detail: branch.detail }] : []));
+  return { green: named("green"), pending: named("pending"), noCi: named("no-ci"), red: detailed("red"), unknown: detailed("unknown") };
 }
 
 /** Combine status, audit, discovery, and sweep retro into one report with suggested next steps. */
@@ -145,6 +181,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     ...(inputs.disk && { disk: { ...inputs.disk, low } }),
     ...(inputs.running && { running: { leftover } }),
     ...(inputs.git && { git: inputs.git }),
+    ...(inputs.defaultBranches && { defaultBranches: groupDefaultBranches(inputs.defaultBranches) }),
     sweeps: {
       read: inputs.retro.sweeps,
       recurring: inputs.retro.recurring.map(({ kind, cause, repos, sweeps }) => ({ kind, cause, repos, sweeps })),
@@ -187,13 +224,25 @@ function discoveryLine(discovery: Health["discovery"]): string {
   return `- Discovery: ${discovery ? (discovery.added.length + discovery.notDiscovered.length === 0 ? "matrix.json matches the owner's repositories" : `${plural(discovery.added.length, "new repository", "new repositories")}, ${discovery.notDiscovered.length} no longer found`) : "not checked; run with --remote"}.`;
 }
 
+function defaultBranchesLine(branches: Health["defaultBranches"]): string {
+  if (!branches) return "- Default branches: not checked; run with --remote.";
+  const parts = [
+    `${branches.green.length} green`,
+    ...(branches.red.length > 0 ? [`red in ${list(branches.red.map(branch => branch.repo))}`] : []),
+    ...(branches.pending.length > 0 ? [`running in ${list(branches.pending)}`] : []),
+    ...(branches.noCi.length > 0 ? [`no push CI in ${list(branches.noCi)}`] : []),
+    ...(branches.unknown.length > 0 ? [`unread in ${list(branches.unknown.map(branch => branch.repo))}`] : []),
+  ];
+  return `- Default branches: ${parts.join(", ")}.`;
+}
+
 function sweepsLine(sweeps: Health["sweeps"]): string {
   return `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no unresolved recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}${sweeps.resolved.length > 0 ? ` (${sweeps.resolved.length} resolved)` : ""}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`;
 }
 
 /** The report as Markdown, for a person, a scheduled run's message, or an issue. */
 export function markdownHealth(health: Health, at = new Date()): string {
-  const { checkouts, audit, discovery, disk, running, git, sweeps } = health;
+  const { checkouts, audit, discovery, disk, running, git, defaultBranches, sweeps } = health;
   const lines = [
     "# Matrix health",
     "",
@@ -205,6 +254,7 @@ export function markdownHealth(health: Health, at = new Date()): string {
     ...(git ? [gitLine(git)] : []),
     ...(running ? [runningLine(running)] : []),
     discoveryLine(discovery),
+    defaultBranchesLine(defaultBranches),
     sweepsLine(sweeps),
     "",
     "## Next steps",

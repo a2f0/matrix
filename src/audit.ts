@@ -6,6 +6,7 @@ import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
+import { type PushGateResult, runsOnEveryPush } from "./pushGates";
 import { supersededGuidance } from "./superseded";
 import { plural } from "./text";
 
@@ -32,6 +33,10 @@ export interface AuditContext {
   releases(name: string): Record<string, string>;
   /** The time release ages are measured against; defaults to now. */
   readonly now?: Date;
+  /** agent-tool's `push-gate check` for a checkout directory, run with the workspace's pinned agent-tool. */
+  pushGate(directory: string): PushGateResult;
+  /** Where GitHub requires an up-to-date branch before merging into `branch`; only remote rules call it. */
+  strictFreshness(repo: string, branch: string): string[];
 }
 
 export interface Rule {
@@ -59,6 +64,29 @@ function compareVersions(left: string, right: string): number {
   const b = right.split(".").map(Number);
   for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index]! - b[index]!;
   return 0;
+}
+
+/** Where agent-tool's push gate lives; `push-gate check` reads only this path. */
+const PUSH_GATE_HOOK = "scripts/git/hooks/pre-push";
+
+/** The source `hooks.files` installs as `pre-push`, if any. */
+function installedPushHook(checkout: Checkout): unknown {
+  const files = object(checkout.agentToolJson?.hooks)?.files;
+  return (Array.isArray(files) ? files : []).map(object).find(file => file?.target === "pre-push")?.source;
+}
+
+/** A pre-push hook other than the push gate's path: one `hooks.files` installs from elsewhere, or a hook manager's. */
+function otherPushHook(checkout: Checkout): string | undefined {
+  const installed = installedPushHook(checkout);
+  if (typeof installed === "string" && installed !== PUSH_GATE_HOOK) return installed;
+  return checkout.tracked(".husky/pre-push")[0];
+}
+
+/** Whether a checkout has a pre-push hook or a declared push gate, so the audit spawns `push-gate check` only where it can find something. */
+function hasPushHook(checkout: Checkout): boolean {
+  return (
+    installedPushHook(checkout) !== undefined || "pushGate" in (checkout.agentToolJson ?? {}) || checkout.tracked(PUSH_GATE_HOOK, ".husky/pre-push").length > 0
+  );
 }
 
 const OUTPUT_CAPTURE_SCRIPTS = ["agent:run", "agent:logs"];
@@ -427,6 +455,58 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "push-gate",
+    summary: "A tracked pre-push hook is agent-tool's push gate, declared in agent-tool.json, with no tests, builds, or installs",
+    source: "docs/tooling.md#push-gates",
+    check: (checkout, context) => {
+      if (!hasPushHook(checkout)) return skip("no pre-push hook");
+      const other = otherPushHook(checkout);
+      if (other !== undefined)
+        return fail(`${other} is a pre-push hook outside the push gate; replace it with \`agent-tool push-gate hook\` at ${PUSH_GATE_HOOK}`);
+      const result = context.pushGate(checkout.directory);
+      if (result.status === "none") return skip(result.detail);
+      return result.status === "conforms" ? pass : problems(result.problems);
+    },
+  },
+  {
+    id: "base-freshness",
+    summary: "agent-tool.json does not require an up-to-date branch to merge",
+    source: "docs/tooling.md#push-gates",
+    check: checkout =>
+      object(checkout.agentToolJson?.merge)?.requireStrictBaseFreshness === true ? fail("merge.requireStrictBaseFreshness is true; set it to false") : pass,
+  },
+  {
+    id: "base-freshness-settings",
+    summary: "With --remote: no classic protection or active ruleset requires an up-to-date branch to merge into the default branch",
+    source: "docs/tooling.md#push-gates",
+    remote: true,
+    check: (checkout, context) => {
+      const found = context.strictFreshness(checkout.repo, checkout.defaultBranch);
+      return found.length === 0
+        ? pass
+        : fail(`${found.join(" and ")} require${found.length === 1 ? "s" : ""} an up-to-date branch on ${checkout.defaultBranch}`);
+    },
+  },
+  {
+    id: "default-branch-ci",
+    summary: "A workflow runs on every push to the default branch",
+    source: "docs/tooling.md#push-gates",
+    check: checkout => {
+      const files = checkout.tracked(".github/workflows/*.yml", ".github/workflows/*.yaml");
+      if (files.length === 0) return fail("no GitHub Actions workflow");
+      const parsed = files.map(file => {
+        try {
+          return Bun.YAML.parse(checkout.read(file) ?? "");
+        } catch {
+          return undefined;
+        }
+      });
+      return parsed.some(workflow => runsOnEveryPush(workflow, checkout.defaultBranch))
+        ? pass
+        : fail(`no workflow runs on every push to ${checkout.defaultBranch}; add a push trigger for it with no paths filter`);
+    },
+  },
+  {
     id: "superseded-guidance",
     summary: "Markdown outside managed skills names no command a shared command replaced",
     source: "docs/audit.md#superseded-guidance",
@@ -478,7 +558,7 @@ function auditCheckout(root: string, repo: string, rules: Rule[], status: Checko
   const base = { repo, path: status.path, failed: [], skipped: [] };
   if (status.error) return { ...base, error: status.error };
   if (!status.present) return { ...base, error: "checkout missing; run sync" };
-  const checkout = openCheckout(repo, checkoutPath(root, repo));
+  const checkout = openCheckout(repo, checkoutPath(root, repo), status.defaultBranch);
   const result: CheckoutAudit = { ...base, branch: status.branch, head: status.head, failed: [], skipped: [] };
   for (const rule of rules) {
     const outcome = rule.check(checkout, context);

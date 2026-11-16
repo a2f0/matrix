@@ -138,6 +138,85 @@ Retain behavioral fixtures for repository-specific guarantees, and move generic
 guard coverage upstream with the shared implementation. Tests for a script move
 must exercise its relocated default paths as well as explicit path overrides.
 
+## Push gates
+
+A push gate is what a repository's `pre-push` hook runs. It catches the
+mistakes that are cheap to catch locally and leaves everything slow to CI,
+which is the authority on whether a change works. Many sessions share one
+machine, and a gate that runs test suites on every push holds all of them up.
+
+agent-tool owns the gate. `agent-tool push-gate hook` prints the canonical
+hook body; commit it unchanged as `scripts/git/hooks/pre-push` and declare it
+in `hooks.files` so `hooks install --apply` copies it. The hook runs
+`agent-tool push-gate run`, which applies the shared trust guards (installed
+hooks, managed skills and permissions, branch names, commit signatures and
+attribution, binary files) to exactly the commits being pushed, then runs the
+steps the `pushGate` section of `agent-tool.json` declares and records their
+timings in `agent-tool runs list`. The
+[agent-tool workflow reference](https://github.com/a2f0/agent-tool/blob/main/docs/workflows.md#push-gates)
+defines the schema, the push data steps receive, and the time budget.
+
+A declared step belongs in the gate when it finishes in seconds without
+building anything: lint, format, typecheck, unused-code and architecture
+checks, Markdown and shell lint, and generated-file freshness. Tests of any
+kind, builds, coverage, dependency installs, browsers, simulators and
+emulators, model checking, and infrastructure plans run in CI only.
+`agent-tool push-gate check` rejects a step that resolves to a test runner or
+an install unless it carries an `allowSlow` reason. Before taking a check out
+of a hook, confirm that a required CI job runs it.
+
+After a push, wait for CI with `agent-tool pr checks --wait`. When a job
+fails, read it with `agent-tool pr logs` and push a reviewed fix commit to the
+same branch.
+
+### Base freshness
+
+No default branch requires a branch to be up to date before merging: classic
+protection's strict status checks are off, no active ruleset sets a strict
+required-status-check policy, and `agent-tool.json` leaves
+`merge.requireStrictBaseFreshness` false, so `pr checks --wait` reports a
+moved base instead of stopping for it. A real conflict still sends the branch
+back to integrate, and so does a `versions check` that fails against the live
+base.
+
+Two PRs that pass CI separately can break the default branch together; that
+is accepted. Every repository runs CI on each push to its default branch so a
+break shows up, and its deploy and publish jobs on that branch depend on its
+tests so a break fails before it ships. The `ship-pr` skill starts with
+`agent-tool repo base-health`: a red default branch is repaired, and the test
+that would have caught the combination added or hardened, before or alongside
+the requested change. A sweep runs it for each target as it starts
+([sweeps](sweeps.md#base-health)).
+
+To turn the requirement off, change classic protection with
+`gh api -X PATCH repos/<owner>/<repo>/branches/<branch>/protection/required_status_checks -F strict=false`.
+For a ruleset, save `gh api repos/<owner>/<repo>/rulesets/<id>`, set
+`strict_required_status_checks_policy` to false in its `required_status_checks`
+rule, and `PUT` the whole ruleset back, since a `PUT` replaces the rule list.
+Change GitHub only after the repository's `agent-tool.json` stops requiring
+strictness, or `pr merge` refuses there.
+
+The audit checks this with `push-gate`, `base-freshness`, `default-branch-ci`,
+and, with `--remote`, `base-freshness-settings`.
+
+## Brand images
+
+The rules in [AGENTS.md](../AGENTS.md#brand-images) apply, and every website
+serves `favicon.svg`, `favicon.ico` (16, 32, and 48 pixels), and an opaque
+180-pixel `apple-touch-icon.png` rendered from `assets/brand/logo.svg`, linked
+from each page head; balebase and tearleads are the references. Render them
+during dev and build, including the build a deploy runs, into a gitignored
+directory or the build output, and add `agent-tool.json` and `assets/brand/**`
+to cached build inputs such as Turbo's. Replace a committed raster with its SVG
+source and a rendered output. Export editor SVGs as plain SVG that meets
+agent-tool's source rules, and have pages that display the logo use the
+`assets/brand` copy instead of a duplicate. Pages that a published package lets
+another site copy under a subpath either link relative icons that the package
+ships rendered (dnbm) or link root-absolute icons so the host's apply
+(skyline); every host serves its own icons at the root. Merging does not put a
+favicon live where a repository deploys only on request; report those deploys
+rather than running them.
+
 ## Import cycles and layering
 
 Every repository with TypeScript sources or a Python package enforces an
@@ -166,6 +245,8 @@ checks that one of these exists.
 | Push exactly the reviewed commit through hooks | `agent-tool branch push <head> --remote origin` |
 | Commit subjects, attribution, and signature policy | `agent-tool commits check` |
 | Copied-hook installation and ownership drift | `agent-tool hooks install`, `agent-tool hooks check` |
+| Pre-push trust guards and quick declared checks | `agent-tool push-gate run`, `agent-tool push-gate check` |
+| Default-branch CI health and the merges that broke it | `agent-tool repo base-health` |
 | Current repository, PR, base, and head | `agent-tool repo context --fetch`, `agent-tool pr context` |
 | Every CI entry and exact-head merge readiness | `agent-tool pr checks --wait`, `agent-tool pr preflight` |
 | Review-thread replies and resolution | `agent-tool pr threads` |

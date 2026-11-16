@@ -3,7 +3,8 @@
 `bun run health` is where matrix proposes its own next work. It combines
 checkout `status`, the [checkout audit](audit.md), and
 [sweep retro](sweeps.md#retro) into one report with suggested next steps.
-`--remote` adds GitHub discovery and the audit's registry rules.
+`--remote` adds GitHub discovery, the audit's registry and GitHub rules, and
+each default branch's CI from `agent-tool repo base-health`.
 
 ```sh
 bun run sync
@@ -14,7 +15,8 @@ It reads and reports only, and always exits 0; `bun run audit` is the check
 that fails. Suggestions come in this order: free disk space below 50 GiB on the
 volume holding the checkouts, repositories where `bun run teardown` fails,
 ways Git or gh can leave SSH for GitHub ([below](#github-over-ssh)),
-checkouts that are not ready, stale installs,
+checkouts that are not ready, red default branches
+([base freshness](tooling.md#base-freshness)), stale installs,
 repositories to onboard or that discovery lost, failing audit rules, recurring
 sweep friction without a recorded resolution, unfinished sweep entries, and
 unmanaged checkout entries. JSON output has the same parts for agents;

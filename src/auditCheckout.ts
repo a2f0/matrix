@@ -7,6 +7,8 @@ import { object, parseObject } from "./packageJson";
 export interface Checkout {
   readonly repo: string;
   readonly directory: string;
+  /** The branch the checkout's repository merges into. */
+  readonly defaultBranch: string;
   read(file: string): string | undefined;
   exists(file: string): boolean;
   tracked(...pathspecs: string[]): string[];
@@ -24,12 +26,13 @@ function isFile(file: string): boolean {
   }
 }
 
-export function openCheckout(repo: string, directory: string): Checkout {
+export function openCheckout(repo: string, directory: string, defaultBranch = "main"): Checkout {
   const read = (file: string) => (isFile(path.join(directory, file)) ? readFileSync(path.join(directory, file), "utf8") : undefined);
   const packageJson = parseObject(read("package.json"));
   return {
     repo,
     directory,
+    defaultBranch,
     read,
     exists: file => existsSync(path.join(directory, file)),
     tracked: (...pathspecs) => {

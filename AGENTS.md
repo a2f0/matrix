@@ -86,7 +86,8 @@ Before reporting work done, `bun run teardown` must pass.
 2. Adopting agent-tool in a checkout is a change to that repository: read its
    guidance and ship it there. Pin `@a2f0/agent-tool` exactly, run
    `agent-tool skills install --apply` and
-   `agent-tool permissions install --apply`, and run `agent-tool skills check`
+   `agent-tool permissions install --apply`, replace its `pre-push` with the
+   [push gate](docs/tooling.md#push-gates), and run `agent-tool skills check`
    and `agent-tool permissions check` in a CI job that already gates merges,
    so drift blocks them without changing repository settings;
    [adoption](docs/tooling.md#adoption-and-validation) says which jobs qualify.
@@ -152,6 +153,14 @@ capture and what to keep visible. READMEs never mention it. Bring a newly
 onboarded repository to it, and change the shared text there before diverging
 in one repository.
 
+## Push gates
+
+A `pre-push` hook is agent-tool's [push gate](docs/tooling.md#push-gates): the
+shared trust guards plus quick static checks declared in `agent-tool.json`,
+never tests, builds, or installs. CI is the authority; when it fails, push a
+reviewed fix. Nothing requires an up-to-date branch to merge, so `ship-pr`
+starts by repairing a red default branch.
+
 ## Brand images
 
 Repositories that render icons, splash screens, favicons, or store graphics keep
@@ -160,20 +169,9 @@ section of `agent-tool.json`; `agent-tool images build <target>` renders them
 (see agent-tool's `docs/images.md`). Do not add per-repository image scripts or
 ImageMagick dependencies.
 
-Every website serves `favicon.svg`, `favicon.ico` (16, 32, and 48 pixels), and
-an opaque 180-pixel `apple-touch-icon.png` rendered from `assets/brand/logo.svg`,
-linked from each page head; balebase and tearleads are the references. Render
-them during dev and build, including the build a deploy runs, into a gitignored
-directory or the build output, and add `agent-tool.json` and `assets/brand/**`
-to cached build inputs such as Turbo's. Never commit binary images: replace a
-committed raster with its SVG source and a rendered output. Export editor SVGs
-as plain SVG that meets agent-tool's source rules, and have pages that display
-the logo use the `assets/brand` copy instead of a duplicate. Pages that a
-published package lets another site copy under a subpath either link relative
-icons that the package ships rendered (dnbm) or link root-absolute icons so the
-host's apply (skyline); every host serves its own icons at the root. Merging
-does not put a favicon live where a repository deploys only on request; report
-those deploys rather than running them.
+Never commit binary images. Every website serves the icon set that
+[brand images](docs/tooling.md#brand-images) lists, rendered during dev and
+build.
 
 ## Screenshots
 

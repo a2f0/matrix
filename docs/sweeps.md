@@ -128,9 +128,11 @@ stays short enough for every agent to follow.
 Delegated checkouts share one machine with each other and with other
 sessions, so a sweep's own load causes `machine-load` and `browser-timing`
 retries. AGENTS.md caps a sweep at four delegates at a time. Within that, run
-at most two checkouts whose validation drives browsers or native builds, or
-whose push gate runs over ten minutes; tearleads, balebase, dnbm, ct,
-devopsrockstars, and rn-sandbox were the heavy ones in recent sweeps. Start the
+at most two checkouts whose validation drives browsers or native builds;
+tearleads, balebase, dnbm, ct, devopsrockstars, and rn-sandbox were the heavy
+ones in recent sweeps. Push gates no longer run tests
+([push gates](tooling.md#push-gates)), so a delegate's own targeted tests are
+the heavy part, not its pushes. Start the
 longest one first, check `uptime` before starting another, and start a sweep
 with the free disk space `bun run health` asks for.
 
@@ -147,6 +149,22 @@ others) and commitlint's 100-column body lines. Its `commit-msg` hook rejects
 a longer message before anything is pushed, so the cost is a rewrite, not a
 failed run. A brief also gives `pr checks --wait` a `--timeout` long enough
 for the checkout's slowest required job.
+
+## Base health
+
+A sweep starts by asking GitHub how each target's default branch is doing:
+
+```sh
+node_modules/.bin/agent-tool --repo checkouts/<name> repo base-health
+```
+
+Record a red default branch on its ledger entry (`--note`), and have that
+checkout's delegate repair it first, as the `ship-pr` skill describes: fix
+logic that combined merges broke and add the test that would have caught the
+combination, or harden a flaky test; never retry it until it passes. A
+checkout with `no-ci` lacks CI on pushes to its default branch, which the
+audit's `default-branch-ci` rule reports. `bun run health --remote` lists red
+default branches across the workspace.
 
 ## Tracking issues
 
