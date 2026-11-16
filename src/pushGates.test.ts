@@ -158,9 +158,37 @@ describe("ungatedShippingJobs", () => {
     expect(publish("bun test && echo ok", "npm publish")).toEqual([]);
     expect(publish("bun test && npm publish\n")).toEqual([]);
     expect(publish("bun run lint && bun run test", "npm publish")).toEqual([]);
-    // A custom shell may not stop at the first failure.
-    expect(publish({ run: "bun test", shell: "bash {0}" }, "npm publish")).toEqual(["publish"]);
-    expect(publish({ run: "bun test", shell: "bash" }, "npm publish")).toEqual([]);
+    // A custom shell may not stop at the first failure; a single command fails its step in any shell.
+    expect(publish({ run: "bun test; echo done", shell: "bash {0}" }, "npm publish")).toEqual(["publish"]);
+    expect(publish({ run: "bun test; echo done", shell: "bash" }, "npm publish")).toEqual([]);
+    expect(publish({ run: "bun test", shell: "bash {0}" }, "npm publish")).toEqual([]);
+    // Anything but plain commands could keep a failed test from failing its step.
+    for (const script of [
+      "if bun test; then echo ok; fi",
+      "! bun test",
+      "echo $(bun test)",
+      "bun test &",
+      "bun test 2>&1",
+      "(bun test)",
+      "{ bun test; }",
+      "while bun test; do break; done",
+      "trap 'exit 0' ERR\nbun test",
+      "set +o errexit\nbun test",
+    ])
+      expect(publish(script, "npm publish")).toEqual(["publish"]);
+    expect(publish(`cd packages/client\nbun test --filter "$NAME" ${expression("matrix.shard")}; echo done`, "npm publish")).toEqual([]);
+  });
+
+  test("resolves each step's shell from job and workflow defaults and the runner", () => {
+    const shipping = (workflow: Record<string, unknown>, job: Record<string, unknown> = {}, run = "bun test; echo done") =>
+      ungatedShippingJobs({ ...workflow, jobs: { publish: { "runs-on": "ubuntu-latest", ...job, steps: [{ run }, { run: "npm publish" }] } } }, []);
+    expect(shipping({})).toEqual([]);
+    expect(shipping({ defaults: { run: { shell: "bash {0}" } } })).toEqual(["publish"]);
+    expect(shipping({}, { defaults: { run: { shell: "bash {0}" } } })).toEqual(["publish"]);
+    expect(shipping({ defaults: { run: { shell: "bash {0}" } } }, { defaults: { run: { shell: "bash" } } })).toEqual([]);
+    expect(shipping({}, { "runs-on": "windows-latest" })).toEqual(["publish"]);
+    expect(shipping({}, { "runs-on": "windows-latest" }, "bun test")).toEqual([]);
+    expect(shipping({}, { "runs-on": "windows-latest", defaults: { run: { shell: "bash" } } })).toEqual([]);
   });
 
   test("counts validation scripts but not installs that share their names", () => {

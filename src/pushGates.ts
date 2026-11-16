@@ -160,20 +160,28 @@ function blocking(step: Record<string, unknown>): boolean {
   return !excused && condition !== false && !NEVER.test(text) && !ONLY_AFTER_FAILURE.test(text);
 }
 
-/** Shell that keeps a failed command from failing its step whatever comes after: `||`, a pipe, or `set +e`. */
-const MASKS_FAILURE = /\||\bset\s+\+e\b/;
+/** Characters outside plain commands: pipes, `||`, background `&`, grouping, substitution, negation, and redirection. */
+const SHELL_SYNTAX = /[|&`()!{}<>]/;
+
+/** Shell keywords and builtins that change control flow or error handling, where a command starts. */
+const SHELL_CONTROL = /(?:^|;)\s*(?:if|then|else|elif|fi|while|until|do|done|case|esac|for|select|function|trap|exit|return|eval|exec|source|set)(?=[\s;]|$)/m;
 
 /**
- * Whether a command can carry on past a failed validation at `at`: masking
- * shell, or an `&&` list followed by more commands, since `-e` ignores a
- * failure inside a list that is not the script's last command.
+ * Whether a script is plain commands, separated by newlines, `;`, or `&&`, so
+ * its exit status follows its commands'. Anything else (conditionals, loops,
+ * `||`, pipes, substitution, `set`) could keep a failure from failing the step,
+ * and a file cannot show which, so such a script validates nothing.
+ * Workflow expressions and `${NAME}` variables are plain words.
  */
-function masksFailure(run: string, at: number): boolean {
-  const text = run.trim();
-  return MASKS_FAILURE.test(text) || (text.includes("&&") && /[;\n]/.test(text.slice(at)));
+function plainScript(run: string): boolean {
+  const text = run
+    .replace(/\$\{\{[\s\S]*?\}\}/g, "x")
+    .replace(/\$\{\w+\}/g, "x")
+    .replace(/&&/g, ";");
+  return !SHELL_SYNTAX.test(text) && !SHELL_CONTROL.test(text);
 }
 
-/** Whether a step runs under GitHub's default shells, which stop at the first failed command (`-e`). */
+/** Whether a step's resolved shell stops at the first failed command: GitHub's default bash and sh run with `-e`. */
 function stopsOnError(step: Record<string, unknown>): boolean {
   return step.shell === undefined || step.shell === "bash" || step.shell === "sh";
 }
@@ -183,11 +191,19 @@ function namedValidationAt(step: Record<string, unknown>): number {
   return typeof step.run === "string" ? step.run.search(VALIDATION_STEP) : -1;
 }
 
-/** Where a step's command runs validation whose failure fails the step, or -1. */
+/**
+ * Where a step's command runs validation whose failure fails the step, or -1.
+ * A plain script of one command fails its step in any shell; with more, the
+ * shell must stop at the first failure, and the validation must not sit in an
+ * `&&` list that more commands follow, since `-e` ignores failures there.
+ */
 function validationAt(step: Record<string, unknown>): number {
   const at = namedValidationAt(step);
-  if (at === -1 || !blocking(step) || !stopsOnError(step)) return -1;
-  return masksFailure(step.run as string, at) ? -1 : at;
+  const run = typeof step.run === "string" ? step.run.trim() : "";
+  if (at === -1 || !blocking(step) || !plainScript(run)) return -1;
+  if (!/[;\n]|&&/.test(run)) return at;
+  if (!stopsOnError(step)) return -1;
+  return run.includes("&&") && /[;\n]/.test(run.slice(at)) ? -1 : at;
 }
 
 /** Text in a step that deploys or publishes: its command, action, or inputs. */
@@ -297,6 +313,29 @@ function waitsForChecks(jobs: Record<string, unknown>, id: string, required: str
   return false;
 }
 
+/** A `defaults.run.shell` setting. */
+function defaultShell(scope: Record<string, unknown> | undefined): unknown {
+  return object(object(scope?.defaults)?.run)?.shell;
+}
+
+/**
+ * A workflow's jobs with each step's effective shell written on it: its own,
+ * its job's or workflow's `defaults.run.shell`, or `pwsh`, GitHub's default
+ * on a Windows runner, which does not stop at a failed command.
+ */
+function withShells(workflow: Record<string, unknown> | undefined): Record<string, unknown> {
+  const jobs = object(workflow?.jobs) ?? {};
+  return Object.fromEntries(
+    Object.entries(jobs).map(([id, value]) => {
+      const job = object(value);
+      if (!job) return [id, value];
+      const windows = /windows/i.test(JSON.stringify(job["runs-on"] ?? ""));
+      const shell = defaultShell(job) ?? defaultShell(workflow) ?? (windows ? "pwsh" : undefined);
+      return [id, { ...job, steps: steps(job).map(step => (step.shell === undefined && shell !== undefined ? { ...step, shell } : step)) }];
+    }),
+  );
+}
+
 /**
  * Deploy and publish jobs in a parsed workflow that start without waiting for
  * validation, named as `id` or `id (name)`. Names and commands are all a
@@ -304,7 +343,7 @@ function waitsForChecks(jobs: Record<string, unknown>, id: string, required: str
  * one that waits for a job running too little.
  */
 export function ungatedShippingJobs(workflow: unknown, required: string[]): string[] {
-  const jobs = object(object(workflow)?.jobs) ?? {};
+  const jobs = withShells(object(workflow));
   return Object.entries(jobs).flatMap(([id, value]) => {
     const name = jobName(id, object(value) ?? {});
     if (!SHIPPING_JOB.test(`${id} ${name}`) || waitsForChecks(jobs, id, required)) return [];
