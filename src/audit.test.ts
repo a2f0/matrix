@@ -835,10 +835,10 @@ describe("audit", () => {
         }),
         ["default-branch-ci"],
       )["default-branch-ci"];
-    expect(gated("github.event_name == 'pull_request'")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
-    expect(gated("github.ref != 'refs/heads/main'")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+    expect(gated("github.event_name == 'pull_request'")).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
+    expect(gated("github.ref != 'refs/heads/main'")).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
     for (const disabled of ["false", `$\{{ false }}`, "0", "github.event_name == 'push' && false"])
-      expect(gated(disabled)).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+      expect(gated(disabled)).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
     for (const condition of ["always()", "github.event_name == 'push' || github.event_name == 'pull_request'", "vars.ENABLED == 'true'"])
       expect(gated(condition)).toBeUndefined();
     // GitHub also skips a job whose needs were skipped, unless its condition says otherwise.
@@ -851,7 +851,7 @@ describe("audit", () => {
         ["default-branch-ci"],
       )["default-branch-ci"];
     for (const gateIf of ["", "needs.tests.result == 'success' && always()"])
-      expect(aggregate(gateIf)).toBe("required check 'CI gate' never runs on a push to main; let its job run there");
+      expect(aggregate(gateIf)).toBe("required check 'CI gate' does not run on every push to main; let its job run on each one");
     for (const gateIf of ["always()", "always() && needs.lint.result == 'success'"]) expect(aggregate(gateIf)).toBeUndefined();
     // A required check named without its workflow is looked for in every workflow.
     const bare = (prOnly: boolean, workflowOn = "on: [push, pull_request]") =>
@@ -863,9 +863,13 @@ describe("audit", () => {
         }),
         ["default-branch-ci"],
       )["default-branch-ci"];
-    expect(bare(true)).toBe("required check 'Tests' never runs on a push to main; let its job run there");
-    expect(bare(false, "on: pull_request")).toBe("required check 'Tests' never runs on a push to main; let its job run there");
+    expect(bare(true)).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
+    expect(bare(false, "on: pull_request")).toBe("required check 'Tests' does not run on every push to main; let its job run on each one");
     expect(bare(false)).toBeUndefined();
+    // Its only workflow must run on every push, whatever other workflows do.
+    expect(bare(false, "on:\n  push:\n    paths: [src/**]\n  pull_request:")).toBe(
+      "required check 'Tests' does not run on every push to main; let its job run on each one",
+    );
   });
 
   test("requires deploy and publish jobs on the default branch to wait for validation", () => {

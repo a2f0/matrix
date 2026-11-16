@@ -111,7 +111,7 @@ function requiredChecks(checkout: Checkout): Array<{ name: string; workflow?: st
   });
 }
 
-/** Whether a push to the default branch runs no job behind a required check: in its named workflow or, without one, in any workflow that has its job. */
+/** Whether some push to the default branch runs no job behind a required check: in its named workflow or, without one, in any workflow that has its job. */
 function checkSkipped(check: { name: string; workflow?: string }, parsed: Array<{ file: string; workflow: unknown }>, branch: string): boolean {
   const runs = parsed
     .filter(({ file, workflow }) => check.workflow === undefined || workflowName(workflow, file) === check.workflow)
@@ -142,7 +142,7 @@ function defaultBranchCi(checkout: Checkout): string | undefined {
     .filter(check => checkSkipped(check, parsed, branch))
     .map(check => `'${check.name}'`);
   if (skipped.length === 0) return undefined;
-  return `required check ${skipped.join(" and ")} never ${skipped.length === 1 ? "runs" : "run"} on a push to ${branch}; let its job run there`;
+  return `required check ${skipped.join(" and ")} ${skipped.length === 1 ? "does" : "do"} not run on every push to ${branch}; let ${skipped.length === 1 ? "its job" : "their jobs"} run on each one`;
 }
 
 /** Whether a checkout has a pre-push hook or a declared push gate, so the audit spawns `push-gate check` only where it can find something. */

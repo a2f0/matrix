@@ -404,20 +404,88 @@ function falseOnPush(term: string, branch: string): boolean {
   return operator === "==" ? value !== actual : value === actual;
 }
 
+/** A position in a condition being read, and the branch the push targets. */
+interface Cursor {
+  readonly text: string;
+  readonly branch: string;
+  at: number;
+}
+
+/** Consume `token` after any spaces, if it comes next. */
+function accept(cursor: Cursor, token: string): boolean {
+  while (/\s/.test(cursor.text[cursor.at] ?? "")) cursor.at++;
+  if (!cursor.text.startsWith(token, cursor.at)) return false;
+  cursor.at += token.length;
+  return true;
+}
+
+/** `a || b`: false on the push only when every alternative is. */
+function readOr(cursor: Cursor): boolean {
+  let never = readAnd(cursor);
+  while (accept(cursor, "||")) never = readAnd(cursor) && never;
+  return never;
+}
+
+/** `a && b`: false on the push when any term is. */
+function readAnd(cursor: Cursor): boolean {
+  let never = readUnary(cursor);
+  while (accept(cursor, "&&")) never = readUnary(cursor) || never;
+  return never;
+}
+
+/** A negation, which could invert anything and so is never read as false, a group, or a comparison. */
+function readUnary(cursor: Cursor): boolean {
+  if (accept(cursor, "!")) {
+    readUnary(cursor);
+    return false;
+  }
+  if (accept(cursor, "(")) {
+    const never = readOr(cursor);
+    accept(cursor, ")");
+    return never;
+  }
+  return falseOnPush(readTerm(cursor), cursor.branch);
+}
+
+/** Whether a term ends at `at`: an `&&`, `||`, or closing parenthesis outside the term's own calls. */
+function termEnds(text: string, at: number, depth: number): boolean {
+  return depth === 0 && (text[at] === ")" || text.startsWith("&&", at) || text.startsWith("||", at));
+}
+
+/** Where the character after `at` lands: past a quoted string that opens there, or the next character. */
+function nextAt(text: string, at: number): number {
+  if (text[at] !== "'") return at + 1;
+  const close = text.indexOf("'", at + 1);
+  return close === -1 ? text.length : close + 1;
+}
+
+/** One comparison or call, up to the next `&&`, `||`, or closing parenthesis outside its own calls and quoted text. */
+function readTerm(cursor: Cursor): string {
+  const { text } = cursor;
+  const start = cursor.at;
+  let depth = 0;
+  while (cursor.at < text.length && !termEnds(text, cursor.at, depth)) {
+    if (text[cursor.at] === "(") depth++;
+    if (text[cursor.at] === ")") depth--;
+    cursor.at = nextAt(text, cursor.at);
+  }
+  return text.slice(start, cursor.at);
+}
+
 /**
  * Whether a condition cannot hold on a push to `branch`, the only run this
- * audit reads: a constant false, such as `${{ false }}`, or every `||` alternative has an `&&` term
- * comparing `github.event_name`, `github.ref`, or `github.ref_name` to a value
- * the push does not have. A negation could invert a term, so a condition with
- * one is not read.
+ * audit reads. It is parsed with GitHub's `||`, `&&`, `!`, and parentheses: a
+ * constant false, such as `${{ false }}`, or a comparison of
+ * `github.event_name`, `github.ref`, or `github.ref_name` to a value the push
+ * does not have, is false; any other term, and any negation, might hold.
  */
 function neverOnPush(condition: unknown, branch: string): boolean {
   if (condition === false || condition === 0) return true;
   if (typeof condition !== "string") return false;
-  if (NEVER.test(condition)) return true;
-  const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "");
-  if (/!(?!=)/.test(plain)) return false;
-  return plain.split("||").every(alternative => alternative.split("&&").some(term => falseOnPush(term, branch)));
+  const cursor: Cursor = { text: condition.trim().replace(/^\$\{\{([\s\S]*)\}\}$/, "$1"), branch, at: 0 };
+  const never = readOr(cursor);
+  // Text the reader could not consume leaves the condition unread.
+  return !accept(cursor, ")") && cursor.text.slice(cursor.at).trim() === "" && never;
 }
 
 /**
@@ -452,14 +520,14 @@ function successNeeds(job: Record<string, unknown>): string[] {
  * Whether a push to `branch` runs a job behind required check `check` in a
  * parsed workflow: undefined when no job there matches it (a reusable
  * workflow's check cannot be judged here), false when the workflow does not
- * run on that push or every matching job is skipped there, by its own
+ * run on every such push or every matching job is skipped there, by its own
  * condition or a skipped job it needs.
  */
 export function checkRunsOnPush(workflow: unknown, check: string, branch: string): boolean | undefined {
   const jobs = object(object(workflow)?.jobs) ?? {};
   const matching = Object.keys(jobs).filter(id => isRequiredJob(jobName(id, object(jobs[id]) ?? {}), [check]));
   if (matching.length === 0) return undefined;
-  if (!runsOnPushTo(workflow, branch)) return false;
+  if (!runsOnEveryPush(workflow, branch)) return false;
   const skipped = skippedOnPush(jobs, branch);
   return matching.some(id => !skipped.has(id));
 }

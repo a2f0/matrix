@@ -258,6 +258,9 @@ describe("ungatedShippingJobs", () => {
       "github.ref_name != 'main'",
       "github.event_name == 'pull_request' || github.event_name == 'schedule'",
       expression("github.event_name == 'workflow_dispatch' && inputs.full"),
+      "github.event_name == 'pull_request' && (vars.A || vars.B)",
+      "(github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && contains(github.ref, ')')",
+      "github.event_name == 'push' && false",
     ])
       expect(publish(condition)).toEqual(["publish"]);
     // Conditions a push to main can satisfy, or that cannot be read, are trusted.
@@ -267,6 +270,9 @@ describe("ungatedShippingJobs", () => {
       "github.event_name == 'pull_request' || inputs.full",
       "!(github.event_name == 'pull_request')",
       "steps.version.outputs.publish == 'true'",
+      "(github.event_name == 'pull_request' || vars.A) && vars.B",
+      "contains(github.ref, 'main') || github.event_name == 'pull_request'",
+      "github.event_name == 'pull_request')",
     ])
       expect(publish(condition)).toEqual([]);
     expect(publish("github.ref_name == 'release'", "release")).toEqual([]);
