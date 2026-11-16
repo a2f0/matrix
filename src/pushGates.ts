@@ -139,9 +139,29 @@ function steps(job: Record<string, unknown>): Record<string, unknown>[] {
   return job.steps.map(object).filter(step => step !== undefined);
 }
 
-/** Where a step's command runs validation, or -1. */
+/** A step condition that never holds: a constant false. */
+const NEVER = /^\s*(?:\$\{\{\s*)?(?:false|0|''|"")(?:\s*\}\})?\s*$/;
+
+/** Status functions that run a step only after an earlier one failed or the run was cancelled. */
+const ONLY_AFTER_FAILURE = /\b(?:failure|cancelled)\(\s*\)/;
+
+/**
+ * Whether a step fails its job when its work fails: no `continue-on-error`
+ * other than false, and no `if` that keeps it from running on a passing run,
+ * a constant false or `failure()`/`cancelled()`. Other conditions cannot be
+ * evaluated from the file, so they are trusted: a test step that shares the
+ * publish job's condition, as release workflows do, still gates it.
+ */
+function blocking(step: Record<string, unknown>): boolean {
+  const excused = step["continue-on-error"] !== undefined && step["continue-on-error"] !== false;
+  const condition = step.if;
+  const text = typeof condition === "string" ? condition.replace(/!\s*cancelled\(\s*\)/g, "") : "";
+  return !excused && condition !== false && !NEVER.test(text) && !ONLY_AFTER_FAILURE.test(text);
+}
+
+/** Where a blocking step's command runs validation, or -1. */
 function validationAt(step: Record<string, unknown>): number {
-  return typeof step.run === "string" ? step.run.search(VALIDATION_STEP) : -1;
+  return blocking(step) && typeof step.run === "string" ? step.run.search(VALIDATION_STEP) : -1;
 }
 
 /** Text in a step that deploys or publishes: its command, action, or inputs. */
@@ -154,7 +174,7 @@ function shippingAt(step: Record<string, unknown>): number {
   return SHIPPING_STEP.test(JSON.stringify([step.uses ?? null, step.with ?? null])) ? 0 : -1;
 }
 
-/** Whether any of a needed job's steps runs validation; the shipping job waits for the whole job to succeed. */
+/** Whether a needed job's steps run validation that fails it; the shipping job waits for the whole job to succeed. */
 function validates(job: Record<string, unknown>): boolean {
   return steps(job).some(step => validationAt(step) !== -1);
 }
@@ -170,30 +190,45 @@ function validatesBeforeShipping(job: Record<string, unknown>): boolean {
   return false;
 }
 
-/** Whether a job that a shipping job needs is a required check or is named for validation. */
-function validationJob(id: string, job: Record<string, unknown>, required: string[]): boolean {
+/**
+ * Whether a job that a shipping job needs validates: it is a required check,
+ * is named for validation, or runs validation, and its failure is not
+ * excused by `continue-on-error`.
+ */
+function validatingNeed(id: string, job: Record<string, unknown>, required: string[]): boolean {
+  if (job["continue-on-error"] !== undefined && job["continue-on-error"] !== false) return false;
   const name = jobName(id, job);
-  return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name);
+  return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name) || validates(job);
 }
 
 /** Status functions that let a job run after a job it needs fails. */
 const RUNS_AFTER_FAILURE = /\b(?:always|failure|cancelled)\(\s*\)/;
 
-/** A comparison requiring a needed job to have succeeded, capturing the job. */
-const NEEDS_SUCCESS = /\bneeds\.([\w-]+)\.result\s*==\s*['"]success['"]/g;
+/** One `&&` term that requires a needed job to have succeeded, capturing the job. */
+const NEEDS_SUCCESS = /^\(*\s*needs\.([\w-]+)\.result\s*==\s*['"]success['"]\s*\)*$/;
+
+/**
+ * The needed jobs whose success a condition that tolerates failure still
+ * requires. Only a plain `&&` of terms is read: an `||` or a negation other
+ * than `!=` and `!cancelled()` could invert or bypass a comparison, so such a
+ * condition requires none.
+ */
+function requiredSuccesses(condition: string): Set<string> {
+  const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "").replace(/!\s*cancelled\(\s*\)/g, "");
+  if (plain.includes("||") || /!(?!=)/.test(plain)) return new Set();
+  return new Set(plain.split("&&").flatMap(term => NEEDS_SUCCESS.exec(term.trim())?.[1] ?? []));
+}
 
 /**
  * The jobs whose success a job waits for. By default that is all of its
  * `needs`; an `if` using `always()`, `failure()`, or `cancelled()` lets it run
- * after they fail, so then only the jobs whose success the condition compares
- * count, and none when an `||` could bypass the comparison.
+ * after they fail, so then only the jobs whose success the condition requires.
  */
 function gatingNeeds(job: Record<string, unknown>): string[] {
   const needs = patterns(job.needs) ?? [];
   const condition = typeof job.if === "string" ? job.if : "";
   if (!RUNS_AFTER_FAILURE.test(condition)) return needs;
-  if (condition.includes("||")) return [];
-  const succeeded = new Set([...condition.matchAll(NEEDS_SUCCESS)].map(match => match[1]));
+  const succeeded = requiredSuccesses(condition);
   return needs.filter(need => succeeded.has(need));
 }
 
@@ -214,7 +249,7 @@ function waitsForChecks(jobs: Record<string, unknown>, id: string, required: str
     const job = object(jobs[current]);
     if (seen.has(current) || !job) continue;
     seen.add(current);
-    if (validationJob(current, job, required) || validates(job)) return true;
+    if (validatingNeed(current, job, required)) return true;
     queue.push(...gatingNeeds(job));
   }
   return false;

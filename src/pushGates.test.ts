@@ -28,11 +28,11 @@ describe("filterMatches", () => {
 
 describe("ungatedShippingJobs", () => {
   const job = (fields: Record<string, unknown>) => ({ "runs-on": "x", steps: [{ run: "true" }], ...fields });
+  // A GitHub expression, built so it is not mistaken for a template placeholder.
+  const expression = (text: string) => `$\{{ ${text} }}`;
   test("matches required checks by name, matrix suffix, reusable-workflow prefix, and expression prefix", () => {
     const required = ["build (ubuntu-latest)", "windows / Windows CEF persistence", "Smoke (node 20)"];
     const workflow = (name: string) => ({ jobs: { pre: job({ name }), deploy: job({ needs: "pre" }) } });
-    // A GitHub expression, built so it is not mistaken for a template placeholder.
-    const expression = (text: string) => `$\{{ ${text} }}`;
     for (const name of ["build", "windows", `Smoke (node ${expression("matrix.node")})`]) expect(ungatedShippingJobs(workflow(name), required)).toEqual([]);
     expect(ungatedShippingJobs(workflow("Package"), required)).toEqual(["deploy"]);
     expect(ungatedShippingJobs(workflow(expression("matrix.name")), required)).toEqual(["deploy"]);
@@ -77,6 +77,39 @@ describe("ungatedShippingJobs", () => {
       );
     expect(deploy("always() && needs.build.result == 'success'")).toEqual(["deploy"]);
     expect(deploy("always() && needs.tests.result == 'success'")).toEqual([]);
+    expect(deploy(expression("!cancelled() && (needs.tests.result == 'success')"))).toEqual([]);
+    // Negation could invert a comparison, so a condition with one requires nothing.
+    for (const condition of [
+      "always() && !(needs.tests.result == 'success')",
+      "always() && !(github.ref == 'x' && needs.tests.result == 'success')",
+      "always() && needs.tests.result == 'success' || failure()",
+    ])
+      expect(deploy(condition)).toEqual(["deploy"]);
+    expect(deploy("always() && needs.tests.result == 'success' && github.ref != 'refs/heads/x'")).toEqual([]);
+  });
+
+  test("counts only validation whose failure fails the job", () => {
+    const publish = (testStep: Record<string, unknown>, testJob: Record<string, unknown> = {}) =>
+      ungatedShippingJobs({ jobs: { prepare: job({ steps: [testStep], ...testJob }), publish: job({ needs: "prepare" }) } }, []);
+    expect(publish({ run: "bun test" })).toEqual([]);
+    // Conditions the file cannot evaluate are trusted, such as a release workflow's shared publish condition.
+    for (const runs of [{ "continue-on-error": false }, { if: "steps.version.outputs.publish == 'true'" }, { if: "always()" }, { if: "!cancelled()" }])
+      expect(publish({ run: "bun test", ...runs })).toEqual([]);
+    for (const skipped of [
+      { if: false },
+      { if: "false" },
+      { if: expression("false") },
+      { if: "failure()" },
+      { if: "cancelled()" },
+      { "continue-on-error": true },
+      { "continue-on-error": expression("true") },
+    ])
+      expect(publish({ run: "bun test", ...skipped })).toEqual(["publish"]);
+    expect(publish({ run: "bun test" }, { "continue-on-error": true })).toEqual(["publish"]);
+    // The shipping job's own validation follows the same rule.
+    const own = (testStep: Record<string, unknown>) => ungatedShippingJobs({ jobs: { publish: job({ steps: [testStep, { run: "npm publish" }] }) } }, []);
+    expect(own({ run: "bun test" })).toEqual([]);
+    expect(own({ run: "bun test", if: "false" })).toEqual(["publish"]);
   });
 
   test("counts validation in the shipping job only before it ships", () => {
