@@ -86,6 +86,10 @@ describe("ungatedShippingJobs", () => {
     ])
       expect(deploy(condition)).toEqual(["deploy"]);
     expect(deploy("always() && needs.tests.result == 'success' && github.ref != 'refs/heads/x'")).toEqual([]);
+    // Any status function drops GitHub's implicit success(); an explicit success() keeps every need.
+    for (const condition of ["!success()", "!failure() && always()", "success() || failure()"]) expect(deploy(condition)).toEqual(["deploy"]);
+    for (const condition of ["success()", "success() && github.ref == 'refs/heads/main'", "github.ref == 'refs/heads/main'"])
+      expect(deploy(condition)).toEqual([]);
   });
 
   test("counts only validation whose failure fails the job", () => {
@@ -93,7 +97,13 @@ describe("ungatedShippingJobs", () => {
       ungatedShippingJobs({ jobs: { prepare: job({ steps: [testStep], ...testJob }), publish: job({ needs: "prepare" }) } }, []);
     expect(publish({ run: "bun test" })).toEqual([]);
     // Conditions the file cannot evaluate are trusted, such as a release workflow's shared publish condition.
-    for (const runs of [{ "continue-on-error": false }, { if: "steps.version.outputs.publish == 'true'" }, { if: "always()" }, { if: "!cancelled()" }])
+    for (const runs of [
+      { "continue-on-error": false },
+      { if: "steps.version.outputs.publish == 'true'" },
+      { if: "always()" },
+      { if: "!cancelled()" },
+      { if: "!failure()" },
+    ])
       expect(publish({ run: "bun test", ...runs })).toEqual([]);
     for (const skipped of [
       { if: false },
@@ -101,6 +111,8 @@ describe("ungatedShippingJobs", () => {
       { if: expression("false") },
       { if: "failure()" },
       { if: "cancelled()" },
+      { if: "!success()" },
+      { if: "!always()" },
       { "continue-on-error": true },
       { "continue-on-error": expression("true") },
     ])
@@ -121,6 +133,10 @@ describe("ungatedShippingJobs", () => {
     expect(publish("npm publish && bun test")).toEqual(["publish"]);
     expect(publish({ uses: "cloudflare/wrangler-action@v3", with: { command: "deploy" } }, "bun test")).toEqual(["publish"]);
     expect(publish("bun test", { uses: "cloudflare/wrangler-action@v3", with: { command: "deploy" } })).toEqual([]);
+    // A shipping step whose condition lets it run after the tests fail is not gated by them.
+    for (const condition of ["always()", "!cancelled()", "failure() || success()"])
+      expect(publish("bun test", { run: "npm publish", if: condition })).toEqual(["publish"]);
+    for (const condition of ["success()", "github.ref == 'refs/heads/main'"]) expect(publish("bun test", { run: "npm publish", if: condition })).toEqual([]);
   });
 
   test("counts validation scripts but not installs that share their names", () => {

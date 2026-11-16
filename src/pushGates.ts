@@ -142,20 +142,21 @@ function steps(job: Record<string, unknown>): Record<string, unknown>[] {
 /** A step condition that never holds: a constant false. */
 const NEVER = /^\s*(?:\$\{\{\s*)?(?:false|0|''|"")(?:\s*\}\})?\s*$/;
 
-/** Status functions that run a step only after an earlier one failed or the run was cancelled. */
-const ONLY_AFTER_FAILURE = /\b(?:failure|cancelled)\(\s*\)/;
+/** Conditions that run a step only after an earlier one failed or the run was cancelled. */
+const ONLY_AFTER_FAILURE = /\b(?:failure|cancelled)\(\s*\)|!\s*(?:success|always)\(\s*\)/;
 
 /**
  * Whether a step fails its job when its work fails: no `continue-on-error`
  * other than false, and no `if` that keeps it from running on a passing run,
- * a constant false or `failure()`/`cancelled()`. Other conditions cannot be
- * evaluated from the file, so they are trusted: a test step that shares the
- * publish job's condition, as release workflows do, still gates it.
+ * a constant false, `failure()`, `cancelled()`, `!success()`, or `!always()`.
+ * Other conditions cannot be evaluated from the file, so they are trusted: a
+ * test step that shares the publish step's condition, as release workflows
+ * do, still gates it.
  */
 function blocking(step: Record<string, unknown>): boolean {
   const excused = step["continue-on-error"] !== undefined && step["continue-on-error"] !== false;
   const condition = step.if;
-  const text = typeof condition === "string" ? condition.replace(/!\s*cancelled\(\s*\)/g, "") : "";
+  const text = typeof condition === "string" ? condition.replace(/!\s*(?:failure|cancelled)\(\s*\)/g, "") : "";
   return !excused && condition !== false && !NEVER.test(text) && !ONLY_AFTER_FAILURE.test(text);
 }
 
@@ -179,15 +180,20 @@ function validates(job: Record<string, unknown>): boolean {
   return steps(job).some(step => validationAt(step) !== -1);
 }
 
-/** Whether a shipping job validates in an earlier step, or earlier in the step that ships, before it deploys or publishes. */
+/**
+ * Whether a shipping job validates before it deploys or publishes: in an
+ * earlier step, when the shipping step's condition still requires earlier
+ * steps to succeed, or earlier in the step that ships.
+ */
 function validatesBeforeShipping(job: Record<string, unknown>): boolean {
+  let validated = false;
   for (const step of steps(job)) {
     const validation = validationAt(step);
     const shipping = shippingAt(step);
-    if (validation !== -1 && (shipping === -1 || validation < shipping)) return true;
-    if (shipping !== -1) return false;
+    if (shipping === -1) validated ||= validation !== -1;
+    else return (validated && successRequired(step.if) === "all") || (validation !== -1 && validation < shipping);
   }
-  return false;
+  return validated;
 }
 
 /**
@@ -201,35 +207,35 @@ function validatingNeed(id: string, job: Record<string, unknown>, required: stri
   return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name) || validates(job);
 }
 
-/** Status functions that let a job run after a job it needs fails. */
-const RUNS_AFTER_FAILURE = /\b(?:always|failure|cancelled)\(\s*\)/;
+/** Status functions; a condition with none implicitly requires everything before it to succeed. */
+const STATUS_FUNCTION = /\b(?:success|failure|always|cancelled)\(\s*\)/;
 
 /** One `&&` term that requires a needed job to have succeeded, capturing the job. */
 const NEEDS_SUCCESS = /^\(*\s*needs\.([\w-]+)\.result\s*==\s*['"]success['"]\s*\)*$/;
 
 /**
- * The needed jobs whose success a condition that tolerates failure still
- * requires. Only a plain `&&` of terms is read: an `||` or a negation other
- * than `!=` and `!cancelled()` could invert or bypass a comparison, so such a
- * condition requires none.
+ * What a job or step condition requires to have succeeded first, following
+ * GitHub: without a status function it implicitly requires everything
+ * (`"all"`). With one, only a plain `&&` of terms is read, where a
+ * `success()` term requires everything and a `needs.<job>.result ==
+ * 'success'` term requires that job; an `||` or a negation other than `!=`,
+ * `!cancelled()`, and `!failure()` could invert or bypass a term, so such a
+ * condition requires nothing.
  */
-function requiredSuccesses(condition: string): Set<string> {
-  const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "").replace(/!\s*cancelled\(\s*\)/g, "");
+function successRequired(condition: unknown): "all" | Set<string> {
+  if (typeof condition !== "string" || !STATUS_FUNCTION.test(condition)) return "all";
+  const plain = condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "").replace(/!\s*(?:failure|cancelled)\(\s*\)/g, "true");
   if (plain.includes("||") || /!(?!=)/.test(plain)) return new Set();
-  return new Set(plain.split("&&").flatMap(term => NEEDS_SUCCESS.exec(term.trim())?.[1] ?? []));
+  const terms = plain.split("&&").map(term => term.trim());
+  if (terms.some(term => /^\(*\s*success\(\s*\)\s*\)*$/.test(term))) return "all";
+  return new Set(terms.flatMap(term => NEEDS_SUCCESS.exec(term)?.[1] ?? []));
 }
 
-/**
- * The jobs whose success a job waits for. By default that is all of its
- * `needs`; an `if` using `always()`, `failure()`, or `cancelled()` lets it run
- * after they fail, so then only the jobs whose success the condition requires.
- */
+/** The jobs whose success a job waits for, as its condition allows. */
 function gatingNeeds(job: Record<string, unknown>): string[] {
   const needs = patterns(job.needs) ?? [];
-  const condition = typeof job.if === "string" ? job.if : "";
-  if (!RUNS_AFTER_FAILURE.test(condition)) return needs;
-  const succeeded = requiredSuccesses(condition);
-  return needs.filter(need => succeeded.has(need));
+  const required = successRequired(job.if);
+  return required === "all" ? needs : needs.filter(need => required.has(need));
 }
 
 /**
