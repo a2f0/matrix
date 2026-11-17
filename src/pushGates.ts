@@ -449,13 +449,13 @@ function shipsAfter(validated: boolean, step: Record<string, unknown>, validatio
  * can fail it, or, running none that cannot, is a required check or is named
  * for validation; and `continue-on-error` does not excuse its failure.
  */
-function validatingNeed(id: string, job: Record<string, unknown>, required: string[]): boolean {
+function validatingNeed(id: string, job: Record<string, unknown>, required: string[], prefix = ""): boolean {
   if (job["continue-on-error"] !== undefined && job["continue-on-error"] !== false) return false;
   if (validates(job)) return true;
   // A job whose validation, or any command, cannot fail it validates nothing, whatever its name.
   if (steps(job).some(step => namedValidationAt(step) !== -1 || !failsOnError(step))) return false;
   const name = jobName(id, job);
-  return isRequiredJob(name, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name);
+  return isRequiredJob(`${prefix}${name}`, required) || VALIDATION_JOB.test(id) || VALIDATION_JOB.test(name);
 }
 
 /** Status functions; a condition with none implicitly requires everything before it to succeed. */
@@ -536,9 +536,10 @@ function parseRequirement(condition: string): Requirement | undefined {
  * Whether shipping job `id` validates before it ships, or needs, directly or
  * through other jobs, a required check, a job named for validation, or a job
  * whose steps validate. A job that can run after a need fails does not pass
- * that need's validation on.
+ * that need's validation on. `prefix` is the check-name prefix GitHub gives
+ * the jobs of a called workflow.
  */
-function waitsForChecks(jobs: Record<string, unknown>, id: string, required: string[]): boolean {
+function waitsForChecks(jobs: Record<string, unknown>, id: string, required: string[], prefix = ""): boolean {
   const shipping = object(jobs[id]);
   if (!shipping) return false;
   if (validatesBeforeShipping(shipping)) return true;
@@ -549,7 +550,7 @@ function waitsForChecks(jobs: Record<string, unknown>, id: string, required: str
     const job = object(jobs[current]);
     if (seen.has(current) || !job) continue;
     seen.add(current);
-    if (validatingNeed(current, job, required)) return true;
+    if (validatingNeed(current, job, required, prefix)) return true;
     queue.push(...successNeeds(job));
   }
   return false;
@@ -737,14 +738,30 @@ function pushedJobs(workflow: Record<string, unknown> | undefined, branch: strin
  * workflow shows, so this catches a shipping job that waits for nothing, not
  * one that waits for a job running too little.
  */
-export function ungatedShippingJobs(workflow: unknown, required: string[], branch = "main", called: (path: string) => unknown = () => undefined): string[] {
+export function ungatedShippingJobs(workflow: unknown, required: string[], branch = "main", context: CallContext = {}): string[] {
+  const { called = () => undefined, prefix = "", shipping = false } = context;
   const jobs = pushedJobs(object(workflow), branch);
   return Object.entries(jobs).flatMap(([id, value]) => {
     const job = object(value) ?? {};
     const name = jobName(id, job);
-    if (job.if === false || !SHIPPING_JOB.test(`${id} ${name}`) || callsNamedShipping(job, called) || waitsForChecks(jobs, id, required)) return [];
+    if (job.if === false || !ships(id, job, shipping) || callsShipping(job, called, new Set()) || waitsForChecks(jobs, id, required, prefix)) return [];
     return [name === id ? id : `${id} (${name})`];
   });
+}
+
+/** Where a workflow sits among the calls a push makes. */
+export interface CallContext {
+  /** Reads the repository's own reusable workflow at a path; undefined when it cannot. */
+  readonly called?: (path: string) => unknown;
+  /** The check-name prefix GitHub gives the workflow's jobs: `<calling job> / ` per call. */
+  readonly prefix?: string;
+  /** Whether a call reaching the workflow is named for shipping, so its jobs whose commands ship count too. */
+  readonly shipping?: boolean;
+}
+
+/** Whether a job ships: it is named for deploying or publishing, or, inside a call named for that, runs a step that does. */
+function ships(id: string, job: Record<string, unknown>, inShippingCall: boolean): boolean {
+  return SHIPPING_JOB.test(`${id} ${jobName(id, job)}`) || (inShippingCall && steps(job).some(step => shippingAt(step) !== -1));
 }
 
 /** The path of the repository's own reusable workflow a job calls with `uses: ./<path>`. */
@@ -753,31 +770,44 @@ function localCall(job: Record<string, unknown>): string | undefined {
 }
 
 /**
- * Whether a job calls a reusable workflow of the repository's own whose jobs
- * name their own deploying or publishing, so those jobs are judged there
- * instead of the call; a call whose workflow cannot be read, or names none,
- * is judged by its own name.
+ * Whether a job calls a reusable workflow of the repository's own with a job
+ * that ships, read as inside a call named for shipping, directly or through
+ * further calls, so it is judged there instead of the call; a call whose
+ * workflow cannot be read, or ships nothing it shows, is judged by its own name.
  */
-function callsNamedShipping(job: Record<string, unknown>, called: (path: string) => unknown): boolean {
+function callsShipping(job: Record<string, unknown>, called: (path: string) => unknown, seen: Set<string>): boolean {
   const target = localCall(job);
-  const jobs = target === undefined ? {} : (object(object(called(target))?.jobs) ?? {});
-  return Object.entries(jobs).some(([id, value]) => SHIPPING_JOB.test(`${id} ${jobName(id, object(value) ?? {})}`));
+  if (target === undefined || seen.has(target)) return false;
+  const jobs = object(object(called(target))?.jobs) ?? {};
+  const inner = new Set([...seen, target]);
+  return Object.entries(jobs).some(([id, value]) => {
+    const child = object(value) ?? {};
+    return ships(id, child, true) || callsShipping(child, called, inner);
+  });
 }
 
 /**
  * The repository's own reusable workflows that a push to `branch` can call
  * from a parsed workflow before any validation: each `uses: ./<path>` job the
  * push does not skip, by its condition or a skipped job it needs, that waits
- * for no validation, with its called path. The called workflow's jobs run in
- * that push, so they can ship without waiting.
+ * for no validation, with its called path and the context its jobs run in.
+ * The called workflow's jobs run in that push, so they can ship without waiting.
  */
-export function ungatedCalls(workflow: unknown, required: string[], branch = "main"): Array<{ job: string; path: string }> {
+export function ungatedCalls(
+  workflow: unknown,
+  required: string[],
+  branch = "main",
+  context: Pick<CallContext, "prefix" | "shipping"> = {},
+): Array<{ job: string; path: string; prefix: string; shipping: boolean }> {
+  const { prefix = "", shipping = false } = context;
   const jobs = pushedJobs(object(workflow), branch);
   const skipped = skippedOnPush(object(object(workflow)?.jobs) ?? {}, branch);
   return Object.entries(jobs).flatMap(([id, value]) => {
-    const target = localCall(object(value) ?? {});
-    if (target === undefined || skipped.has(id) || waitsForChecks(jobs, id, required)) return [];
-    return [{ job: id, path: target }];
+    const job = object(value) ?? {};
+    const target = localCall(job);
+    if (target === undefined || skipped.has(id) || waitsForChecks(jobs, id, required, prefix)) return [];
+    const name = jobName(id, job);
+    return [{ job: id, path: target, prefix: `${prefix}${name} / `, shipping: shipping || SHIPPING_JOB.test(`${id} ${name}`) }];
   });
 }
 
