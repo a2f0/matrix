@@ -251,11 +251,10 @@ function ownRegistryPackages(checkout: Checkout): string[] {
  */
 function installedManifests(checkout: Checkout): Array<Record<string, unknown> | undefined> {
   const declared = checkout.packageJson?.workspaces;
-  const patterns = (Array.isArray(declared) ? declared : (object(declared)?.packages as unknown[] | undefined)) ?? [];
+  const listed: unknown = Array.isArray(declared) ? declared : object(declared)?.packages;
+  const patterns = (Array.isArray(listed) ? listed : []).filter(pattern => typeof pattern === "string");
   const globs = (negated: boolean) =>
-    patterns
-      .filter(pattern => typeof pattern === "string" && pattern.startsWith("!") === negated)
-      .map(pattern => new Bun.Glob((pattern as string).replace(/^!/, "").replace(/\/+$/, "")));
+    patterns.filter(pattern => pattern.startsWith("!") === negated).map(pattern => new Bun.Glob(pattern.replace(/^!/, "").replace(/\/+$/, "")));
   const [included, excluded] = [globs(false), globs(true)];
   const members = checkout.tracked(":(glob)**/package.json").filter(file => {
     const directory = path.posix.dirname(file);
@@ -264,11 +263,23 @@ function installedManifests(checkout: Checkout): Array<Record<string, unknown> |
   return [checkout.packageJson, ...members.map(file => parseObject(checkout.read(file)))];
 }
 
-/** The dependencies of every kind a package.json installs from the registry, with their specifiers. */
+/**
+ * The dependencies of every kind a package.json installs from the registry,
+ * as the package installed and its specifier: an `npm:<name>@<range>` alias
+ * installs `<name>`.
+ */
 function registryDependencies(manifest: Record<string, unknown> | undefined): Array<[string, unknown]> {
   return ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"].flatMap(field =>
-    Object.entries(object(manifest?.[field]) ?? {}).filter(([, spec]) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec))),
+    Object.entries(object(manifest?.[field]) ?? {})
+      .map(([name, spec]): [string, unknown] => (typeof spec === "string" && spec.startsWith("npm:") ? aliasTarget(spec.slice(4)) : [name, spec]))
+      .filter(([, spec]) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec))),
   );
+}
+
+/** The package and range an npm alias's `<name>@<range>` names; a bare name takes any version. */
+function aliasTarget(target: string): [string, string] {
+  const at = target.indexOf("@", 1);
+  return at === -1 ? [target, "*"] : [target.slice(0, at), target.slice(at + 1)];
 }
 
 /** Parse TOML that should hold a table; missing or malformed TOML gives undefined. */
