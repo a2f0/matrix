@@ -215,21 +215,38 @@ const MISE_LOCK_FORMAT = 4;
 const MINIMUM_MISE = "2026.11.1";
 const MISE_ACTION = /^jdx\/mise-action@/;
 
-/** Parse TOML that should hold a table; missing or malformed TOML gives undefined. */
-/** Specifiers that resolve outside the registry, which a minimum release age does not delay. */
-const NON_REGISTRY_SPEC = /^(?:workspace|file|link|portal|git|git\+[a-z]+|github|https?):/i;
+/**
+ * Specifiers that resolve outside the registry, which a minimum release age
+ * does not delay: protocols, relative paths, Git over SSH, and `owner/repo`
+ * GitHub shorthand.
+ */
+const NON_REGISTRY_SPEC = /^(?:(?:workspace|file|link|portal|git|git\+[a-z]+|github|gitlab|bitbucket|https?):|\.{0,2}\/|git@|[\w.-]+\/[\w.-]+(?:#.*)?$)/i;
 
 /**
- * The packages of the repository owner's npm scope that a checkout's tracked
- * package.json files install from the registry: dependencies of every kind,
- * except the checkout's own workspace packages and non-registry specifiers.
+ * The packages of the repository owner's npm scope that a checkout installs
+ * from the registry: dependencies of every kind in the root package.json and
+ * its declared workspace members, except those members themselves and
+ * non-registry specifiers.
  */
 function ownRegistryPackages(checkout: Checkout): string[] {
   const scope = `@${checkout.repo.split("/")[0]!.toLowerCase()}/`;
-  const manifests = checkout.tracked(":(glob)**/package.json").map(file => parseObject(checkout.read(file)));
+  const manifests = installedManifests(checkout);
   const own = new Set(manifests.map(manifest => manifest?.name));
   const found = new Set(manifests.flatMap(registryDependencies).filter(name => name.startsWith(scope) && !own.has(name)));
   return [...found].sort();
+}
+
+/** The root package.json and those of the workspace members its `workspaces` patterns declare, parsed. */
+function installedManifests(checkout: Checkout): Array<Record<string, unknown> | undefined> {
+  const declared = checkout.packageJson?.workspaces;
+  const patterns = Array.isArray(declared) ? declared : object(declared)?.packages;
+  const globs = (Array.isArray(patterns) ? patterns : [])
+    .filter(pattern => typeof pattern === "string")
+    .map(pattern => new Bun.Glob(pattern.replace(/\/+$/, "")));
+  const members = checkout
+    .tracked(":(glob)**/package.json")
+    .filter(file => file !== "package.json" && globs.some(glob => glob.match(path.posix.dirname(file))));
+  return [checkout.packageJson, ...members.map(file => parseObject(checkout.read(file)))];
 }
 
 /** The dependencies of every kind a package.json installs from the registry. */
@@ -241,6 +258,7 @@ function registryDependencies(manifest: Record<string, unknown> | undefined): st
   );
 }
 
+/** Parse TOML that should hold a table; missing or malformed TOML gives undefined. */
 function parseToml(source: string | undefined): Record<string, unknown> | undefined {
   if (source === undefined) return undefined;
   try {

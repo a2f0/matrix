@@ -1002,22 +1002,37 @@ describe("audit", () => {
       failures(checkout(name, { "bunfig.toml": bunfig, ...files }), ["release-age-internal"])["release-age-internal"];
     const aged = (excludes: string[]) => `[install]\nminimumReleaseAge = 86400\nminimumReleaseAgeExcludes = ${JSON.stringify(excludes)}\n`;
     const workspace = {
+      "package.json": JSON.stringify({
+        name: "root",
+        workspaces: ["packages/*"],
+        devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL, "@a2f0/client": "1.0.0" },
+      }),
       "packages/app/package.json": JSON.stringify({
         name: "@a2f0/app",
-        dependencies: { "@a2f0/ct-client": "0.1.0", "@a2f0/shared": "workspace:*", "@a2f0/local": "file:../local", "@other/lib": "1.0.0" },
+        dependencies: {
+          "@a2f0/ct-client": "0.1.0",
+          "@a2f0/shared": "workspace:*",
+          "@a2f0/local": "file:../local",
+          "@a2f0/relative": "../relative",
+          "@a2f0/shorthand": "a2f0/shorthand#main",
+          "@a2f0/ssh": "git@github.com:a2f0/ssh.git",
+          "@other/lib": "1.0.0",
+        },
       }),
       "packages/shared/package.json": JSON.stringify({ name: "@a2f0/shared" }),
       "packages/web/package.json": JSON.stringify({ name: "web", peerDependencies: { "@a2f0/app": "0.1.0" } }),
+      // Not a workspace member: neither installed nor one of the checkout's own packages.
+      "test/fixtures/client/package.json": JSON.stringify({ name: "@a2f0/client", dependencies: { "@a2f0/fixture-only": "1.0.0" } }),
     };
     // The fixture's root package.json pins @a2f0/agent-tool.
     expect(rule("age-root", aged([]))).toBe(
       "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
     );
-    // A scope pattern names no package, and workspace packages, local specifiers, and other scopes need no entry.
+    // A scope pattern names no package; workspace members, non-registry specifiers, other scopes, and manifests outside the workspace need no entry.
     expect(rule("age-scope", aged(["@a2f0/*"]), workspace)).toBe(
-      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/ct-client; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/client, @a2f0/ct-client; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
     );
-    expect(rule("age-listed", aged(["@a2f0/agent-tool", "@a2f0/ct-client"]), workspace)).toBeUndefined();
+    expect(rule("age-listed", aged(["@a2f0/agent-tool", "@a2f0/client", "@a2f0/ct-client"]), workspace)).toBeUndefined();
     // Without a minimum release age, nothing is delayed.
     for (const [name, bunfig] of [
       ["age-none", null],
