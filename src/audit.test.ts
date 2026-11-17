@@ -997,6 +997,73 @@ describe("audit", () => {
       expect(called(caller!, callee!, nested)).toBeUndefined();
   });
 
+  test("requires a minimum release age to exempt the owner's own registry packages", () => {
+    const rule = (name: string, bunfig: string | null, files: Record<string, string> = {}) =>
+      failures(checkout(name, { "bunfig.toml": bunfig, ...files }), ["release-age-internal"])["release-age-internal"];
+    const aged = (excludes: string[]) => `[install]\nminimumReleaseAge = 86400\nminimumReleaseAgeExcludes = ${JSON.stringify(excludes)}\n`;
+    const workspace = {
+      "package.json": JSON.stringify({
+        name: "root",
+        workspaces: ["packages/*", "!packages/fixture"],
+        devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL, "@a2f0/client": "1.0.0", "@a2f0/fixture": "1.0.0" },
+      }),
+      // Excluded from the workspace, so its name is a registry package's.
+      "packages/fixture/package.json": JSON.stringify({ name: "@a2f0/fixture", version: "1.0.0" }),
+      // A range the workspace member does not satisfy installs from the registry.
+      "packages/old/package.json": JSON.stringify({ name: "old", dependencies: { "@a2f0/app": "^9.0.0" } }),
+      "packages/app/package.json": JSON.stringify({
+        name: "@a2f0/app",
+        version: "0.1.0",
+        dependencies: {
+          "@a2f0/ct-client": "0.1.0",
+          "@a2f0/shared": "workspace:*",
+          "@a2f0/local": "file:../local",
+          "@a2f0/relative": "../relative",
+          "@a2f0/shorthand": "a2f0/shorthand#main",
+          "@a2f0/ssh": "git@github.com:a2f0/ssh.git",
+          "@other/lib": "1.0.0",
+        },
+      }),
+      "packages/shared/package.json": JSON.stringify({ name: "@a2f0/shared" }),
+      "packages/web/package.json": JSON.stringify({ name: "web", peerDependencies: { "@a2f0/app": "0.1.0" } }),
+      // Not a workspace member: neither installed nor one of the checkout's own packages.
+      "test/fixtures/client/package.json": JSON.stringify({ name: "@a2f0/client", dependencies: { "@a2f0/fixture-only": "1.0.0" } }),
+    };
+    // The fixture's root package.json pins @a2f0/agent-tool.
+    expect(rule("age-root", aged([]))).toBe(
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+    );
+    // A scope pattern names no package; workspace members, non-registry specifiers, other scopes, and manifests outside the workspace need no entry.
+    expect(rule("age-scope", aged(["@a2f0/*"]), workspace)).toBe(
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/app, @a2f0/client, @a2f0/ct-client, @a2f0/fixture; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+    );
+    expect(rule("age-listed", aged(["@a2f0/agent-tool", "@a2f0/app", "@a2f0/client", "@a2f0/ct-client", "@a2f0/fixture"]), workspace)).toBeUndefined();
+    // An npm alias installs its target, and malformed workspaces declare no members.
+    const root = (fields: Record<string, unknown>) => ({ "package.json": JSON.stringify({ name: "root", ...fields }) });
+    // An alias resolves from the registry even when a workspace member has its target's name and a matching version.
+    const aliases = {
+      ...root({
+        workspaces: ["packages/*"],
+        dependencies: { tool: "npm:@a2f0/agent-tool@0.1.59", bare: "npm:@a2f0/bare", release: "npm:@a2f0/app@1.0.0", "@a2f0/app": "1.0.0" },
+      }),
+      "packages/app/package.json": JSON.stringify({ name: "@a2f0/app", version: "1.0.0" }),
+    };
+    expect(rule("age-alias", aged([]), aliases)).toBe(
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/app, @a2f0/bare; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+    );
+    for (const workspaces of [{ packages: "packages/*" }, "packages/*", [7, "packages/*"]])
+      expect(
+        rule(`age-malformed-${Bun.hash(JSON.stringify(workspaces))}`, aged(["@a2f0/x"]), root({ workspaces, devDependencies: { "@a2f0/x": "1.0.0" } })),
+      ).toBeUndefined();
+    // Without a minimum release age, nothing is delayed.
+    for (const [name, bunfig] of [
+      ["age-none", null],
+      ["age-unset", '[install]\nlinker = "isolated"\n'],
+      ["age-zero", "[install]\nminimumReleaseAge = 0\n"],
+    ] as const)
+      expect(rule(name, bunfig)).toBeUndefined();
+  });
+
   test("rejects unknown rules", () => {
     expect(() => selectRules(["nope"], false)).toThrow("Unknown audit rule 'nope'");
     expect(new Set(RULES.map(rule => rule.id)).size).toBe(RULES.length);

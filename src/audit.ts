@@ -215,6 +215,81 @@ const MISE_LOCK_FORMAT = 4;
 const MINIMUM_MISE = "2026.11.1";
 const MISE_ACTION = /^jdx\/mise-action@/;
 
+/**
+ * Specifiers that resolve outside the registry, which a minimum release age
+ * does not delay: protocols, relative paths, Git over SSH, and `owner/repo`
+ * GitHub shorthand.
+ */
+const NON_REGISTRY_SPEC = /^(?:(?:workspace|file|link|portal|git|git\+[a-z]+|github|gitlab|bitbucket|https?):|\.{0,2}\/|git@|[\w.-]+\/[\w.-]+(?:#.*)?$)/i;
+
+/**
+ * The packages of the repository owner's npm scope that a checkout installs
+ * from the registry: dependencies of every kind in the root package.json and
+ * its declared workspace members, except non-registry specifiers and ranges
+ * that a member of that name satisfies, which install from the workspace.
+ */
+function ownRegistryPackages(checkout: Checkout): string[] {
+  const scope = `@${checkout.repo.split("/")[0]!.toLowerCase()}/`;
+  const manifests = installedManifests(checkout);
+  const members = new Map(manifests.map(manifest => [manifest?.name, manifest?.version]));
+  // An alias always resolves from the registry, even to a member's name.
+  const local = ({ name, spec, alias }: RegistryDependency) => {
+    const version = members.get(name);
+    return !alias && members.has(name) && (typeof spec !== "string" || typeof version !== "string" || Bun.semver.satisfies(version, spec));
+  };
+  const found = new Set(
+    manifests
+      .flatMap(registryDependencies)
+      .filter(dependency => dependency.name.startsWith(scope) && !local(dependency))
+      .map(({ name }) => name),
+  );
+  return [...found].sort();
+}
+
+/** A dependency as the package it installs, its specifier, and whether an npm alias names it. */
+interface RegistryDependency {
+  readonly name: string;
+  readonly spec: unknown;
+  readonly alias: boolean;
+}
+
+/**
+ * The root package.json and those of the workspace members its `workspaces`
+ * patterns declare, less those a `!` pattern excludes, parsed.
+ */
+function installedManifests(checkout: Checkout): Array<Record<string, unknown> | undefined> {
+  const declared = checkout.packageJson?.workspaces;
+  const listed: unknown = Array.isArray(declared) ? declared : object(declared)?.packages;
+  const patterns = (Array.isArray(listed) ? listed : []).filter(pattern => typeof pattern === "string");
+  const globs = (negated: boolean) =>
+    patterns.filter(pattern => pattern.startsWith("!") === negated).map(pattern => new Bun.Glob(pattern.replace(/^!/, "").replace(/\/+$/, "")));
+  const [included, excluded] = [globs(false), globs(true)];
+  const members = checkout.tracked(":(glob)**/package.json").filter(file => {
+    const directory = path.posix.dirname(file);
+    return file !== "package.json" && included.some(glob => glob.match(directory)) && !excluded.some(glob => glob.match(directory));
+  });
+  return [checkout.packageJson, ...members.map(file => parseObject(checkout.read(file)))];
+}
+
+/**
+ * The dependencies of every kind a package.json installs from the registry,
+ * as the package installed and its specifier: an `npm:<name>@<range>` alias
+ * installs `<name>`.
+ */
+function registryDependencies(manifest: Record<string, unknown> | undefined): RegistryDependency[] {
+  return ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"].flatMap(field =>
+    Object.entries(object(manifest?.[field]) ?? {})
+      .map(([name, spec]) => (typeof spec === "string" && spec.startsWith("npm:") ? aliasTarget(spec.slice(4)) : { name, spec, alias: false }))
+      .filter(({ spec }) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec))),
+  );
+}
+
+/** The package and range an npm alias's `<name>@<range>` names; a bare name takes any version. */
+function aliasTarget(target: string): RegistryDependency {
+  const at = target.indexOf("@", 1);
+  return at === -1 ? { name: target, spec: "*", alias: true } : { name: target.slice(0, at), spec: target.slice(at + 1), alias: true };
+}
+
 /** Parse TOML that should hold a table; missing or malformed TOML gives undefined. */
 function parseToml(source: string | undefined): Record<string, unknown> | undefined {
   if (source === undefined) return undefined;
@@ -515,6 +590,22 @@ export const RULES: readonly Rule[] = [
       // false turns locking off, which mise-action's --locked rejects; leaving it unset keeps a committed lock current.
       const setting = object(parsed.settings)?.lockfile === false ? [`${config} sets lockfile = false`] : [];
       return problems([...setting, ...miseLockProblems(checkout, config, tools), ...ciMiseProblems(checkout)]);
+    },
+  },
+  {
+    id: "release-age-internal",
+    summary: "A minimum release age exempts the owner's own registry packages",
+    source: "docs/dependency-upgrades.md#release-age",
+    check: checkout => {
+      // Without a minimum release age, nothing is delayed.
+      const install = object(parseToml(checkout.read("bunfig.toml"))?.install);
+      if (typeof install?.minimumReleaseAge !== "number" || install.minimumReleaseAge <= 0) return pass;
+      const excludes = install.minimumReleaseAgeExcludes;
+      const excluded = new Set(Array.isArray(excludes) ? excludes : []);
+      const missing = ownRegistryPackages(checkout).filter(name => !excluded.has(name));
+      return missing.length === 0
+        ? pass
+        : fail(`bunfig.toml's minimumReleaseAge also delays ${missing.join(", ")}; list each in [install] minimumReleaseAgeExcludes, which takes exact names`);
     },
   },
   {
