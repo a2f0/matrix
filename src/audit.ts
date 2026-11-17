@@ -604,17 +604,17 @@ export const RULES: readonly Rule[] = [
       const byFile = new Map(workflows.map(({ file, workflow }) => [file, workflow]));
       const called = (file: string) => byFile.get(file);
       // A called workflow's jobs run in its caller's push, labelled by the calls that reach them.
-      const shipping = (file: string, workflow: unknown, via: string, seen: Set<string>, context: { prefix: string; shipping: boolean }): string[] => [
-        ...ungatedShippingJobs(workflow, required, branch, { ...context, called }).map(job => `${via}${file} ${job}`),
-        ...ungatedCalls(workflow, required, branch, context).flatMap(call =>
+      const shipping = (file: string, workflow: unknown, checks: string[], via: string, seen: Set<string>, inShippingCall: boolean): string[] => [
+        ...ungatedShippingJobs(workflow, checks, branch, { called, shipping: inShippingCall }).map(job => `${via}${file} ${job}`),
+        ...ungatedCalls(workflow, checks, branch, inShippingCall).flatMap(call =>
           seen.has(call.path) || !byFile.has(call.path)
             ? []
-            : shipping(call.path, byFile.get(call.path), `${via}${file} ${call.job} → `, new Set([...seen, call.path]), call),
+            : shipping(call.path, byFile.get(call.path), call.required, `${via}${file} ${call.job} → `, new Set([...seen, call.path]), call.shipping),
         ),
       ];
       const ungated = workflows
         .filter(({ workflow }) => runsOnPushTo(workflow, branch))
-        .flatMap(({ file, workflow }) => shipping(file, workflow, "", new Set([file]), { prefix: "", shipping: false }));
+        .flatMap(({ file, workflow }) => shipping(file, workflow, required, "", new Set([file]), false));
       if (ungated.length === 0) return pass;
       const verb = ungated.length === 1 ? "starts" : "start";
       return fail(`${ungated.join(", ")} ${verb} without needing a required check or a job that runs tests`);

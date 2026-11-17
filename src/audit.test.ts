@@ -960,6 +960,13 @@ describe("audit", () => {
     // A call named for shipping is judged by the workflow it calls when that one names its shipping jobs, and by its own name otherwise.
     expect(called(calls("", "deploy"), `  run:\n${step("sh go.sh")}`)).toBe(ungated(".github/workflows/ci.yml deploy"));
     expect(called(calls("", "deploy", "missing"), deploy)).toBe(ungated(".github/workflows/ci.yml deploy"));
+    // Jobs and steps a push skips ship nothing there, so they leave the call judged by its own name.
+    for (const skippedShipping of [
+      `  deploy:\n    if: github.event_name == 'pull_request'\n${step("wrangler deploy")}`,
+      `  pr:\n    if: github.event_name == 'pull_request'\n${step("true")}  deploy:\n    needs: pr\n${step("wrangler deploy")}`,
+      `  run:\n    runs-on: x\n    steps:\n      - if: github.event_name == 'pull_request'\n        run: wrangler deploy\n`,
+    ])
+      expect(called(calls("", "deploy"), `  go:\n${step("sh go.sh")}${skippedShipping}`)).toBe(ungated(".github/workflows/ci.yml deploy"));
     // Inside a call named for shipping, a job whose commands ship counts as shipping whatever its name.
     expect(called(calls("", "deploy"), `${tested}  run:\n${step("npm publish")}`)).toBe(
       ungated(".github/workflows/ci.yml deploy → .github/workflows/backend.yml run"),
@@ -969,6 +976,13 @@ describe("audit", () => {
     const prepared = `  prepare:\n${step("sh prepare.sh")}  deploy:\n    needs: prepare\n${step("wrangler deploy")}`;
     expect(called(calls(), prepared, "", ["backend / prepare"])).toBeUndefined();
     expect(called(calls(), prepared, "", ["prepare"])).toBe(ungated(".github/workflows/ci.yml backend → .github/workflows/backend.yml deploy"));
+    // A matrix calling job's check adds its values, and nested calls add each calling job.
+    const matrix = "    strategy:\n      matrix:\n        os: [linux]\n";
+    expect(called(calls(matrix), prepared, "", ["backend (linux) / prepare"])).toBeUndefined();
+    expect(called(calls(), prepared, "", ["backend (linux) / prepare"])).toBe(
+      ungated(".github/workflows/ci.yml backend → .github/workflows/backend.yml deploy"),
+    );
+    expect(called(calls(), calls("", "ship", "ship"), prepared, ["backend / ship / prepare"])).toBeUndefined();
     for (const [caller, callee, nested] of [
       [calls(), tested],
       [calls("", "deploy"), tested],
