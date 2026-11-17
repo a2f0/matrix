@@ -997,6 +997,36 @@ describe("audit", () => {
       expect(called(caller!, callee!, nested)).toBeUndefined();
   });
 
+  test("requires a minimum release age to exempt the owner's own registry packages", () => {
+    const rule = (name: string, bunfig: string | null, files: Record<string, string> = {}) =>
+      failures(checkout(name, { "bunfig.toml": bunfig, ...files }), ["release-age-internal"])["release-age-internal"];
+    const aged = (excludes: string[]) => `[install]\nminimumReleaseAge = 86400\nminimumReleaseAgeExcludes = ${JSON.stringify(excludes)}\n`;
+    const workspace = {
+      "packages/app/package.json": JSON.stringify({
+        name: "@a2f0/app",
+        dependencies: { "@a2f0/ct-client": "0.1.0", "@a2f0/shared": "workspace:*", "@a2f0/local": "file:../local", "@other/lib": "1.0.0" },
+      }),
+      "packages/shared/package.json": JSON.stringify({ name: "@a2f0/shared" }),
+      "packages/web/package.json": JSON.stringify({ name: "web", peerDependencies: { "@a2f0/app": "0.1.0" } }),
+    };
+    // The fixture's root package.json pins @a2f0/agent-tool.
+    expect(rule("age-root", aged([]))).toBe(
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+    );
+    // A scope pattern names no package, and workspace packages, local specifiers, and other scopes need no entry.
+    expect(rule("age-scope", aged(["@a2f0/*"]), workspace)).toBe(
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/ct-client; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+    );
+    expect(rule("age-listed", aged(["@a2f0/agent-tool", "@a2f0/ct-client"]), workspace)).toBeUndefined();
+    // Without a minimum release age, nothing is delayed.
+    for (const [name, bunfig] of [
+      ["age-none", null],
+      ["age-unset", '[install]\nlinker = "isolated"\n'],
+      ["age-zero", "[install]\nminimumReleaseAge = 0\n"],
+    ] as const)
+      expect(rule(name, bunfig)).toBeUndefined();
+  });
+
   test("rejects unknown rules", () => {
     expect(() => selectRules(["nope"], false)).toThrow("Unknown audit rule 'nope'");
     expect(new Set(RULES.map(rule => rule.id)).size).toBe(RULES.length);

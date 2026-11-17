@@ -216,6 +216,31 @@ const MINIMUM_MISE = "2026.11.1";
 const MISE_ACTION = /^jdx\/mise-action@/;
 
 /** Parse TOML that should hold a table; missing or malformed TOML gives undefined. */
+/** Specifiers that resolve outside the registry, which a minimum release age does not delay. */
+const NON_REGISTRY_SPEC = /^(?:workspace|file|link|portal|git|git\+[a-z]+|github|https?):/i;
+
+/**
+ * The packages of the repository owner's npm scope that a checkout's tracked
+ * package.json files install from the registry: dependencies of every kind,
+ * except the checkout's own workspace packages and non-registry specifiers.
+ */
+function ownRegistryPackages(checkout: Checkout): string[] {
+  const scope = `@${checkout.repo.split("/")[0]!.toLowerCase()}/`;
+  const manifests = checkout.tracked(":(glob)**/package.json").map(file => parseObject(checkout.read(file)));
+  const own = new Set(manifests.map(manifest => manifest?.name));
+  const found = new Set(manifests.flatMap(registryDependencies).filter(name => name.startsWith(scope) && !own.has(name)));
+  return [...found].sort();
+}
+
+/** The dependencies of every kind a package.json installs from the registry. */
+function registryDependencies(manifest: Record<string, unknown> | undefined): string[] {
+  return ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"].flatMap(field =>
+    Object.entries(object(manifest?.[field]) ?? {})
+      .filter(([, spec]) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec)))
+      .map(([name]) => name),
+  );
+}
+
 function parseToml(source: string | undefined): Record<string, unknown> | undefined {
   if (source === undefined) return undefined;
   try {
@@ -515,6 +540,22 @@ export const RULES: readonly Rule[] = [
       // false turns locking off, which mise-action's --locked rejects; leaving it unset keeps a committed lock current.
       const setting = object(parsed.settings)?.lockfile === false ? [`${config} sets lockfile = false`] : [];
       return problems([...setting, ...miseLockProblems(checkout, config, tools), ...ciMiseProblems(checkout)]);
+    },
+  },
+  {
+    id: "release-age-internal",
+    summary: "A minimum release age exempts the owner's own registry packages",
+    source: "docs/dependency-upgrades.md#release-age",
+    check: checkout => {
+      // Without a minimum release age, nothing is delayed.
+      const install = object(parseToml(checkout.read("bunfig.toml"))?.install);
+      if (typeof install?.minimumReleaseAge !== "number" || install.minimumReleaseAge <= 0) return pass;
+      const excludes = install.minimumReleaseAgeExcludes;
+      const excluded = new Set(Array.isArray(excludes) ? excludes : []);
+      const missing = ownRegistryPackages(checkout).filter(name => !excluded.has(name));
+      return missing.length === 0
+        ? pass
+        : fail(`bunfig.toml's minimumReleaseAge also delays ${missing.join(", ")}; list each in [install] minimumReleaseAgeExcludes, which takes exact names`);
     },
   },
   {

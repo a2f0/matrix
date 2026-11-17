@@ -108,7 +108,7 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(markdown).toContain(
     "1. Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB; `bun run space` lists what is safe to remove.",
   );
-  expect(markdown).toContain("- Audit (24 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain("- Audit (25 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   // Only present checkouts are asked about; a2f0/missing has none.
   expect(markdown).toContain("- Default branches: 1 green.");

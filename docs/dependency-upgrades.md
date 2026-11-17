@@ -70,6 +70,18 @@ Format 4 needs mise 2026.11.1 or later, so every workflow's mise-action
 checks the lock's format, an entry for each declared tool, `lockfile = false`,
 and every pinned mise-action `version`.
 
+## Release age
+
+A checkout may refuse registry versions younger than a minimum age, as
+commandsnippets' root `bunfig.toml` does with `minimumReleaseAge`. Packages in
+the owner's own npm scope (`@a2f0`) are exempt: they ship from these
+repositories through reviewed PRs and `release verify`, and a sweep often needs
+the release it just published. Bun's `minimumReleaseAgeExcludes` honors exact
+package names only (`"@a2f0/*"` is ignored), so list each one the checkout
+installs from the registry. `bun run audit --rule release-age-internal` fails a
+checkout whose `bunfig.toml` sets a minimum release age without excluding every
+such package.
+
 ## Plan helper for checkouts without agent-tool
 
 The read-only `agent-tool dependencies check-terraform-plan <plan.json>` helper
