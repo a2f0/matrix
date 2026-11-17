@@ -1040,8 +1040,16 @@ describe("audit", () => {
     expect(rule("age-listed", aged(["@a2f0/agent-tool", "@a2f0/app", "@a2f0/client", "@a2f0/ct-client", "@a2f0/fixture"]), workspace)).toBeUndefined();
     // An npm alias installs its target, and malformed workspaces declare no members.
     const root = (fields: Record<string, unknown>) => ({ "package.json": JSON.stringify({ name: "root", ...fields }) });
-    expect(rule("age-alias", aged([]), root({ dependencies: { tool: "npm:@a2f0/agent-tool@0.1.59", bare: "npm:@a2f0/bare" } }))).toBe(
-      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/bare; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+    // An alias resolves from the registry even when a workspace member has its target's name and a matching version.
+    const aliases = {
+      ...root({
+        workspaces: ["packages/*"],
+        dependencies: { tool: "npm:@a2f0/agent-tool@0.1.59", bare: "npm:@a2f0/bare", release: "npm:@a2f0/app@1.0.0", "@a2f0/app": "1.0.0" },
+      }),
+      "packages/app/package.json": JSON.stringify({ name: "@a2f0/app", version: "1.0.0" }),
+    };
+    expect(rule("age-alias", aged([]), aliases)).toBe(
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/app, @a2f0/bare; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
     );
     for (const workspaces of [{ packages: "packages/*" }, "packages/*", [7, "packages/*"]])
       expect(

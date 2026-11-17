@@ -232,17 +232,25 @@ function ownRegistryPackages(checkout: Checkout): string[] {
   const scope = `@${checkout.repo.split("/")[0]!.toLowerCase()}/`;
   const manifests = installedManifests(checkout);
   const members = new Map(manifests.map(manifest => [manifest?.name, manifest?.version]));
-  const local = (name: string, spec: unknown) => {
+  // An alias always resolves from the registry, even to a member's name.
+  const local = ({ name, spec, alias }: RegistryDependency) => {
     const version = members.get(name);
-    return members.has(name) && (typeof spec !== "string" || typeof version !== "string" || Bun.semver.satisfies(version, spec));
+    return !alias && members.has(name) && (typeof spec !== "string" || typeof version !== "string" || Bun.semver.satisfies(version, spec));
   };
   const found = new Set(
     manifests
       .flatMap(registryDependencies)
-      .filter(([name, spec]) => name.startsWith(scope) && !local(name, spec))
-      .map(([name]) => name),
+      .filter(dependency => dependency.name.startsWith(scope) && !local(dependency))
+      .map(({ name }) => name),
   );
   return [...found].sort();
+}
+
+/** A dependency as the package it installs, its specifier, and whether an npm alias names it. */
+interface RegistryDependency {
+  readonly name: string;
+  readonly spec: unknown;
+  readonly alias: boolean;
 }
 
 /**
@@ -268,18 +276,18 @@ function installedManifests(checkout: Checkout): Array<Record<string, unknown> |
  * as the package installed and its specifier: an `npm:<name>@<range>` alias
  * installs `<name>`.
  */
-function registryDependencies(manifest: Record<string, unknown> | undefined): Array<[string, unknown]> {
+function registryDependencies(manifest: Record<string, unknown> | undefined): RegistryDependency[] {
   return ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"].flatMap(field =>
     Object.entries(object(manifest?.[field]) ?? {})
-      .map(([name, spec]): [string, unknown] => (typeof spec === "string" && spec.startsWith("npm:") ? aliasTarget(spec.slice(4)) : [name, spec]))
-      .filter(([, spec]) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec))),
+      .map(([name, spec]) => (typeof spec === "string" && spec.startsWith("npm:") ? aliasTarget(spec.slice(4)) : { name, spec, alias: false }))
+      .filter(({ spec }) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec))),
   );
 }
 
 /** The package and range an npm alias's `<name>@<range>` names; a bare name takes any version. */
-function aliasTarget(target: string): [string, string] {
+function aliasTarget(target: string): RegistryDependency {
   const at = target.indexOf("@", 1);
-  return at === -1 ? [target, "*"] : [target.slice(0, at), target.slice(at + 1)];
+  return at === -1 ? { name: target, spec: "*", alias: true } : { name: target.slice(0, at), spec: target.slice(at + 1), alias: true };
 }
 
 /** Parse TOML that should hold a table; missing or malformed TOML gives undefined. */
