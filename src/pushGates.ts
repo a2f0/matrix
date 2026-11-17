@@ -1,3 +1,4 @@
+import path from "node:path";
 import { type Gh, runGh } from "./gh";
 import { object } from "./packageJson";
 
@@ -736,13 +737,101 @@ function pushedJobs(workflow: Record<string, unknown> | undefined, branch: strin
  * workflow shows, so this catches a shipping job that waits for nothing, not
  * one that waits for a job running too little.
  */
-export function ungatedShippingJobs(workflow: unknown, required: string[], branch = "main"): string[] {
+export function ungatedShippingJobs(workflow: unknown, required: string[], branch = "main", context: CallContext = {}): string[] {
+  const { called = () => undefined, shipping = false } = context;
   const jobs = pushedJobs(object(workflow), branch);
+  const skipped = skippedOnPush(object(object(workflow)?.jobs) ?? {}, branch);
   return Object.entries(jobs).flatMap(([id, value]) => {
     const job = object(value) ?? {};
     const name = jobName(id, job);
-    if (job.if === false || !SHIPPING_JOB.test(`${id} ${name}`) || waitsForChecks(jobs, id, required)) return [];
+    if (skipped.has(id) || !ships(id, job, shipping) || callsShipping(job, called, branch, new Set()) || waitsForChecks(jobs, id, required)) return [];
     return [name === id ? id : `${id} (${name})`];
+  });
+}
+
+/** Where a workflow sits among the calls a push makes. */
+export interface CallContext {
+  /** Reads the repository's own reusable workflow at a path; undefined when it cannot. */
+  readonly called?: (path: string) => unknown;
+  /** Whether a call reaching the workflow is named for shipping, so its jobs whose commands ship count too. */
+  readonly shipping?: boolean;
+}
+
+/**
+ * Whether a job as a push runs it ships: it is named for deploying or
+ * publishing, or, inside a call named for that, runs a step that does.
+ */
+function ships(id: string, job: Record<string, unknown>, inShippingCall: boolean): boolean {
+  return SHIPPING_JOB.test(`${id} ${jobName(id, job)}`) || (inShippingCall && steps(job).some(step => step.if !== false && shippingAt(step) !== -1));
+}
+
+/** Whether a job as a push runs it ships there: it ships, unless every step that recognizably ships is skipped. */
+function shipsOnPush(id: string, job: Record<string, unknown>, inShippingCall: boolean): boolean {
+  const shippingSteps = steps(job).filter(step => shippingAt(step) !== -1);
+  return ships(id, job, inShippingCall) && !(shippingSteps.length > 0 && shippingSteps.every(step => step.if === false));
+}
+
+/** The path of the repository's own reusable workflow a job calls with `uses: ./<path>`. */
+function localCall(job: Record<string, unknown>): string | undefined {
+  return typeof job.uses === "string" && job.uses.startsWith("./") ? path.posix.normalize(job.uses) : undefined;
+}
+
+/**
+ * Whether a job calls a reusable workflow of the repository's own with a job
+ * that a push to `branch` runs and that ships, read as inside a call named for
+ * shipping, directly or through further calls, so it is judged there instead
+ * of the call; a call whose workflow cannot be read, or ships nothing it
+ * shows, is judged by its own name.
+ */
+function callsShipping(job: Record<string, unknown>, called: (path: string) => unknown, branch: string, seen: Set<string>): boolean {
+  const target = localCall(job);
+  if (target === undefined || seen.has(target)) return false;
+  const workflow = object(called(target));
+  const skipped = skippedOnPush(object(workflow?.jobs) ?? {}, branch);
+  const inner = new Set([...seen, target]);
+  return Object.entries(pushedJobs(workflow, branch)).some(([id, value]) => {
+    const child = object(value) ?? {};
+    return !skipped.has(id) && (shipsOnPush(id, child, true) || callsShipping(child, called, branch, inner));
+  });
+}
+
+/**
+ * The required checks a called workflow's jobs can be, as GitHub names them
+ * `<calling job> / <job>`, with the calling job's part removed: its name, with
+ * ` (<values>)` for a matrix, or the text before an expression in it.
+ */
+function calledRequired(id: string, job: Record<string, unknown>, required: string[]): string[] {
+  const name = jobName(id, job);
+  const fixed = name.split("${{")[0]!.trim();
+  if (name.includes("${{") && fixed === "") return [];
+  const escaped = fixed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const suffix = name.includes("${{") ? "[^/]*?" : object(job.strategy)?.matrix !== undefined ? "(?: \\([^)]*\\))?" : "";
+  const pattern = new RegExp(`^${escaped}${suffix} / (.+)$`);
+  return required.flatMap(check => pattern.exec(check)?.slice(1, 2) ?? []);
+}
+
+/**
+ * The repository's own reusable workflows that a push to `branch` can call
+ * from a parsed workflow before any validation: each `uses: ./<path>` job the
+ * push does not skip, by its condition or a skipped job it needs, that waits
+ * for no validation, with its called path, the required checks its jobs can
+ * be, and whether the call, or one reaching it, is named for shipping. The
+ * called workflow's jobs run in that push, so they can ship without waiting.
+ */
+export function ungatedCalls(
+  workflow: unknown,
+  required: string[],
+  branch = "main",
+  shipping = false,
+): Array<{ job: string; path: string; required: string[]; shipping: boolean }> {
+  const jobs = pushedJobs(object(workflow), branch);
+  const skipped = skippedOnPush(object(object(workflow)?.jobs) ?? {}, branch);
+  return Object.entries(jobs).flatMap(([id, value]) => {
+    const job = object(value) ?? {};
+    const target = localCall(job);
+    if (target === undefined || skipped.has(id) || waitsForChecks(jobs, id, required)) return [];
+    const named = SHIPPING_JOB.test(`${id} ${jobName(id, job)}`);
+    return [{ job: id, path: target, required: calledRequired(id, job, required), shipping: shipping || named }];
   });
 }
 

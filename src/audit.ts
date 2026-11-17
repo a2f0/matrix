@@ -8,7 +8,7 @@ import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
 import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
-import { checkRunsOnPush, type PushGateResult, runsOnEveryPush, runsOnPushTo, ungatedShippingJobs, workflowName } from "./pushGates";
+import { checkRunsOnPush, type PushGateResult, runsOnEveryPush, runsOnPushTo, ungatedCalls, ungatedShippingJobs, workflowName } from "./pushGates";
 import { supersededGuidance } from "./superseded";
 import { plural } from "./text";
 
@@ -599,9 +599,22 @@ export const RULES: readonly Rule[] = [
     source: "docs/tooling.md#base-freshness",
     check: checkout => {
       const required = requiredChecks(checkout).map(check => check.name);
-      const ungated = parsedWorkflows(checkout)
-        .filter(({ workflow }) => runsOnPushTo(workflow, checkout.defaultBranch))
-        .flatMap(({ file, workflow }) => ungatedShippingJobs(workflow, required, checkout.defaultBranch).map(job => `${file} ${job}`));
+      const branch = checkout.defaultBranch;
+      const workflows = parsedWorkflows(checkout);
+      const byFile = new Map(workflows.map(({ file, workflow }) => [file, workflow]));
+      const called = (file: string) => byFile.get(file);
+      // A called workflow's jobs run in its caller's push, labelled by the calls that reach them.
+      const shipping = (file: string, workflow: unknown, checks: string[], via: string, seen: Set<string>, inShippingCall: boolean): string[] => [
+        ...ungatedShippingJobs(workflow, checks, branch, { called, shipping: inShippingCall }).map(job => `${via}${file} ${job}`),
+        ...ungatedCalls(workflow, checks, branch, inShippingCall).flatMap(call =>
+          seen.has(call.path) || !byFile.has(call.path)
+            ? []
+            : shipping(call.path, byFile.get(call.path), call.required, `${via}${file} ${call.job} → `, new Set([...seen, call.path]), call.shipping),
+        ),
+      ];
+      const ungated = workflows
+        .filter(({ workflow }) => runsOnPushTo(workflow, branch))
+        .flatMap(({ file, workflow }) => shipping(file, workflow, required, "", new Set([file]), false));
       if (ungated.length === 0) return pass;
       const verb = ungated.length === 1 ? "starts" : "start";
       return fail(`${ungated.join(", ")} ${verb} without needing a required check or a job that runs tests`);
