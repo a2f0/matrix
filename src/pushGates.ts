@@ -765,6 +765,12 @@ function ships(id: string, job: Record<string, unknown>, inShippingCall: boolean
   return SHIPPING_JOB.test(`${id} ${jobName(id, job)}`) || (inShippingCall && steps(job).some(step => step.if !== false && shippingAt(step) !== -1));
 }
 
+/** Whether a job as a push runs it ships there: it ships, unless every step that recognizably ships is skipped. */
+function shipsOnPush(id: string, job: Record<string, unknown>, inShippingCall: boolean): boolean {
+  const shippingSteps = steps(job).filter(step => shippingAt(step) !== -1);
+  return ships(id, job, inShippingCall) && !(shippingSteps.length > 0 && shippingSteps.every(step => step.if === false));
+}
+
 /** The path of the repository's own reusable workflow a job calls with `uses: ./<path>`. */
 function localCall(job: Record<string, unknown>): string | undefined {
   return typeof job.uses === "string" && job.uses.startsWith("./") ? path.posix.normalize(job.uses) : undefined;
@@ -785,7 +791,7 @@ function callsShipping(job: Record<string, unknown>, called: (path: string) => u
   const inner = new Set([...seen, target]);
   return Object.entries(pushedJobs(workflow, branch)).some(([id, value]) => {
     const child = object(value) ?? {};
-    return !skipped.has(id) && (ships(id, child, true) || callsShipping(child, called, branch, inner));
+    return !skipped.has(id) && (shipsOnPush(id, child, true) || callsShipping(child, called, branch, inner));
   });
 }
 

@@ -965,6 +965,7 @@ describe("audit", () => {
       `  deploy:\n    if: github.event_name == 'pull_request'\n${step("wrangler deploy")}`,
       `  pr:\n    if: github.event_name == 'pull_request'\n${step("true")}  deploy:\n    needs: pr\n${step("wrangler deploy")}`,
       `  run:\n    runs-on: x\n    steps:\n      - if: github.event_name == 'pull_request'\n        run: wrangler deploy\n`,
+      `  deploy:\n    runs-on: x\n    steps:\n      - if: github.event_name == 'pull_request'\n        run: wrangler deploy\n`,
     ])
       expect(called(calls("", "deploy"), `  go:\n${step("sh go.sh")}${skippedShipping}`)).toBe(ungated(".github/workflows/ci.yml deploy"));
     // Inside a call named for shipping, a job whose commands ship counts as shipping whatever its name.
