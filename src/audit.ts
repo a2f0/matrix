@@ -225,36 +225,49 @@ const NON_REGISTRY_SPEC = /^(?:(?:workspace|file|link|portal|git|git\+[a-z]+|git
 /**
  * The packages of the repository owner's npm scope that a checkout installs
  * from the registry: dependencies of every kind in the root package.json and
- * its declared workspace members, except those members themselves and
- * non-registry specifiers.
+ * its declared workspace members, except non-registry specifiers and ranges
+ * that a member of that name satisfies, which install from the workspace.
  */
 function ownRegistryPackages(checkout: Checkout): string[] {
   const scope = `@${checkout.repo.split("/")[0]!.toLowerCase()}/`;
   const manifests = installedManifests(checkout);
-  const own = new Set(manifests.map(manifest => manifest?.name));
-  const found = new Set(manifests.flatMap(registryDependencies).filter(name => name.startsWith(scope) && !own.has(name)));
+  const members = new Map(manifests.map(manifest => [manifest?.name, manifest?.version]));
+  const local = (name: string, spec: unknown) => {
+    const version = members.get(name);
+    return members.has(name) && (typeof spec !== "string" || typeof version !== "string" || Bun.semver.satisfies(version, spec));
+  };
+  const found = new Set(
+    manifests
+      .flatMap(registryDependencies)
+      .filter(([name, spec]) => name.startsWith(scope) && !local(name, spec))
+      .map(([name]) => name),
+  );
   return [...found].sort();
 }
 
-/** The root package.json and those of the workspace members its `workspaces` patterns declare, parsed. */
+/**
+ * The root package.json and those of the workspace members its `workspaces`
+ * patterns declare, less those a `!` pattern excludes, parsed.
+ */
 function installedManifests(checkout: Checkout): Array<Record<string, unknown> | undefined> {
   const declared = checkout.packageJson?.workspaces;
-  const patterns = Array.isArray(declared) ? declared : object(declared)?.packages;
-  const globs = (Array.isArray(patterns) ? patterns : [])
-    .filter(pattern => typeof pattern === "string")
-    .map(pattern => new Bun.Glob(pattern.replace(/\/+$/, "")));
-  const members = checkout
-    .tracked(":(glob)**/package.json")
-    .filter(file => file !== "package.json" && globs.some(glob => glob.match(path.posix.dirname(file))));
+  const patterns = (Array.isArray(declared) ? declared : (object(declared)?.packages as unknown[] | undefined)) ?? [];
+  const globs = (negated: boolean) =>
+    patterns
+      .filter(pattern => typeof pattern === "string" && pattern.startsWith("!") === negated)
+      .map(pattern => new Bun.Glob((pattern as string).replace(/^!/, "").replace(/\/+$/, "")));
+  const [included, excluded] = [globs(false), globs(true)];
+  const members = checkout.tracked(":(glob)**/package.json").filter(file => {
+    const directory = path.posix.dirname(file);
+    return file !== "package.json" && included.some(glob => glob.match(directory)) && !excluded.some(glob => glob.match(directory));
+  });
   return [checkout.packageJson, ...members.map(file => parseObject(checkout.read(file)))];
 }
 
-/** The dependencies of every kind a package.json installs from the registry. */
-function registryDependencies(manifest: Record<string, unknown> | undefined): string[] {
+/** The dependencies of every kind a package.json installs from the registry, with their specifiers. */
+function registryDependencies(manifest: Record<string, unknown> | undefined): Array<[string, unknown]> {
   return ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"].flatMap(field =>
-    Object.entries(object(manifest?.[field]) ?? {})
-      .filter(([, spec]) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec)))
-      .map(([name]) => name),
+    Object.entries(object(manifest?.[field]) ?? {}).filter(([, spec]) => !(typeof spec === "string" && NON_REGISTRY_SPEC.test(spec))),
   );
 }
 

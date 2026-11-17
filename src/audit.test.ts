@@ -1004,11 +1004,16 @@ describe("audit", () => {
     const workspace = {
       "package.json": JSON.stringify({
         name: "root",
-        workspaces: ["packages/*"],
-        devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL, "@a2f0/client": "1.0.0" },
+        workspaces: ["packages/*", "!packages/fixture"],
+        devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL, "@a2f0/client": "1.0.0", "@a2f0/fixture": "1.0.0" },
       }),
+      // Excluded from the workspace, so its name is a registry package's.
+      "packages/fixture/package.json": JSON.stringify({ name: "@a2f0/fixture", version: "1.0.0" }),
+      // A range the workspace member does not satisfy installs from the registry.
+      "packages/old/package.json": JSON.stringify({ name: "old", dependencies: { "@a2f0/app": "^9.0.0" } }),
       "packages/app/package.json": JSON.stringify({
         name: "@a2f0/app",
+        version: "0.1.0",
         dependencies: {
           "@a2f0/ct-client": "0.1.0",
           "@a2f0/shared": "workspace:*",
@@ -1030,9 +1035,9 @@ describe("audit", () => {
     );
     // A scope pattern names no package; workspace members, non-registry specifiers, other scopes, and manifests outside the workspace need no entry.
     expect(rule("age-scope", aged(["@a2f0/*"]), workspace)).toBe(
-      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/client, @a2f0/ct-client; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
+      "bunfig.toml's minimumReleaseAge also delays @a2f0/agent-tool, @a2f0/app, @a2f0/client, @a2f0/ct-client, @a2f0/fixture; list each in [install] minimumReleaseAgeExcludes, which takes exact names",
     );
-    expect(rule("age-listed", aged(["@a2f0/agent-tool", "@a2f0/client", "@a2f0/ct-client"]), workspace)).toBeUndefined();
+    expect(rule("age-listed", aged(["@a2f0/agent-tool", "@a2f0/app", "@a2f0/client", "@a2f0/ct-client", "@a2f0/fixture"]), workspace)).toBeUndefined();
     // Without a minimum release age, nothing is delayed.
     for (const [name, bunfig] of [
       ["age-none", null],
