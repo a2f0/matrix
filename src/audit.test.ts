@@ -934,28 +934,43 @@ describe("audit", () => {
     expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on:\n  push:\n    branches: [staging]")).toBeUndefined();
     expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on: workflow_dispatch")).toBeUndefined();
     // A push also runs the jobs of the repository's reusable workflows it calls.
-    const called = (caller: string, callee: string) =>
+    const called = (caller: string, callee: string, nested = "") =>
       failures(
-        checkout(`called-${Bun.hash(caller + callee)}`, {
+        checkout(`called-${Bun.hash(caller + callee + nested)}`, {
           ...config,
           ".github/workflows/ci.yml": `name: CI\non:\n  push:\n    branches: [main]\njobs:\n${caller}`,
           ".github/workflows/backend.yml": `name: Backend\non: workflow_call\njobs:\n${callee}`,
+          ...(nested ? { ".github/workflows/ship.yml": `name: Ship\non: workflow_call\njobs:\n${nested}` } : {}),
         }),
         ["deploys-need-checks"],
       )["deploys-need-checks"];
-    const calls = (fields = "") => `  backend:\n${fields}    uses: ./.github/workflows/backend.yml\n`;
+    const calls = (fields = "", id = "backend", file = "backend") => `  ${id}:\n${fields}    uses: ./.github/workflows/${file}.yml\n`;
     const deploy = `  deploy:\n${step("wrangler deploy")}`;
-    const message = ".github/workflows/ci.yml backend → .github/workflows/backend.yml deploy starts without needing a required check or a job that runs tests";
-    expect(called(calls(), deploy)).toBe(message);
+    const tested = `  test:\n${step("bun test")}  deploy:\n    needs: test\n${step("wrangler deploy")}`;
+    const ungated = (via: string) => `${via} starts without needing a required check or a job that runs tests`;
+    expect(called(calls(), deploy)).toBe(ungated(".github/workflows/ci.yml backend → .github/workflows/backend.yml deploy"));
     // A cycle of calls reports each job once.
-    expect(called(calls(), `  again:\n    uses: ./.github/workflows/ci.yml\n${deploy}`)).toBe(message);
-    for (const [caller, callee] of [
-      [calls(), `  test:\n${step("bun test")}  deploy:\n    needs: test\n${step("wrangler deploy")}`],
+    expect(called(calls(), `  again:\n    uses: ./.github/workflows/ci.yml\n${deploy}`)).toBe(
+      ungated(".github/workflows/ci.yml backend → .github/workflows/backend.yml deploy"),
+    );
+    // Calls nest; each one's jobs are judged where they run.
+    expect(called(calls(), calls("", "ship", "ship"), deploy)).toBe(
+      ungated(".github/workflows/ci.yml backend → .github/workflows/backend.yml ship → .github/workflows/ship.yml deploy"),
+    );
+    // A call named for shipping is judged by the workflow it calls when that one names its shipping jobs, and by its own name otherwise.
+    expect(called(calls("", "deploy"), `  run:\n${step("wrangler deploy")}`)).toBe(ungated(".github/workflows/ci.yml deploy"));
+    expect(called(calls("", "deploy", "missing"), deploy)).toBe(ungated(".github/workflows/ci.yml deploy"));
+    for (const [caller, callee, nested] of [
+      [calls(), tested],
+      [calls("", "deploy"), tested],
+      [calls("", "deploy"), calls("", "publish", "ship"), tested],
       [`  tests:\n${step("bun test")}${calls("    needs: tests\n")}`, deploy],
       [calls("    if: github.event_name == 'pull_request'\n"), deploy],
+      // Skipped through a need that a push skips.
+      [`  prepare:\n    if: github.event_name == 'pull_request'\n${step("true")}${calls("    needs: prepare\n")}`, deploy],
       ["  remote:\n    uses: a2f0/other/.github/workflows/backend.yml@v1\n", deploy],
     ])
-      expect(called(caller!, callee!)).toBeUndefined();
+      expect(called(caller!, callee!, nested)).toBeUndefined();
   });
 
   test("rejects unknown rules", () => {

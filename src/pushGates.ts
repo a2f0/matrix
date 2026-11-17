@@ -737,29 +737,47 @@ function pushedJobs(workflow: Record<string, unknown> | undefined, branch: strin
  * workflow shows, so this catches a shipping job that waits for nothing, not
  * one that waits for a job running too little.
  */
-export function ungatedShippingJobs(workflow: unknown, required: string[], branch = "main"): string[] {
+export function ungatedShippingJobs(workflow: unknown, required: string[], branch = "main", called: (path: string) => unknown = () => undefined): string[] {
   const jobs = pushedJobs(object(workflow), branch);
   return Object.entries(jobs).flatMap(([id, value]) => {
     const job = object(value) ?? {};
     const name = jobName(id, job);
-    if (job.if === false || !SHIPPING_JOB.test(`${id} ${name}`) || waitsForChecks(jobs, id, required)) return [];
+    if (job.if === false || !SHIPPING_JOB.test(`${id} ${name}`) || callsNamedShipping(job, called) || waitsForChecks(jobs, id, required)) return [];
     return [name === id ? id : `${id} (${name})`];
   });
 }
 
+/** The path of the repository's own reusable workflow a job calls with `uses: ./<path>`. */
+function localCall(job: Record<string, unknown>): string | undefined {
+  return typeof job.uses === "string" && job.uses.startsWith("./") ? path.posix.normalize(job.uses) : undefined;
+}
+
+/**
+ * Whether a job calls a reusable workflow of the repository's own whose jobs
+ * name their own deploying or publishing, so those jobs are judged there
+ * instead of the call; a call whose workflow cannot be read, or names none,
+ * is judged by its own name.
+ */
+function callsNamedShipping(job: Record<string, unknown>, called: (path: string) => unknown): boolean {
+  const target = localCall(job);
+  const jobs = target === undefined ? {} : (object(object(called(target))?.jobs) ?? {});
+  return Object.entries(jobs).some(([id, value]) => SHIPPING_JOB.test(`${id} ${jobName(id, object(value) ?? {})}`));
+}
+
 /**
  * The repository's own reusable workflows that a push to `branch` can call
- * from a parsed workflow before any validation: each `uses: ./<path>` job not
- * skipped there that waits for no validation, with its called path. The
- * called workflow's jobs run in that push, so they can ship without waiting.
+ * from a parsed workflow before any validation: each `uses: ./<path>` job the
+ * push does not skip, by its condition or a skipped job it needs, that waits
+ * for no validation, with its called path. The called workflow's jobs run in
+ * that push, so they can ship without waiting.
  */
 export function ungatedCalls(workflow: unknown, required: string[], branch = "main"): Array<{ job: string; path: string }> {
   const jobs = pushedJobs(object(workflow), branch);
+  const skipped = skippedOnPush(object(object(workflow)?.jobs) ?? {}, branch);
   return Object.entries(jobs).flatMap(([id, value]) => {
-    const job = object(value) ?? {};
-    const uses = job.uses;
-    if (job.if === false || typeof uses !== "string" || !uses.startsWith("./") || waitsForChecks(jobs, id, required)) return [];
-    return [{ job: id, path: path.posix.normalize(uses) }];
+    const target = localCall(object(value) ?? {});
+    if (target === undefined || skipped.has(id) || waitsForChecks(jobs, id, required)) return [];
+    return [{ job: id, path: target }];
   });
 }
 

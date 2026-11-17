@@ -604,7 +604,7 @@ export const RULES: readonly Rule[] = [
       const byFile = new Map(workflows.map(({ file, workflow }) => [file, workflow]));
       // A called workflow's jobs run in its caller's push, labelled by the calls that reach them.
       const shipping = (file: string, workflow: unknown, via: string, seen: Set<string>): string[] => [
-        ...ungatedShippingJobs(workflow, required, branch).map(job => `${via}${file} ${job}`),
+        ...ungatedShippingJobs(workflow, required, branch, called => byFile.get(called)).map(job => `${via}${file} ${job}`),
         ...ungatedCalls(workflow, required, branch).flatMap(call =>
           seen.has(call.path) || !byFile.has(call.path)
             ? []
