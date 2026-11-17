@@ -20,7 +20,7 @@ import {
 } from "../skills/take-screenshots/scripts/record";
 import { LINK, LOCK, storeDir } from "../skills/take-screenshots/scripts/store";
 import { artifactsRoot, resolveTargets } from "../skills/take-screenshots/scripts/targets";
-import { gitIn, gitInit, tempDir, write } from "./testFixtures";
+import { gitIn, gitInit, SPAWNS, tempDir, write } from "./testFixtures";
 
 // Fixtures name repositories that do not exist on GitHub; resolve them from their URLs.
 process.env.MATRIX_ARTIFACTS_NO_GH = "1";
@@ -62,7 +62,7 @@ const print = (text: string) => {
 };
 
 describe("take-screenshots artifacts", () => {
-  test("names projects by GitHub repository and stores them beside the workspace", async () => {
+  test("names projects by GitHub repository and stores them beside the workspace", SPAWNS, async () => {
     expect(githubRepo("git@github.com:a2f0/a2f0.net.git")).toBe("a2f0/a2f0.net");
     expect(githubRepo("https://github.com/a2f0/nc")).toBe("a2f0/nc");
     expect(githubRepo("/srv/git/app.git")).toBeUndefined();
@@ -87,7 +87,7 @@ describe("take-screenshots artifacts", () => {
     expect(resolveTargets(root, []).targets.map(target => target.name)).toEqual(["app"]);
   });
 
-  test("resolves named repositories exactly as space-cleanup does", () => {
+  test("resolves named repositories exactly as space-cleanup does", SPAWNS, () => {
     const { home, root, app } = workspace();
     const lib = path.join(root, "checkouts", "lib");
     const outside = repo(path.join(home, "outside"), ".screenshots\n");
@@ -112,7 +112,7 @@ describe("take-screenshots artifacts", () => {
     }
   });
 
-  test("links a clone with a relative, ignored symlink, and only when a plain pattern ignores it", async () => {
+  test("links a clone with a relative, ignored symlink, and only when a plain pattern ignores it", SPAWNS, async () => {
     const { home, app } = workspace();
     const target = targetFor(app);
     const artifacts = path.join(home, "matrix-artifacts");
@@ -128,7 +128,7 @@ describe("take-screenshots artifacts", () => {
     expect(link(targetFor(slashed.app), path.join(slashed.home, "matrix-artifacts"), true).blocked).toContain("without a trailing slash");
   });
 
-  test("moves an existing capture into an empty store, and refuses to merge two captures", async () => {
+  test("moves an existing capture into an empty store, and refuses to merge two captures", SPAWNS, async () => {
     const { home, app } = workspace();
     const artifacts = path.join(home, "matrix-artifacts");
     write(app, { ".screenshots/web/home.png": "old" });
@@ -179,7 +179,7 @@ describe("take-screenshots artifacts", () => {
     expect(link(targetFor(again), path.join(again, "store"), false).blocked).toBe(`the store ${path.join(again, "store")} is inside the repository`);
   });
 
-  test("captures under a lock, records provenance, and every linked clone sees it", async () => {
+  test("captures under a lock, records provenance, and every linked clone sees it", SPAWNS, async () => {
     const { home, root, app } = workspace();
     const artifacts = path.join(home, "matrix-artifacts");
     expect(await main(["link", "--apply"], root, undefined, print)).toBe(0);
@@ -254,7 +254,7 @@ describe("take-screenshots artifacts", () => {
     expect(link(targetFor(fork), artifacts, false).blocked).toBeUndefined();
   });
 
-  test("partial captures keep the merge state of the images they keep", async () => {
+  test("partial captures keep the merge state of the images they keep", SPAWNS, async () => {
     const { app } = workspace();
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     const ok: Runner = { capture: async () => ({ code: 0 }) };
@@ -269,7 +269,7 @@ describe("take-screenshots artifacts", () => {
     expect(readRecord(store)?.merged).toBe(true);
   });
 
-  test("refuses dirty trees and unlinked clones, and records failed captures", async () => {
+  test("refuses dirty trees and unlinked clones, and records failed captures", SPAWNS, async () => {
     const { home, app } = workspace();
     await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("not linked");
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
@@ -343,7 +343,7 @@ describe("take-screenshots artifacts", () => {
     expect(readRecord(store)).toMatchObject({ status: "complete", dirty: true, over: { dirty: true } });
   });
 
-  test("a git failure while settling a capture records it failed, never leaving it running", async () => {
+  test("a git failure while settling a capture records it failed, never leaving it running", SPAWNS, async () => {
     const { home, app } = workspace();
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     const store = path.join(home, "matrix-artifacts/app/screenshots");
@@ -365,7 +365,7 @@ describe("take-screenshots artifacts", () => {
     expect(readRecord(store)?.status).toBe("complete");
   });
 
-  test("ignores inherited variables that bind git to other configuration or repositories", async () => {
+  test("ignores inherited variables that bind git to other configuration or repositories", SPAWNS, async () => {
     const { home, app } = workspace();
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     write(app, { "src/wip.ts": "x" });
@@ -408,7 +408,7 @@ describe("take-screenshots artifacts", () => {
     expect(() => acquireLock(file, info)).toThrow("still has processes that may be writing");
   });
 
-  test("exactly one of several concurrent processes takes the lock", async () => {
+  test("exactly one of several concurrent processes takes the lock", SPAWNS, async () => {
     const dir = realpathSync(tempDir("take-screenshots-race"));
     const file = path.join(dir, LOCK);
     const script = path.join(dir, "race.ts");
@@ -428,7 +428,7 @@ try {
     expect(results.map(result => result.trim()).filter(result => result === "won")).toHaveLength(1);
   });
 
-  test("malformed records read as no record, so partial captures over them stay incomplete", async () => {
+  test("malformed records read as no record, so partial captures over them stay incomplete", SPAWNS, async () => {
     const good = { schemaVersion: 1, project: "app", status: "complete", commit: "a".repeat(40), branch: "main", dirty: false, merged: true, args: [] };
     expect(validRecord(good)).toBe(true);
     expect(validRecord({ status: "complete" })).toBe(false);
@@ -444,7 +444,7 @@ try {
     expect(readRecord(store)).toMatchObject({ status: "incomplete" });
   });
 
-  test("holds the lock until the capture's whole process group has exited", async () => {
+  test("holds the lock until the capture's whole process group has exited", SPAWNS, async () => {
     const { home, app } = workspace();
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     const lock = path.join(home, "matrix-artifacts/app", LOCK);
@@ -484,7 +484,7 @@ try {
     expect(existsSync(lock)).toBe(false);
   });
 
-  test("asks GitHub about origin by name, and falls back to its URL", async () => {
+  test("asks GitHub about origin by name, and falls back to its URL", SPAWNS, async () => {
     const { home, app } = workspace();
     const bin = path.join(home, "bin");
     // A stub gh: names origin's renamed repository, and a fork's parent when asked without a name.
@@ -651,7 +651,7 @@ esac
     expect(claimNamespace({ name: "app", root: app, project: "app", repo: "a2f0/app" }, artifacts, true)).toContain("unreadable repository.json");
   });
 
-  test("owner updates from concurrent processes are all kept", async () => {
+  test("owner updates from concurrent processes are all kept", SPAWNS, async () => {
     const dir = realpathSync(tempDir("take-screenshots-owner"));
     const file = path.join(dir, "repository.json");
     writeFileSync(file, JSON.stringify({ repo: "a2f0/app" }));
@@ -669,7 +669,7 @@ updateOwner(${JSON.stringify(file)}, owner => owner && { ...owner, aliases: [...
     expect(JSON.parse(readFileSync(file, "utf8")).aliases.toSorted()).toEqual(Array.from({ length: 8 }, (_, index) => `a2f0/old${index}`));
   });
 
-  test("concurrent claims with conflicting GitHub ids: exactly one wins", async () => {
+  test("concurrent claims with conflicting GitHub ids: exactly one wins", SPAWNS, async () => {
     const dir = realpathSync(tempDir("take-screenshots-claim"));
     mkdirSync(path.join(dir, "app"));
     // A legacy owner file, written before ids were recorded.
@@ -702,7 +702,7 @@ console.log(error ? "lost" : "won");
     expect(existsSync(`${file}.lock`)).toBe(true);
   });
 
-  test("reads a finished record an older version wrote without finishedAt or exitCode", async () => {
+  test("reads a finished record an older version wrote without finishedAt or exitCode", SPAWNS, async () => {
     const { home, app } = workspace();
     const store = path.join(home, "matrix-artifacts/app/screenshots");
     const ok: Runner = { capture: async () => ({ code: 0 }) };
@@ -719,7 +719,7 @@ console.log(error ? "lost" : "won");
     expect(lines.join("\n")).toContain(`complete ${legacy.startedAt} at `);
   });
 
-  test("prints status, link and capture reports as text", async () => {
+  test("prints status, link and capture reports as text", SPAWNS, async () => {
     const { home, root, app } = workspace();
     const artifacts = path.join(home, "matrix-artifacts");
     const lines: string[] = [];
@@ -879,7 +879,7 @@ describe("capture record transitions", () => {
     expect(Object.keys(finished)).toEqual([...Object.keys(fields), "status", "finishedAt", "exitCode"]);
   });
 
-  test("capture.json keeps its key order while running and once finished", async () => {
+  test("capture.json keeps its key order while running and once finished", SPAWNS, async () => {
     const { home, app } = workspace();
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     const store = path.join(home, "matrix-artifacts/app/screenshots");
@@ -897,7 +897,7 @@ describe("capture record transitions", () => {
     expect(keys()).toEqual([...base, "finishedAt", "exitCode"]);
   });
 
-  test("capture --json prints a plan, and once applied adds applied then record", async () => {
+  test("capture --json prints a plan, and once applied adds applied then record", SPAWNS, async () => {
     const { app } = workspace();
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     const plan = ["name", "project", "store", "command", "commit", "branch", "dirty", "merged"];
@@ -915,7 +915,7 @@ describe("capture record transitions", () => {
 });
 
 describe("namespace targets", () => {
-  test("builds a target from origin, GitHub's answer, and --project", () => {
+  test("builds a target from origin, GitHub's answer, and --project", SPAWNS, () => {
     const { app } = workspace();
     gitIn(app, "remote", "set-url", "origin", "git@github.com:a2f0/Old.git");
     const base = { name: "app", root: app };

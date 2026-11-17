@@ -19,6 +19,13 @@ export function tempDir(prefix: string): string {
   return directory;
 }
 
+/**
+ * Options for a test that starts many processes, such as a Git fixture per
+ * case: Bun's 5 s default fails them on a loaded machine, and a hang still
+ * fails within this limit.
+ */
+export const SPAWNS = { timeout: 30_000 };
+
 /** Remove every directory `tempDir` made; the test preload runs this after each test. */
 export function removeTempDirs(): void {
   for (const directory of temporary.splice(0)) rmSync(directory, { recursive: true, force: true });

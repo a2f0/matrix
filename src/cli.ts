@@ -121,6 +121,14 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter(entry => typeof entry === "string") : [];
 }
 
+/** What a `push-gate check` finding's kind runs, in words; a kind a later agent-tool adds keeps its own name. */
+function slowWork(kind: unknown): string {
+  if (kind === "install") return "a dependency install";
+  if (kind === "build") return "a build";
+  if (kind === "test" || typeof kind !== "string") return "a test run";
+  return `a ${kind}`;
+}
+
 /** The object entries of a report list. */
 function records(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
@@ -128,11 +136,11 @@ function records(value: unknown): Record<string, unknown>[] {
 }
 
 /**
- * `push-gate check`'s report (agent-tool 0.1.58): a checkout with neither a
- * tracked hook nor a `pushGate` section has no gate; otherwise `errors` holds
- * every problem, including each step that reaches a test run or install.
- * agent-tool lets an `allowSlow` reason excuse such a step; the matrix
- * standard keeps tests and installs out of every gate, so this does not.
+ * `push-gate check`'s report (agent-tool 0.1.58 and later): a checkout with
+ * neither a tracked hook nor a `pushGate` section has no gate; otherwise
+ * `errors` holds every problem, including each step that reaches a test run,
+ * install, or build. agent-tool lets an `allowSlow` reason excuse such a step;
+ * the matrix standard keeps them out of every gate, so this does not.
  */
 export function parsePushGateReport(report: Record<string, unknown>, ok: boolean): PushGateResult {
   if (object(report.pushGate)?.declared !== true && object(report.hook)?.tracked !== true)
@@ -140,8 +148,7 @@ export function parsePushGateReport(report: Record<string, unknown>, ok: boolean
   const excused = records(report.steps).flatMap(step =>
     typeof step.allowSlow === "string"
       ? records(step.findings).map(
-          finding =>
-            `Step '${String(step.label)}' runs ${finding.kind === "install" ? "a dependency install" : "a test run"} (${String(finding.runner)}) under allowSlow; move it to CI`,
+          finding => `Step '${String(step.label)}' runs ${slowWork(finding.kind)} (${String(finding.runner)}) under allowSlow; move it to CI`,
         )
       : [],
   );

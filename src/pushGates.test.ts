@@ -283,6 +283,10 @@ describe("ungatedShippingJobs", () => {
       "bun run build --outdir dist/release",
       "npm install semantic-release",
       "bun add -d release-it",
+      // An option's value is not a subcommand.
+      "cargo build --profile release",
+      "cargo build --target-dir release",
+      "bun run --filter release-notes build",
     ])
       expect(ships(neutral, "bun test", "npm publish")).toEqual([]);
     for (const shipping of [
@@ -307,6 +311,13 @@ describe("ungatedShippingJobs", () => {
       "npm --prefix web --workspace client publish",
       "bun --cwd web run deploy",
       "pnpm -C packages/client publish --no-git-checks",
+      // A value naming a package-managing subcommand is still a value.
+      "npm --prefix build publish",
+      "npm -w install publish",
+      "npm --loglevel warn publish",
+      // Only a command's own known options lose their values, so a value can still name what runs.
+      "cmake --build build --target publish",
+      "cargo run -p deployer",
     ])
       expect(ships(shipping, "bun test")).toEqual(["publish"]);
     // Only command inputs name what an action runs.

@@ -4,7 +4,7 @@ import path from "node:path";
 import { AGENT_TOOL_GRACE_DAYS, AGENTS_MD_MAX_CHARS, type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
 import type { PushGateResult } from "./pushGates";
-import { checkoutFixture, GUIDANCE, gitIn, README, tempDir } from "./testFixtures";
+import { checkoutFixture, GUIDANCE, gitIn, README, SPAWNS, tempDir } from "./testFixtures";
 
 let root: string;
 const RELEASES = {
@@ -385,7 +385,7 @@ describe("audit", () => {
   const missing =
     "TypeScript has no Biome noImportCycles with ignoreTypes: false, dependency-cruiser no-circular rule, agent-tool graph check, or module-graph test";
 
-  test("requires an import-cycle guard: Biome noImportCycles that counts type-only imports, or a module-graph test", () => {
+  test("requires an import-cycle guard: Biome noImportCycles that counts type-only imports, or a module-graph test", SPAWNS, () => {
     expect(guard("unguarded", {})).toBe(missing);
     expect(guard("biome-default", { "biome.json": '{ "linter": { "rules": { "suspicious": { "noImportCycles": "error" } } } }' })).toBe(missing);
     expect(
@@ -410,7 +410,7 @@ describe("audit", () => {
     expect(guard("graph-test", { "tests/module-graph.test.ts": "test('acyclic', () => {});\n" })).toBeUndefined();
   });
 
-  test("accepts a dependency-cruiser no-circular rule only as a type-aware error", () => {
+  test("accepts a dependency-cruiser no-circular rule only as a type-aware error", SPAWNS, () => {
     expect(
       guard("cruiser", {
         "dependency-cruiser.config.ts":
@@ -481,7 +481,7 @@ describe("audit", () => {
     ).toBe(missing);
   });
 
-  test("accepts agent-tool's graph check only where a script, run group, workflow, or runner runs it", () => {
+  test("accepts agent-tool's graph check only where a script, run group, workflow, or runner runs it", SPAWNS, () => {
     const graphConfig = JSON.stringify({ schemaVersion: 1, graph: { include: ["src/**"] } });
     expect(
       guard("graph-command", {
@@ -722,6 +722,36 @@ describe("audit", () => {
     expect(failures(checkout("husky", { ".husky/pre-push": "bun test\n" }), ["push-gate"])).toEqual({
       "push-gate": `.husky/pre-push is a pre-push hook outside the push gate; ${fix}`,
     });
+  });
+
+  test("fails a pre-push hook that core.hooksPath runs from the worktree", SPAWNS, () => {
+    const fix = "replace it with `agent-tool push-gate hook` at scripts/git/hooks/pre-push";
+    const configured = (name: string, hooksPath: (directory: string) => string, files: Record<string, string> = { ".githooks/pre-push": "bun test\n" }) => {
+      const repo = checkout(name, files);
+      const directory = path.join(root, "checkouts", name);
+      gitIn(directory, "config", "--local", "core.hooksPath", hooksPath(directory));
+      return repo;
+    };
+    const outside = { "push-gate": `.githooks/pre-push is a pre-push hook outside the push gate; ${fix}` };
+    expect(
+      failures(
+        configured("relative-hooks", () => ".githooks"),
+        ["push-gate"],
+      ),
+    ).toEqual(outside);
+    expect(
+      failures(
+        configured("absolute-hooks", directory => path.join(directory, ".githooks")),
+        ["push-gate"],
+      ),
+    ).toEqual(outside);
+    // Installed copies under .git and an untracked hook are not tracked sources; Git runs the push gate's path itself.
+    for (const [name, hooksPath, files] of [
+      ["installed-hooks", (directory: string) => path.join(directory, ".git", "hooks"), { ".githooks/pre-push": "bun test\n" }],
+      ["untracked-hooks", () => ".hooks", {}],
+      ["gate-hooks", () => "scripts/git/hooks", { "scripts/git/hooks/pre-push": "#!/bin/sh\n" }],
+    ] as const)
+      expect(failures(configured(name, hooksPath, files), ["push-gate"])).toEqual({});
   });
 
   test("fails push-gate for a checkout agent-tool cannot inspect and audits the rest", () => {
