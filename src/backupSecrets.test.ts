@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "./cli";
-import { tempDir } from "./testFixtures";
+import { SPAWNS, tempDir } from "./testFixtures";
 
 const SCRIPT = path.join(ROOT, "scripts", "secrets", "backupSecrets.sh");
 let temporary: string, secrets: string, output: string, gnupg: string, passphrase: string;
@@ -52,14 +52,14 @@ beforeEach(() => {
   writeFileSync(passphrase, "fixture-passphrase\n", { mode: 0o600 });
 });
 
-test("non-interactive backups require an explicit encryption choice", () => {
+test("non-interactive backups require an explicit encryption choice", SPAWNS, () => {
   const result = backup(output);
   expect(result.status).toBe(1);
   expect(result.stderr).toContain("require --password-file or explicit --no-password");
   expect(archives()).toEqual([]);
 });
 
-test("rejects conflicting and unknown options and unusable password files", () => {
+test("rejects conflicting and unknown options and unusable password files", SPAWNS, () => {
   expect(backup(output, "--password-file", passphrase, "--no-password").stderr).toContain("cannot be combined");
   expect(backup(output, "--password-file", path.join(temporary, "absent")).stderr).toContain("not a readable file");
   writeFileSync(passphrase, "\nsecond line\n");
@@ -69,7 +69,7 @@ test("rejects conflicting and unknown options and unusable password files", () =
   expect(backup(output, output, "--no-password").stderr).toContain("too many positional arguments");
 });
 
-test("refuses a missing source and an output directory inside it", () => {
+test("refuses a missing source and an output directory inside it", SPAWNS, () => {
   rmSync(secrets, { recursive: true });
   expect(backup(output, "--no-password").stderr).toContain("secrets directory not found");
   mkdirSync(path.join(secrets, "demo"), { recursive: true });
@@ -81,7 +81,7 @@ test("refuses a missing source and an output directory inside it", () => {
   expect(existsSync(path.join(temporary, "missing"))).toBe(false);
 });
 
-test("encrypts the folder under its own name without touching earlier archives", () => {
+test("encrypts the folder under its own name without touching earlier archives", SPAWNS, () => {
   expect(backup(output, "--password-file", passphrase).status).toBe(0);
   const [first] = archives();
   expect(first).toEndWith(".zip.gpg");
@@ -96,7 +96,7 @@ test("encrypts the folder under its own name without touching earlier archives",
   expect(() => decrypt(first!, "wrong-passphrase")).toThrow();
 });
 
-test("writes a private plain archive when asked for no password", () => {
+test("writes a private plain archive when asked for no password", SPAWNS, () => {
   expect(backup(output, "--no-password").status).toBe(0);
   const [archive] = archives();
   expect(archive).toEndWith(".zip");
@@ -105,12 +105,12 @@ test("writes a private plain archive when asked for no password", () => {
   expect(readdirSync(output).filter(name => name.startsWith("."))).toEqual([]);
 });
 
-test("defaults to ~/matrix-secrets-backups", () => {
+test("defaults to ~/matrix-secrets-backups", SPAWNS, () => {
   expect(backup("--no-password").status).toBe(0);
   expect(archives(path.join(temporary, "matrix-secrets-backups"))).toHaveLength(1);
 });
 
-test("finds the default secrets directory beside the relocated workspace", () => {
+test("finds the default secrets directory beside the relocated workspace", SPAWNS, () => {
   const scriptDirectory = path.join(temporary, "matrix", "scripts", "secrets");
   mkdirSync(scriptDirectory, { recursive: true });
   const copiedScript = path.join(scriptDirectory, "backupSecrets.sh");

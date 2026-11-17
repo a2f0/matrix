@@ -317,6 +317,33 @@ const PACKAGE_SUBCOMMANDS = new Set([
 const RUNNERS = new Set(["bun", "npm", "pnpm", "yarn", "deno"]);
 
 /**
+ * Options whose value is the next word, for the commands that define them,
+ * limited to values that never name what runs: `--prefix build` or
+ * `--profile release`, but not cargo's `--package` (`cargo run -p deployer`)
+ * or cmake's `--target publish`. Another command's option values stay
+ * words, which can only find more shipping.
+ */
+const VALUE_OPTIONS: Record<string, Set<string>> = {
+  bun: new Set(["--cwd", "--filter", "-F", "--env-file", "--config"]),
+  npm: new Set(["--prefix", "--workspace", "-w", "--registry", "--userconfig", "--cache"]),
+  pnpm: new Set(["-C", "--dir", "--filter", "-F", "--registry"]),
+  yarn: new Set(["--cwd"]),
+  cargo: new Set(["--profile", "--target", "--target-dir", "--features", "-F", "--jobs", "-j", "--config"]),
+};
+
+/** A command's words without its options and the values of the options its command is known to give one. */
+function plainWords(words: string[]): string[] {
+  const valued = Object.hasOwn(VALUE_OPTIONS, words[0]!) ? VALUE_OPTIONS[words[0]!] : undefined;
+  const plain: string[] = [];
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index]!;
+    if (!word.startsWith("-")) plain.push(word);
+    else if (valued?.has(word)) index++;
+  }
+  return plain;
+}
+
+/**
  * Whether one command deploys or publishes, by the first words that name what
  * it runs, past assignments, wrappers, options, and a package manager's
  * `run`: `npm publish`, `wrangler deploy`, `bun run deploy`, or a release
@@ -330,9 +357,8 @@ function namesShipping(command: string): boolean {
     .map(word => word.replace(/['"]/g, ""));
   while (words.length > 0 && (/^\w+=/.test(words[0]!) || WRAPPERS.has(words[0]!))) words = words.slice(1);
   if (words.length === 0 || NEUTRAL_COMMANDS.has(words[0]!)) return false;
-  // Options can come before a subcommand (`npm --prefix web publish`), so read the first non-option words.
-  const plain = words.filter(word => !word.startsWith("-"));
-  return shippingWords(plain).some(word => SHIPPING_WORD.test(word));
+  // Options can come before a subcommand (`npm --prefix web publish`), so read the first words that are neither options nor their values.
+  return shippingWords(plainWords(words)).some(word => SHIPPING_WORD.test(word));
 }
 
 /**
@@ -345,8 +371,8 @@ function shippingWords(plain: string[]): string[] {
   if (!RUNNERS.has(plain[0]!)) return plain.slice(0, 4);
   const at = plain.findIndex((word, index) => index > 0 && ["run", "x", "exec", "dlx"].includes(word));
   if (at === -1) {
-    // Option values can come before the subcommand (`npm --prefix web publish`), so read up to one that only manages
-    // packages, whose arguments are package names (`npm install semantic-release`).
+    // Unknown options' values can come before the subcommand (`npm --loglevel warn publish`), so read up to one that
+    // only manages packages, whose arguments are package names (`npm install semantic-release`).
     const stop = plain.findIndex((word, index) => index > 0 && PACKAGE_SUBCOMMANDS.has(word));
     return plain.slice(1, stop === -1 ? undefined : stop);
   }

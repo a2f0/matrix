@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { type Checkout, excludeManaged, openCheckout, sourceGlobs, TEST_PATH, workflows } from "./auditCheckout";
 import { type CheckoutStatus, redact } from "./checkouts";
 import { typescriptGuarded } from "./cycleGuards";
@@ -76,16 +78,34 @@ function installedPushHook(checkout: Checkout): unknown {
 }
 
 /**
+ * The tracked `pre-push` Git runs from a `core.hooksPath` inside the worktree,
+ * such as `.githooks/pre-push`, other than the push gate's own path. Only the
+ * repository's config counts: matrix's Git calls override the setting, and a
+ * path in `.git` holds installed copies, not tracked hooks.
+ */
+function configuredPushHook(checkout: Checkout): string | undefined {
+  const configured = git(checkout.directory, ["config", "--local", "--type=path", "--get", "core.hooksPath"]);
+  if (configured.status !== 0 || configured.stdout === "") return undefined;
+  const real = (file: string) => (existsSync(file) ? realpathSync(file) : file);
+  const directory = path.relative(real(checkout.directory), real(path.resolve(checkout.directory, configured.stdout)));
+  if (directory.startsWith("..") || path.isAbsolute(directory) || directory.split(path.sep)[0] === ".git") return undefined;
+  const hook = path.posix.join(directory.split(path.sep).join("/"), "pre-push");
+  return hook !== PUSH_GATE_HOOK && checkout.tracked(hook).length > 0 ? hook : undefined;
+}
+
+/**
  * What files alone show is wrong with a pre-push hook, before asking
  * agent-tool, which reads only the push gate's path: `hooks.files` installing
- * an untracked source or one from elsewhere, or a hook manager's hook.
+ * an untracked source or one from elsewhere, a hook manager's hook, or one
+ * that `core.hooksPath` runs from the worktree.
  */
 function localPushHookProblem(checkout: Checkout): string | undefined {
   const installed = installedPushHook(checkout);
   const fix = `replace it with \`agent-tool push-gate hook\` at ${PUSH_GATE_HOOK}`;
   if (typeof installed === "string" && checkout.tracked(installed).length === 0)
     return `hooks.files installs ${installed} as pre-push, but it is not tracked; ${installed === PUSH_GATE_HOOK ? "commit the output of `agent-tool push-gate hook` there" : fix}`;
-  const other = typeof installed === "string" && installed !== PUSH_GATE_HOOK ? installed : checkout.tracked(".husky/pre-push")[0];
+  const other =
+    typeof installed === "string" && installed !== PUSH_GATE_HOOK ? installed : (checkout.tracked(".husky/pre-push")[0] ?? configuredPushHook(checkout));
   return other === undefined ? undefined : `${other} is a pre-push hook outside the push gate; ${fix}`;
 }
 
@@ -148,7 +168,10 @@ function defaultBranchCi(checkout: Checkout): string | undefined {
 /** Whether a checkout has a pre-push hook or a declared push gate, so the audit spawns `push-gate check` only where it can find something. */
 function hasPushHook(checkout: Checkout): boolean {
   return (
-    installedPushHook(checkout) !== undefined || "pushGate" in (checkout.agentToolJson ?? {}) || checkout.tracked(PUSH_GATE_HOOK, ".husky/pre-push").length > 0
+    installedPushHook(checkout) !== undefined ||
+    "pushGate" in (checkout.agentToolJson ?? {}) ||
+    checkout.tracked(PUSH_GATE_HOOK, ".husky/pre-push").length > 0 ||
+    configuredPushHook(checkout) !== undefined
   );
 }
 

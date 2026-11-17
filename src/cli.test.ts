@@ -331,6 +331,8 @@ test("summarizes agent-tool's push-gate and base-health reports", () => {
         findings: [
           { kind: "test", runner: "bun test", chain: ["package.json scripts.test: bun test", "bun test"] },
           { kind: "install", runner: "bun install", chain: ["bun install"] },
+          { kind: "build", runner: "vite build", chain: ["vite build"] },
+          { kind: "lint", runner: "eslint", chain: ["eslint"] },
         ],
         errors: [],
       },
@@ -341,6 +343,9 @@ test("summarizes agent-tool's push-gate and base-health reports", () => {
     problems: [
       "Step 'tests' runs a test run (bun test) under allowSlow; move it to CI",
       "Step 'tests' runs a dependency install (bun install) under allowSlow; move it to CI",
+      "Step 'tests' runs a build (vite build) under allowSlow; move it to CI",
+      // A kind a later agent-tool adds keeps its own name.
+      "Step 'tests' runs a lint (eslint) under allowSlow; move it to CI",
     ],
   });
 
