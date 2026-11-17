@@ -1,3 +1,4 @@
+import path from "node:path";
 import { type Gh, runGh } from "./gh";
 import { object } from "./packageJson";
 
@@ -743,6 +744,22 @@ export function ungatedShippingJobs(workflow: unknown, required: string[], branc
     const name = jobName(id, job);
     if (job.if === false || !SHIPPING_JOB.test(`${id} ${name}`) || waitsForChecks(jobs, id, required)) return [];
     return [name === id ? id : `${id} (${name})`];
+  });
+}
+
+/**
+ * The repository's own reusable workflows that a push to `branch` can call
+ * from a parsed workflow before any validation: each `uses: ./<path>` job not
+ * skipped there that waits for no validation, with its called path. The
+ * called workflow's jobs run in that push, so they can ship without waiting.
+ */
+export function ungatedCalls(workflow: unknown, required: string[], branch = "main"): Array<{ job: string; path: string }> {
+  const jobs = pushedJobs(object(workflow), branch);
+  return Object.entries(jobs).flatMap(([id, value]) => {
+    const job = object(value) ?? {};
+    const uses = job.uses;
+    if (job.if === false || typeof uses !== "string" || !uses.startsWith("./") || waitsForChecks(jobs, id, required)) return [];
+    return [{ job: id, path: path.posix.normalize(uses) }];
   });
 }
 

@@ -933,6 +933,29 @@ describe("audit", () => {
     // Workflows that pushes to the default branch never start are out of scope.
     expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on:\n  push:\n    branches: [staging]")).toBeUndefined();
     expect(deploys(`  deploy:\n${step("wrangler deploy")}`, "on: workflow_dispatch")).toBeUndefined();
+    // A push also runs the jobs of the repository's reusable workflows it calls.
+    const called = (caller: string, callee: string) =>
+      failures(
+        checkout(`called-${Bun.hash(caller + callee)}`, {
+          ...config,
+          ".github/workflows/ci.yml": `name: CI\non:\n  push:\n    branches: [main]\njobs:\n${caller}`,
+          ".github/workflows/backend.yml": `name: Backend\non: workflow_call\njobs:\n${callee}`,
+        }),
+        ["deploys-need-checks"],
+      )["deploys-need-checks"];
+    const calls = (fields = "") => `  backend:\n${fields}    uses: ./.github/workflows/backend.yml\n`;
+    const deploy = `  deploy:\n${step("wrangler deploy")}`;
+    const message = ".github/workflows/ci.yml backend → .github/workflows/backend.yml deploy starts without needing a required check or a job that runs tests";
+    expect(called(calls(), deploy)).toBe(message);
+    // A cycle of calls reports each job once.
+    expect(called(calls(), `  again:\n    uses: ./.github/workflows/ci.yml\n${deploy}`)).toBe(message);
+    for (const [caller, callee] of [
+      [calls(), `  test:\n${step("bun test")}  deploy:\n    needs: test\n${step("wrangler deploy")}`],
+      [`  tests:\n${step("bun test")}${calls("    needs: tests\n")}`, deploy],
+      [calls("    if: github.event_name == 'pull_request'\n"), deploy],
+      ["  remote:\n    uses: a2f0/other/.github/workflows/backend.yml@v1\n", deploy],
+    ])
+      expect(called(caller!, callee!)).toBeUndefined();
   });
 
   test("rejects unknown rules", () => {
