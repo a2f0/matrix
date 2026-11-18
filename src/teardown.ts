@@ -53,8 +53,16 @@ export function isAgentToolTeardown(value: unknown): value is AgentToolTeardown 
   const report = object(value);
   return (
     typeof report?.ok === "boolean" &&
-    [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray)
+    [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray) &&
+    // Optional, since agent-tool before 0.1.65 reports neither; when present, every entry must be readable.
+    (report.sessionShells === undefined || (Array.isArray(report.sessionShells) && report.sessionShells.every(isSessionShell))) &&
+    (report.notes === undefined || (Array.isArray(report.notes) && report.notes.every(note => typeof note === "string")))
   );
+}
+
+function isSessionShell(value: unknown): boolean {
+  const shell = object(value);
+  return Number.isInteger(shell?.pid) && typeof shell?.ageSeconds === "number" && Number.isFinite(shell.ageSeconds) && typeof shell.shell === "string";
 }
 
 const name = (item: { id: string; label: string | null }) => (item.label ? `${item.label} (${item.id})` : item.id);
@@ -86,13 +94,13 @@ export function teardownAll(
   inspect: (path: string, apply: boolean) => AgentToolTeardown,
   apply: boolean,
 ): Teardown {
-  const shells = new Map<number, string>();
-  const notes = new Set<string>();
+  // Each inspection sees the same session, so the latest successful one is the current picture;
+  // merging them would keep shells that exited during the scan.
+  let session: Pick<AgentToolTeardown, "sessionShells" | "notes"> = {};
   const repos = targets.map(({ repo, path }) => {
     try {
       const report = inspect(path, apply);
-      for (const shell of report.sessionShells ?? []) shells.set(shell.pid, describeShell(shell));
-      for (const note of report.notes ?? []) notes.add(note);
+      session = report;
       return summarize(repo, path, report);
     } catch (error) {
       return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [errorMessage(error)] };
@@ -102,8 +110,8 @@ export function teardownAll(
     ok: repos.every(item => item.ok),
     applied: apply,
     repos,
-    sessionShells: [...shells].sort(([a], [b]) => a - b).map(([, text]) => text),
-    notes: [...notes],
+    sessionShells: [...(session.sessionShells ?? [])].sort((a, b) => a.pid - b.pid).map(describeShell),
+    notes: [...new Set(session.notes ?? [])],
   };
 }
 
