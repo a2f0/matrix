@@ -2,7 +2,7 @@ import { beforeEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { MINIMUM_AGENT_TOOL } from "./audit";
+import { MINIMUM_AGENT_TOOL, RULES } from "./audit";
 import { main, parseBaseHealthReport, parsePushGateReport, type Services } from "./cli";
 import { checkoutFixture, gitIn, gitInit, tempDir } from "./testFixtures";
 
@@ -120,7 +120,7 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(markdown).toContain(
     "1. Free disk space before the next sweep: 31 GiB free of 926 GiB; validation needs at least 50 GiB; `bun run space` lists what is safe to remove.",
   );
-  expect(markdown).toContain("- Audit (25 rules): `agent-tool-latest` fails in 1; a2f0/missing not audited.");
+  expect(markdown).toContain(`- Audit (${RULES.length} rules): \`agent-tool-latest\` fails in 1; a2f0/missing not audited.`);
   expect(markdown).toContain("- Discovery: 1 new repository, 0 no longer found.");
   // Only present checkouts are asked about; a2f0/missing has none.
   expect(markdown).toContain("- Default branches: 1 green.");

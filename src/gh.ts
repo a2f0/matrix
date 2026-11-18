@@ -1,11 +1,14 @@
 import { spawnSync } from "node:child_process";
+import { gitEnvironment } from "./git";
 
 /** Runs gh with arguments and returns its stdout; tests replace it. */
 export type Gh = (args: string[]) => string;
 
 /** Run gh without a terminal, throwing on failure. */
-export function runGh(args: string[]): string {
-  const result = spawnSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+export function runGh(args: string[], cwd?: string): string {
+  const env = cwd === undefined ? undefined : gitEnvironment();
+  if (env) delete env.GH_REPO;
+  const result = spawnSync("gh", args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.error) throw new Error(`Could not run gh: ${result.error.message}`);
   if (result.status !== 0) {
     // gh can quote the file it was setting from, so a failed set reports no output.

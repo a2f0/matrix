@@ -22,6 +22,7 @@ first and check `branch` for checkouts that are not on their default branch.
 
 | Rule | Checks | Defined in |
 | --- | --- | --- |
+| `script-relative-paths` | Tracked `*.sh` wrappers under `scripts/` that immediately use the caller's Git root to exec a tracked helper | [Script locations](tooling.md#script-locations) |
 | `agents-md` | A tracked root `AGENTS.md` | [Onboarding](../AGENTS.md#onboarding-a-repository) step 4 |
 | `agents-md-size` | Every tracked `AGENTS.md`, at any depth, has at most 20,000 characters | [Agent guidance](tooling.md#agent-guidance) |
 | `no-claude-md` | No tracked `CLAUDE.md` at any depth | [Onboarding](../AGENTS.md#onboarding-a-repository) step 4 |

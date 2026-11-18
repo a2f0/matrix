@@ -353,7 +353,35 @@ const ONBOARDING = "AGENTS.md#onboarding-a-repository";
 /** Hermes truncates a context file past this many characters (Unicode code points), dropping its middle. */
 export const AGENTS_MD_MAX_CHARS = 20_000;
 
+/** The literal executable in a wrapper that immediately forwards through the caller's Git root. */
+function forwardedScript(source: string): string | undefined {
+  const commands = source
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith("#") && !/^set\s+-[a-zA-Z]+(?:\s+pipefail)?$/.test(line));
+  const root = /^(\w+)="?\$\(git\s+rev-parse\s+--show-toplevel\)"?(?:\s*\|\|\s*exit(?:\s+\d+)?)?(?:\s+#.*)?$/.exec(commands[0] ?? "");
+  if (!root) return undefined;
+  const helper = /^exec\s+("?)\$(?:\{(\w+)\}|(\w+))\/([\w./-]+)\1(?:\s|$)/.exec(commands[1] ?? "");
+  if (!helper?.[4] || root[1] !== (helper[2] ?? helper[3])) return undefined;
+  const target = path.posix.normalize(helper[4]);
+  return /^(?:\.\.(?:\/|$)|\/)/.test(target) ? undefined : target;
+}
+
 export const RULES: readonly Rule[] = [
+  {
+    id: "script-relative-paths",
+    summary: "Shell wrappers locate their helper from the owning checkout",
+    source: "docs/tooling.md#script-locations",
+    check: checkout => {
+      const wrappers = checkout.tracked(":(glob)**/scripts/**/*.sh", ...excludeManaged(checkout)).filter(file => {
+        if (TEST_PATH.test(file)) return false;
+        const target = forwardedScript(checkout.read(file) ?? "");
+        if (!target) return false;
+        return checkout.tracked(`:(literal)${target}`).includes(target);
+      });
+      return wrappers.length ? fail(`resolve the helper from the script location in ${wrappers.join(", ")}`) : pass;
+    },
+  },
   {
     id: "agents-md",
     summary: "AGENTS.md holds the repository's agent guidance",
