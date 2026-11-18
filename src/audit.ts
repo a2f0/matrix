@@ -364,11 +364,12 @@ export const RULES: readonly Rule[] = [
         const commands = (checkout.read(file) ?? "")
           .split("\n")
           .map(line => line.trim())
-          .filter(line => line && !line.startsWith("#") && !/^set -/.test(line));
+          .filter(line => line && !line.startsWith("#") && !/^set\s+-[a-zA-Z]+(?:\s+pipefail)?$/.test(line));
         const root = /^(\w+)="?\$\(git\s+rev-parse\s+--show-toplevel\)"?(?:\s*\|\|\s*exit(?:\s+\d+)?)?$/.exec(commands[0] ?? "");
         if (!root) return false;
-        const helper = /^exec\s+"?\$(?:\{(\w+)\}|(\w+))\//.exec(commands[1] ?? "");
-        return root[1] === (helper?.[1] ?? helper?.[2]);
+        const helper = /^exec\s+"?\$(?:\{(\w+)\}|(\w+))\/([\w./-]+)(?=["\s]|$)/.exec(commands[1] ?? "");
+        const target = helper?.[3];
+        return !!target && root[1] === (helper[1] ?? helper[2]) && checkout.tracked(`:(literal)${target}`).includes(target);
       });
       return wrappers.length ? fail(`resolve the helper from the script location in ${wrappers.join(", ")}`) : pass;
     },
