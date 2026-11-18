@@ -43,7 +43,19 @@ test("audit exits zero only when every selected checkout passes", () => {
 
 /** Services that record output and stand in for GitHub and the registry. */
 const GIB = 1024 ** 3;
-const CLEAN_TEARDOWN = { ok: true, leftover: [], kept: [], stopped: [], untracked: [], worktrees: [], unavailable: [], skipped: [] };
+// What agent-tool 0.1.65 or later reports when nothing is left and no session shell runs.
+const CLEAN_TEARDOWN = {
+  ok: true,
+  leftover: [],
+  kept: [],
+  stopped: [],
+  untracked: [],
+  worktrees: [],
+  unavailable: [],
+  skipped: [],
+  sessionShells: [],
+  notes: [],
+};
 
 const SSH_ONLY = { ghProtocol: "ssh", credentialHelpers: [], ssh: { hostname: "ssh.github.com", port: 443 }, problems: [] };
 

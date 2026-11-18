@@ -96,7 +96,7 @@ export function teardownAll(
 ): Teardown {
   // Each inspection sees the same session, so the latest successful one is the current picture;
   // merging them would keep shells that exited during the scan.
-  let session: Pick<AgentToolTeardown, "sessionShells" | "notes"> = {};
+  let session: Pick<AgentToolTeardown, "sessionShells" | "notes"> | undefined;
   const repos = targets.map(({ repo, path }) => {
     try {
       const report = inspect(path, apply);
@@ -111,9 +111,16 @@ export function teardownAll(
     ok: repos.every(item => item.ok),
     applied: apply,
     repos,
-    sessionShells: [...(session.sessionShells ?? [])].sort((a, b) => a.pid - b.pid).map(describeShell),
-    notes: [...new Set(session.notes ?? [])],
+    sessionShells: [...(session?.sessionShells ?? [])].sort((a, b) => a.pid - b.pid).map(describeShell),
+    notes: sessionNotes(session),
   };
+}
+
+/** The latest snapshot's notes, or why there is no list: an empty one would read as no shells. */
+function sessionNotes(session: Pick<AgentToolTeardown, "sessionShells" | "notes"> | undefined): string[] {
+  if (session === undefined) return ["no inspection succeeded, so this session's background shells are unknown"];
+  if (session.sessionShells === undefined) return ["this agent-tool reports no session shells (0.1.65 or later does)"];
+  return [...new Set(session.notes ?? [])];
 }
 
 /** One session shell as `pid <pid> <shell>, running <age>`; agent-tool never reports its arguments. */

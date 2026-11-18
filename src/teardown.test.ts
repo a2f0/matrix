@@ -48,8 +48,22 @@ test("lists the session's background shells once, without failing teardown", () 
   const kept = teardownAll(targets.slice(0, 2), () => malformed.shift()!(), false);
   expect(kept.repos.map(item => item.ok)).toEqual([true, false]);
   expect(kept.sessionShells).toEqual(["pid 7 bash, running 1m", "pid 42 zsh, running 2h 5m"]);
-  // An agent-tool older than 0.1.65 reports neither field, and the harness may be unknown.
-  expect(teardownAll([targets[0]!], () => base, false)).toMatchObject({ ok: true, sessionShells: [], notes: [] });
+  // An agent-tool older than 0.1.65 reports neither field, and with no successful inspection
+  // nothing is known; each says so, since an empty list would read as no shells.
+  expect(teardownAll([targets[0]!], () => base, false)).toMatchObject({
+    ok: true,
+    sessionShells: [],
+    notes: ["this agent-tool reports no session shells (0.1.65 or later does)"],
+  });
+  expect(teardownAll([], () => base, false).notes).toEqual(["no inspection succeeded, so this session's background shells are unknown"]);
+  const failed = teardownAll(
+    [targets[0]!],
+    () => {
+      throw new Error("spawn failed");
+    },
+    false,
+  );
+  expect(failed.notes).toEqual(["no inspection succeeded, so this session's background shells are unknown"]);
   const missing = teardownAll([targets[0]!], () => ({ ...base, sessionShells: [], notes: ["no agent harness found"] }), false);
   expect(missing.notes).toEqual(["no agent harness found"]);
 });
