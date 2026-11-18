@@ -58,8 +58,10 @@ under `scripts/` or invent empty directories to match this table.
 A repository-owned script must find its own files when invoked by relative path
 from either the checkout or matrix. Anchor those paths to the script's location.
 In Bash, for example, a script two directories below the root can use
-`root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"`.
-In Bun use `import.meta.dir`. Give child processes that need repository context
+`root="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"`.
+The example handles paths through symlinked working directories. If a project
+ships a symlink to the script itself, resolve its target and test that entrypoint
+as well. In Bun use `import.meta.dir`. Give child processes that need repository context
 an explicit working directory. Keep user-supplied relative paths and tools that
 intentionally act on the caller's repository consistent with their documented
 meaning. Test both invocations, using a stub for commands with external effects.

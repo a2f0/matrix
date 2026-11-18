@@ -84,6 +84,7 @@ describe("audit", () => {
     const forward = `ROOT="$(git rev-parse --show-toplevel)"\nexec "\${ROOT}/scripts/website.sh" "$@"`;
     const repo = checkout("paths", {
       "packages/site/scripts/deploy/prod.sh": `#!/bin/bash\n# Deploy production\nset -euo pipefail\n${forward}`,
+      "scripts/deploy/options.sh": `set -eu # exit on error\n${forward.replace("exec ", "exec -- ")}`,
       "scripts/deploy/guarded.sh": forward.replace("\n", " || exit 1 # stop on failure\n"),
       "scripts/deploy/staging.sh": 'ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"\nexec "$ROOT/scripts/website.sh"',
       "scripts/website.sh": "#!/bin/sh\nexit 0",
@@ -95,7 +96,7 @@ describe("audit", () => {
       "scripts/testing/fixtures/prod.sh": forward,
     });
     expect(failures(repo, ["script-relative-paths"])).toEqual({
-      "script-relative-paths": "resolve the helper from the script location in packages/site/scripts/deploy/prod.sh, scripts/deploy/guarded.sh",
+      "script-relative-paths": "resolve the helper from the script location in packages/site/scripts/deploy/prod.sh, scripts/deploy/guarded.sh, scripts/deploy/options.sh",
     });
   });
 

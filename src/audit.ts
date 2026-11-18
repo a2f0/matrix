@@ -358,10 +358,10 @@ function forwardedScript(source: string): string | undefined {
   const commands = source
     .split("\n")
     .map(line => line.trim())
-    .filter(line => line && !line.startsWith("#") && !/^set\s+-[a-zA-Z]+(?:\s+pipefail)?$/.test(line));
+    .filter(line => line && !line.startsWith("#") && !/^set\s+-[a-zA-Z]+(?:\s+pipefail)?(?:\s+#.*)?$/.test(line));
   const root = /^(\w+)="?\$\(git\s+rev-parse\s+--show-toplevel\)"?(?:\s*\|\|\s*exit(?:\s+\d+)?)?(?:\s+#.*)?$/.exec(commands[0] ?? "");
   if (!root) return undefined;
-  const helper = /^exec\s+("?)\$(?:\{(\w+)\}|(\w+))\/([\w./-]+)\1(?:\s|$)/.exec(commands[1] ?? "");
+  const helper = /^exec\s+(?:--\s+)?("?)\$(?:\{(\w+)\}|(\w+))\/([\w./-]+)\1(?:\s|$)/.exec(commands[1] ?? "");
   if (!helper?.[4] || root[1] !== (helper[2] ?? helper[3])) return undefined;
   const target = path.posix.normalize(helper[4]);
   return /^(?:\.\.(?:\/|$)|\/)/.test(target) ? undefined : target;
