@@ -165,6 +165,8 @@ test("teardown inspects the workspace and each present checkout, and exits 1 whi
         problems: [],
       },
     ],
+    sessionShells: [],
+    notes: [],
   });
   calls.length = 0;
   writes.length = 0;

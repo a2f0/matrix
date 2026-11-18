@@ -57,7 +57,12 @@ agent-tool and `--repo`. It lists processes recorded with `agent-tool proc
 start` that still run, untracked processes inside a repository that listen on a
 port, kept processes, and added worktrees, and exits 1 while anything remains or
 an inspection fails. `--apply` stops recorded processes that were not started
-with `--keep`; untracked processes and worktrees are only reported. Inside a
+with `--keep`; untracked processes and worktrees are only reported. It also
+lists, once, the agent session's background shells still running
+(`sessionShells`: pid, shell, and age, never their scripts). They never fail
+teardown or get stopped, since one may be another delegate's live work, but a
+coordinator finishing a sweep should find none it or its delegates started:
+stop any that remain by pid. Inside a
 single checkout, `agent-tool teardown` is the same check, and the shared
 `ship-pr`, `open-pr`, and `reset` skills run it before reporting work done, in
 every harness.

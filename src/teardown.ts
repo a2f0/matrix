@@ -16,6 +16,9 @@ export interface AgentToolTeardown {
   worktrees: Array<{ path: string; branch: string | null }>;
   unavailable: string[];
   skipped: Array<{ file: string }>;
+  /** The agent session's background `-c` shells still running (agent-tool 0.1.65+); never their arguments. */
+  sessionShells?: Array<{ pid: number; ageSeconds: number; shell: string; chars: number }>;
+  notes?: string[];
 }
 
 interface RepoTeardown {
@@ -36,6 +39,13 @@ export interface Teardown {
   readonly ok: boolean;
   readonly applied: boolean;
   readonly repos: RepoTeardown[];
+  /**
+   * The agent session's background shells still running, listed once: every inspection runs
+   * from this process, so each one sees the same session. Informational; they never fail
+   * teardown and are never stopped, since a sibling may be another agent's live work.
+   */
+  readonly sessionShells: string[];
+  readonly notes: string[];
 }
 
 /** Whether parsed JSON has the shape of agent-tool's teardown report, checked as far as matrix reads it. */
@@ -76,14 +86,32 @@ export function teardownAll(
   inspect: (path: string, apply: boolean) => AgentToolTeardown,
   apply: boolean,
 ): Teardown {
+  const shells = new Map<number, string>();
+  const notes = new Set<string>();
   const repos = targets.map(({ repo, path }) => {
     try {
-      return summarize(repo, path, inspect(path, apply));
+      const report = inspect(path, apply);
+      for (const shell of report.sessionShells ?? []) shells.set(shell.pid, describeShell(shell));
+      for (const note of report.notes ?? []) notes.add(note);
+      return summarize(repo, path, report);
     } catch (error) {
       return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [errorMessage(error)] };
     }
   });
-  return { ok: repos.every(item => item.ok), applied: apply, repos };
+  return {
+    ok: repos.every(item => item.ok),
+    applied: apply,
+    repos,
+    sessionShells: [...shells].sort(([a], [b]) => a - b).map(([, text]) => text),
+    notes: [...notes],
+  };
+}
+
+/** One session shell as `pid <pid> <shell>, running <age>`; agent-tool never reports its arguments. */
+function describeShell(shell: { pid: number; ageSeconds: number; shell: string }): string {
+  const minutes = Math.floor(shell.ageSeconds / 60);
+  const age = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+  return `pid ${shell.pid} ${shell.shell}, running ${age}`;
 }
 
 /** Repositories still running something work left behind, for health. */

@@ -121,6 +121,8 @@ test("reports leftover processes, Git transport, unaudited checkouts, and lost r
     repos: [
       { repo: "a2f0/one", path: "checkouts/one", ok: false, leftover: ["dev server"], listeners: [], kept: [], stopped: [], worktrees: [], problems: [] },
     ],
+    sessionShells: [],
+    notes: [],
   };
   const health = assessHealth({
     statuses: [status("a2f0/one"), status("a2f0/two", { agentTool: { pinned: "0.1.21", installed: "0.1.19", current: false } })],
@@ -174,7 +176,7 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
     audit: { ...cleanAudit, checkouts: [{ repo: "a2f0/one", path: "checkouts/one", error: "unreadable", failed: [], skipped: [] }] },
     retro: quietRetro,
     discovery: { added: [], notDiscovered: [] },
-    running: { ok: true, applied: false, repos: [] },
+    running: { ok: true, applied: false, repos: [], sessionShells: [], notes: [] },
     git: { ghProtocol: "ssh", credentialHelpers: [], ssh: { hostname: "ssh.github.com", port: 443 }, problems: [] },
   });
   expect(markdownHealth(health, new Date("2026-10-28T12:00:00Z"))).toBe(
