@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { isAgentToolTeardown, teardownAll } from "./teardown";
+import { type AgentToolTeardown, isAgentToolTeardown, teardownAll } from "./teardown";
 
 test("reports a failed inspection's message, whatever was thrown", () => {
   const thrown: unknown[] = [new Error("agent-tool teardown could not run: ENOENT"), "spawn failed"];
@@ -17,8 +17,72 @@ test("reports a failed inspection's message, whatever was thrown", () => {
   expect(result.repos.map(item => item.problems)).toEqual([["agent-tool teardown could not run: ENOENT"], ["spawn failed"]]);
 });
 
+test("lists the session's background shells once, without failing teardown", () => {
+  const base = { ok: true, leftover: [], kept: [], stopped: [], untracked: [], worktrees: [], unavailable: [], skipped: [] };
+  const shells = [
+    { pid: 42, ageSeconds: 7_530, shell: "zsh", chars: 900 },
+    { pid: 7, ageSeconds: 95, shell: "bash", chars: 40 },
+  ];
+  // The latest successful inspection is the current picture: pid 42 exited between the first and
+  // second, and the third inspection failing does not erase what the second saw.
+  const reports: Array<() => AgentToolTeardown> = [
+    () => ({ ...base, sessionShells: shells, notes: [] }),
+    () => ({ ...base, sessionShells: [shells[1]!], notes: [] }),
+    () => {
+      throw new Error("agent-tool teardown could not run: ENOENT");
+    },
+  ];
+  const targets = ["one", "two", "three"].map(name => ({ repo: `a2f0/${name}`, path: `/${name}` }));
+  const result = teardownAll(targets, () => reports.shift()!(), false);
+  expect(result.ok).toBe(false);
+  expect(result.repos.map(item => item.ok)).toEqual([true, true, false]);
+  expect(result.sessionShells).toEqual(["pid 7 bash, running 1m"]);
+  expect(result.notes).toEqual([]);
+  const ordered = teardownAll([targets[0]!], () => ({ ...base, sessionShells: [...shells].reverse(), notes: [] }), false);
+  expect(ordered.sessionShells).toEqual(["pid 7 bash, running 1m", "pid 42 zsh, running 2h 5m"]);
+  // A report that fails to summarize is a failed inspection and leaves the snapshot alone.
+  const malformed = [
+    () => ({ ...base, sessionShells: shells, notes: [] }),
+    () => ({ ...base, worktrees: [null], sessionShells: [], notes: [] }) as unknown as AgentToolTeardown,
+  ];
+  const kept = teardownAll(targets.slice(0, 2), () => malformed.shift()!(), false);
+  expect(kept.repos.map(item => item.ok)).toEqual([true, false]);
+  expect(kept.sessionShells).toEqual(["pid 7 bash, running 1m", "pid 42 zsh, running 2h 5m"]);
+  // An agent-tool older than 0.1.65 reports neither field, and with no successful inspection
+  // nothing is known; each says so, since an empty list would read as no shells.
+  expect(teardownAll([targets[0]!], () => base, false)).toMatchObject({
+    ok: true,
+    sessionShells: [],
+    notes: ["this agent-tool reports no session shells (0.1.65 or later does)"],
+  });
+  expect(teardownAll([], () => base, false).notes).toEqual(["no inspection succeeded, so this session's background shells are unknown"]);
+  const failed = teardownAll(
+    [targets[0]!],
+    () => {
+      throw new Error("spawn failed");
+    },
+    false,
+  );
+  expect(failed.notes).toEqual(["no inspection succeeded, so this session's background shells are unknown"]);
+  const missing = teardownAll([targets[0]!], () => ({ ...base, sessionShells: [], notes: ["no agent harness found"] }), false);
+  expect(missing.notes).toEqual(["no agent harness found"]);
+});
+
 test("accepts only a report with the fields matrix reads", () => {
   const report = { ok: true, leftover: [], kept: [], stopped: [], untracked: [], worktrees: [], unavailable: [], skipped: [] };
   expect(isAgentToolTeardown(report)).toBe(true);
   for (const value of [null, [], "ok", { ...report, ok: "yes" }, { ...report, leftover: undefined }]) expect(isAgentToolTeardown(value)).toBe(false);
+  // sessionShells and notes are optional, but readable when present.
+  const shell = { pid: 7, ageSeconds: 95, shell: "bash", chars: 40 };
+  expect(isAgentToolTeardown({ ...report, sessionShells: [shell], notes: ["a note"] })).toBe(true);
+  for (const malformed of [
+    { sessionShells: [null] },
+    { sessionShells: "zsh" },
+    { sessionShells: [{ ...shell, pid: "7" }] },
+    { sessionShells: [{ ...shell, ageSeconds: Number.NaN }] },
+    { sessionShells: [{ pid: 7, ageSeconds: 95 }] },
+    { notes: [1] },
+    { notes: "a note" },
+  ])
+    expect(isAgentToolTeardown({ ...report, ...malformed })).toBe(false);
 });

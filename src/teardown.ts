@@ -16,6 +16,9 @@ export interface AgentToolTeardown {
   worktrees: Array<{ path: string; branch: string | null }>;
   unavailable: string[];
   skipped: Array<{ file: string }>;
+  /** The agent session's background `-c` shells still running (agent-tool 0.1.65+); never their arguments. */
+  sessionShells?: Array<{ pid: number; ageSeconds: number; shell: string }>;
+  notes?: string[];
 }
 
 interface RepoTeardown {
@@ -36,6 +39,13 @@ export interface Teardown {
   readonly ok: boolean;
   readonly applied: boolean;
   readonly repos: RepoTeardown[];
+  /**
+   * The agent session's background shells still running, listed once: every inspection runs
+   * from this process, so each one sees the same session. Informational; they never fail
+   * teardown and are never stopped, since a sibling may be another agent's live work.
+   */
+  readonly sessionShells: string[];
+  readonly notes: string[];
 }
 
 /** Whether parsed JSON has the shape of agent-tool's teardown report, checked as far as matrix reads it. */
@@ -43,8 +53,16 @@ export function isAgentToolTeardown(value: unknown): value is AgentToolTeardown 
   const report = object(value);
   return (
     typeof report?.ok === "boolean" &&
-    [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray)
+    [report.leftover, report.kept, report.stopped, report.untracked, report.worktrees, report.unavailable, report.skipped].every(Array.isArray) &&
+    // Optional, since agent-tool before 0.1.65 reports neither; when present, every entry must be readable.
+    (report.sessionShells === undefined || (Array.isArray(report.sessionShells) && report.sessionShells.every(isSessionShell))) &&
+    (report.notes === undefined || (Array.isArray(report.notes) && report.notes.every(note => typeof note === "string")))
   );
+}
+
+function isSessionShell(value: unknown): boolean {
+  const shell = object(value);
+  return Number.isInteger(shell?.pid) && typeof shell?.ageSeconds === "number" && Number.isFinite(shell.ageSeconds) && typeof shell.shell === "string";
 }
 
 const name = (item: { id: string; label: string | null }) => (item.label ? `${item.label} (${item.id})` : item.id);
@@ -76,14 +94,40 @@ export function teardownAll(
   inspect: (path: string, apply: boolean) => AgentToolTeardown,
   apply: boolean,
 ): Teardown {
+  // Each inspection sees the same session, so the latest successful one is the current picture;
+  // merging them would keep shells that exited during the scan.
+  let session: Pick<AgentToolTeardown, "sessionShells" | "notes"> | undefined;
   const repos = targets.map(({ repo, path }) => {
     try {
-      return summarize(repo, path, inspect(path, apply));
+      const report = inspect(path, apply);
+      const summary = summarize(repo, path, report);
+      session = report;
+      return summary;
     } catch (error) {
       return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [errorMessage(error)] };
     }
   });
-  return { ok: repos.every(item => item.ok), applied: apply, repos };
+  return {
+    ok: repos.every(item => item.ok),
+    applied: apply,
+    repos,
+    sessionShells: [...(session?.sessionShells ?? [])].sort((a, b) => a.pid - b.pid).map(describeShell),
+    notes: sessionNotes(session),
+  };
+}
+
+/** The latest snapshot's notes, or why there is no list: an empty one would read as no shells. */
+function sessionNotes(session: Pick<AgentToolTeardown, "sessionShells" | "notes"> | undefined): string[] {
+  if (session === undefined) return ["no inspection succeeded, so this session's background shells are unknown"];
+  if (session.sessionShells === undefined) return ["this agent-tool reports no session shells (0.1.65 or later does)"];
+  return [...new Set(session.notes ?? [])];
+}
+
+/** One session shell as `pid <pid> <shell>, running <age>`; agent-tool never reports its arguments. */
+function describeShell(shell: { pid: number; ageSeconds: number; shell: string }): string {
+  const minutes = Math.floor(shell.ageSeconds / 60);
+  const age = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+  return `pid ${shell.pid} ${shell.shell}, running ${age}`;
 }
 
 /** Repositories still running something work left behind, for health. */

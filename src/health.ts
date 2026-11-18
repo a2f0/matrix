@@ -59,8 +59,11 @@ export interface Health {
   readonly audit: { readonly rules: string[]; readonly failures: Record<string, string[]>; readonly unaudited: string[] };
   readonly discovery?: { added: string[]; notDiscovered: string[] };
   readonly disk?: DiskSpace & { readonly low: boolean };
-  /** Repositories where teardown fails: earlier work left something running, or could not be inspected. */
-  readonly running?: { readonly leftover: string[] };
+  /**
+   * Repositories where teardown fails (earlier work left something running, or could not be
+   * inspected), and the agent session's background shells still running, which are informational.
+   */
+  readonly running?: { readonly leftover: string[]; readonly sessionShells: string[]; readonly notes: string[] };
   /** Ways this machine's Git or gh can leave SSH for GitHub. */
   readonly git?: GitTransport;
   /** With --remote: default branches by CI result; `red` and `unknown` carry why. */
@@ -179,7 +182,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     },
     ...(inputs.discovery && { discovery: inputs.discovery }),
     ...(inputs.disk && { disk: { ...inputs.disk, low } }),
-    ...(inputs.running && { running: { leftover } }),
+    ...(inputs.running && { running: { leftover, sessionShells: inputs.running.sessionShells, notes: inputs.running.notes } }),
     ...(inputs.git && { git: inputs.git }),
     ...(inputs.defaultBranches && { defaultBranches: groupDefaultBranches(inputs.defaultBranches) }),
     sweeps: {
@@ -217,7 +220,13 @@ function gitLine(git: NonNullable<Health["git"]>): string {
 }
 
 function runningLine(running: NonNullable<Health["running"]>): string {
-  return `- Running: ${running.leftover.length === 0 ? "nothing left running" : `teardown fails in ${list(running.leftover)}`}.`;
+  const repos = running.leftover.length === 0 ? "repository teardown checks pass" : `teardown fails in ${list(running.leftover)}`;
+  const shells =
+    running.sessionShells.length === 0
+      ? ""
+      : `; this session still runs ${plural(running.sessionShells.length, "background shell")} (${running.sessionShells.join("; ")})`;
+  const notes = running.notes.length === 0 ? "" : ` (${running.notes.join("; ")})`;
+  return `- Running: ${repos}${shells}${notes}.`;
 }
 
 function discoveryLine(discovery: Health["discovery"]): string {

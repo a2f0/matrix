@@ -121,6 +121,8 @@ test("reports leftover processes, Git transport, unaudited checkouts, and lost r
     repos: [
       { repo: "a2f0/one", path: "checkouts/one", ok: false, leftover: ["dev server"], listeners: [], kept: [], stopped: [], worktrees: [], problems: [] },
     ],
+    sessionShells: [],
+    notes: [],
   };
   const health = assessHealth({
     statuses: [status("a2f0/one"), status("a2f0/two", { agentTool: { pinned: "0.1.21", installed: "0.1.19", current: false } })],
@@ -174,7 +176,7 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
     audit: { ...cleanAudit, checkouts: [{ repo: "a2f0/one", path: "checkouts/one", error: "unreadable", failed: [], skipped: [] }] },
     retro: quietRetro,
     discovery: { added: [], notDiscovered: [] },
-    running: { ok: true, applied: false, repos: [] },
+    running: { ok: true, applied: false, repos: [], sessionShells: [], notes: [] },
     git: { ghProtocol: "ssh", credentialHelpers: [], ssh: { hostname: "ssh.github.com", port: 443 }, problems: [] },
   });
   expect(markdownHealth(health, new Date("2026-10-28T12:00:00Z"))).toBe(
@@ -186,7 +188,7 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
       "- Checkouts: 1 of 1 ready; no stale installs; no unmanaged entries.",
       "- Audit (1 rule): every audited checkout passes; a2f0/one not audited.",
       "- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.",
-      "- Running: nothing left running.",
+      "- Running: repository teardown checks pass.",
       "- Discovery: matrix.json matches the owner's repositories.",
       "- Default branches: not checked; run with --remote.",
       "- Sweeps: 0 ledgers read; no unresolved recurring friction; nothing unfinished.",
@@ -196,6 +198,29 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
       "Nothing to do.",
       "",
     ].join("\n"),
+  );
+  // The session's background shells are informational: listed on the Running line, never a next step.
+  const shells = assessHealth({
+    statuses: [status("a2f0/one")],
+    unmanaged: [],
+    audit: cleanAudit,
+    retro: quietRetro,
+    running: { ok: true, applied: false, repos: [], sessionShells: ["pid 4242 zsh, running 1h 5m"], notes: [] },
+  });
+  const markdown = markdownHealth(shells, new Date("2026-10-28T12:00:00Z"));
+  expect(markdown).toContain("- Running: repository teardown checks pass; this session still runs 1 background shell (pid 4242 zsh, running 1h 5m).");
+  expect(markdown).not.toContain("Stop what earlier work left running");
+  // Notes, such as no harness found, say an empty list means unknown rather than none.
+  const unknown = assessHealth({
+    statuses: [status("a2f0/one")],
+    unmanaged: [],
+    audit: cleanAudit,
+    retro: quietRetro,
+    running: { ok: true, applied: false, repos: [], sessionShells: [], notes: ["no known agent harness above teardown"] },
+  });
+  expect(unknown.running).toEqual({ leftover: [], sessionShells: [], notes: ["no known agent harness above teardown"] });
+  expect(markdownHealth(unknown, new Date("2026-10-28T12:00:00Z"))).toContain(
+    "- Running: repository teardown checks pass (no known agent harness above teardown).",
   );
 });
 
