@@ -62,10 +62,11 @@ lists, once, the agent session's background shells still running
 (`sessionShells`: pid, shell, and age, never their scripts). They never fail
 teardown or get stopped, since one may be another delegate's live work, but a
 coordinator finishing a sweep should find none it or its delegates started.
-Before stopping one by pid, check with `ps -o pid=,ppid=,lstart=,comm= -p <pid>`
-that it is still that shell (same command name, parent, and start time) and
-yours, since a pid can be reused; those fields print no arguments, which may
-hold secrets. Notes say when no
+Before stopping one by pid, check with `ps -o ppid=,etime=,comm= -p <pid>` that
+it is still that shell, since a pid can be reused: the same shell name, an
+elapsed time matching the reported age, and your own harness as its parent
+(`echo $PPID` in your shell prints your harness's pid). Those fields print no
+arguments, which may hold secrets. Notes say when no
 agent harness was found, so an empty list there means unknown, not none. Inside a
 single checkout, `agent-tool teardown` is the same check, and the shared
 `ship-pr`, `open-pr`, and `reset` skills run it before reporting work done, in
