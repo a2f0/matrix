@@ -210,6 +210,18 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
   const markdown = markdownHealth(shells, new Date("2026-10-28T12:00:00Z"));
   expect(markdown).toContain("- Running: repository teardown checks pass; this session still runs 1 background shell (pid 4242 zsh, running 1h 5m).");
   expect(markdown).not.toContain("Stop what earlier work left running");
+  // Notes, such as no harness found, say an empty list means unknown rather than none.
+  const unknown = assessHealth({
+    statuses: [status("a2f0/one")],
+    unmanaged: [],
+    audit: cleanAudit,
+    retro: quietRetro,
+    running: { ok: true, applied: false, repos: [], sessionShells: [], notes: ["no known agent harness above teardown"] },
+  });
+  expect(unknown.running).toEqual({ leftover: [], sessionShells: [], notes: ["no known agent harness above teardown"] });
+  expect(markdownHealth(unknown, new Date("2026-10-28T12:00:00Z"))).toContain(
+    "- Running: repository teardown checks pass (no known agent harness above teardown).",
+  );
 });
 
 test("reports default-branch CI and asks for a red branch's repair before standards", () => {

@@ -63,7 +63,7 @@ export interface Health {
    * Repositories where teardown fails (earlier work left something running, or could not be
    * inspected), and the agent session's background shells still running, which are informational.
    */
-  readonly running?: { readonly leftover: string[]; readonly sessionShells: string[] };
+  readonly running?: { readonly leftover: string[]; readonly sessionShells: string[]; readonly notes: string[] };
   /** Ways this machine's Git or gh can leave SSH for GitHub. */
   readonly git?: GitTransport;
   /** With --remote: default branches by CI result; `red` and `unknown` carry why. */
@@ -182,7 +182,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     },
     ...(inputs.discovery && { discovery: inputs.discovery }),
     ...(inputs.disk && { disk: { ...inputs.disk, low } }),
-    ...(inputs.running && { running: { leftover, sessionShells: inputs.running.sessionShells } }),
+    ...(inputs.running && { running: { leftover, sessionShells: inputs.running.sessionShells, notes: inputs.running.notes } }),
     ...(inputs.git && { git: inputs.git }),
     ...(inputs.defaultBranches && { defaultBranches: groupDefaultBranches(inputs.defaultBranches) }),
     sweeps: {
@@ -225,7 +225,8 @@ function runningLine(running: NonNullable<Health["running"]>): string {
     running.sessionShells.length === 0
       ? ""
       : `; this session still runs ${plural(running.sessionShells.length, "background shell")} (${running.sessionShells.join("; ")})`;
-  return `- Running: ${repos}${shells}.`;
+  const notes = running.notes.length === 0 ? "" : ` (${running.notes.join("; ")})`;
+  return `- Running: ${repos}${shells}${notes}.`;
 }
 
 function discoveryLine(discovery: Health["discovery"]): string {
