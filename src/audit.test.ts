@@ -84,10 +84,11 @@ describe("audit", () => {
     const forward = `ROOT="$(git rev-parse --show-toplevel)"\nexec "\${ROOT}/scripts/website.sh" "$@"`;
     const repo = checkout("paths", {
       "packages/site/scripts/deploy/prod.sh": `#!/bin/bash\n# Deploy production\nset -euo pipefail\n${forward}`,
-      "scripts/deploy/guarded.sh": forward.replace("\n", " || exit 1\n"),
+      "scripts/deploy/guarded.sh": forward.replace("\n", " || exit 1 # stop on failure\n"),
       "scripts/deploy/staging.sh": 'ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"\nexec "$ROOT/scripts/website.sh"',
       "scripts/website.sh": "#!/bin/sh\nexit 0",
       "scripts/dev/sibling.sh": forward.replace("scripts/website.sh", "../tools/helper.sh"),
+      "scripts/dev/computed.sh": forward.replace('website.sh"', 'website.sh $mode"'),
       "scripts/dev/installed.sh": forward.replace("scripts/website.sh", "node_modules/.bin/tool"),
       "scripts/dev/selected.sh": `set -e; cd "$1"\n${forward}`,
       "scripts/dev/target.sh": `cd "$1"\n${forward}`,

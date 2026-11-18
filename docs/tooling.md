@@ -58,11 +58,12 @@ under `scripts/` or invent empty directories to match this table.
 A repository-owned script must find its own files when invoked by relative path
 from either the checkout or matrix. Anchor those paths to the script's location.
 In Bash, for example, a script two directories below the root can use
-`root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"`.
+`root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"`.
 In Bun use `import.meta.dir`. Give child processes that need repository context
 an explicit working directory. Keep user-supplied relative paths and tools that
 intentionally act on the caller's repository consistent with their documented
 meaning. Test both invocations, using a stub for commands with external effects.
+Matrix checks shell forwarding wrappers with `bun run audit --rule script-relative-paths`.
 
 Store build wrappers belong in `scripts/release/` alongside their upload
 entrypoints; `scripts/build/` holds ordinary application and package builds.
