@@ -368,8 +368,10 @@ export const RULES: readonly Rule[] = [
         const root = /^(\w+)="?\$\(git\s+rev-parse\s+--show-toplevel\)"?(?:\s*\|\|\s*exit(?:\s+\d+)?)?$/.exec(commands[0] ?? "");
         if (!root) return false;
         const helper = /^exec\s+"?\$(?:\{(\w+)\}|(\w+))\/([\w./-]+)(?=["\s]|$)/.exec(commands[1] ?? "");
-        const target = helper?.[3];
-        return !!target && root[1] === (helper[1] ?? helper[2]) && checkout.tracked(`:(literal)${target}`).includes(target);
+        if (!helper?.[3] || root[1] !== (helper[1] ?? helper[2])) return false;
+        const target = path.posix.normalize(helper[3]);
+        if (target === ".." || target.startsWith("../") || path.posix.isAbsolute(target)) return false;
+        return checkout.tracked(`:(literal)${target}`).includes(target);
       });
       return wrappers.length ? fail(`resolve the helper from the script location in ${wrappers.join(", ")}`) : pass;
     },
