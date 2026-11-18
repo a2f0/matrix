@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import path from "node:path";
 import { parseArgs } from "node:util";
 import { runGh } from "../../../src/gh";
 import { loadManifest } from "../../../src/manifest";
@@ -8,8 +9,7 @@ import { buildReport } from "./github.js";
 const USAGE = `Usage: bun run merged-commits [today|yesterday|YYYY-MM-DD] [--timezone IANA]
 
 Count original commits in merged PRs across matrix.json repositories, with
-separate totals including this workspace. Run from the matrix root with gh
-authenticated. The default day is today in the machine's local timezone.
+separate totals including this workspace. Requires an authenticated gh CLI. The default day is today in the machine's local timezone.
 Prints JSON with per-PR evidence; does not change repositories or GitHub.
 `;
 
@@ -25,8 +25,9 @@ function main() {
   }
   if (positionals.length > 1) throw new Error(USAGE);
   const day = selectDay(positionals[0] ?? "today", values.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, new Date());
-  const { repos } = loadManifest(process.cwd());
-  const workspace = runGh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
+  const root = path.resolve(import.meta.dir, "../../..");
+  const { repos } = loadManifest(root);
+  const workspace = runGh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], root).trim();
   console.log(JSON.stringify(buildReport(repos, workspace, day), null, 2));
 }
 

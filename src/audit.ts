@@ -355,6 +355,25 @@ export const AGENTS_MD_MAX_CHARS = 20_000;
 
 export const RULES: readonly Rule[] = [
   {
+    id: "script-relative-paths",
+    summary: "Shell wrappers locate their helper from the owning checkout",
+    source: "docs/tooling.md#script-locations",
+    check: checkout => {
+      const wrappers = checkout.tracked(":(glob)**/scripts/**/*.sh", ...excludeManaged(checkout)).filter(file => {
+        if (TEST_PATH.test(file)) return false;
+        const commands = (checkout.read(file) ?? "")
+          .split("\n")
+          .map(line => line.trim())
+          .filter(line => line && !line.startsWith("#") && !/^set -/.test(line));
+        const root = /^(\w+)="?\$\(git\s+rev-parse\s+--show-toplevel\)"?$/.exec(commands[0] ?? "");
+        if (!root) return false;
+        const helper = /^exec\s+"?\$(?:\{(\w+)\}|(\w+))\//.exec(commands[1] ?? "");
+        return root[1] === (helper?.[1] ?? helper?.[2]);
+      });
+      return wrappers.length ? fail(`resolve the helper from the script location in ${wrappers.join(", ")}`) : pass;
+    },
+  },
+  {
     id: "agents-md",
     summary: "AGENTS.md holds the repository's agent guidance",
     source: ONBOARDING,
