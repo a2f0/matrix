@@ -26,7 +26,7 @@ const REPOSITORY_VARIABLES = [
   "GIT_COMMON_DIR",
 ];
 
-function environment(): NodeJS.ProcessEnv {
+export function gitEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
   for (const name of REPOSITORY_VARIABLES) delete env[name];
   return env;
@@ -41,7 +41,7 @@ export function git(cwd: string, args: string[]): GitResult {
   const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], {
     cwd,
     encoding: "utf8",
-    env: environment(),
+    env: gitEnvironment(),
     // Listings such as `ls-files -v` exceed the 1 MiB default in large repositories.
     maxBuffer: 256 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],

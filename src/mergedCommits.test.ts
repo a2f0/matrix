@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { selectDay } from "../skills/merged-commits/scripts/day.js";
 import { buildReport, type Commit, type Commits, countRepository, type Graphql, type PullRequest, summarize } from "../skills/merged-commits/scripts/github.js";
+
+import { loadManifest } from "./manifest";
+import { tempDir } from "./testFixtures";
 
 const now = new Date("2026-11-06T23:46:10Z");
 const day = selectDay("yesterday", "America/New_York", now);
@@ -158,4 +164,36 @@ test.each([
     mergedPrs: expectedRepos,
     withMergeCommits: expectedCommits + expectedRepos,
   });
+});
+
+test("the CLI finds its manifest and workspace identity from either invocation directory", () => {
+  const root = path.resolve(import.meta.dir, "..");
+  const caller = realpathSync(tempDir("other checkout"));
+  const gh = path.join(caller, "gh");
+  writeFileSync(
+    gh,
+    `#!/bin/sh
+if [ "$1" = repo ]; then
+  [ "$PWD" = "$EXPECTED_ROOT" ] && [ -z "$GH_REPO" ] && [ -z "$GIT_DIR" ] || exit 1
+  echo fixture/workspace
+else
+  echo '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}'
+fi
+`,
+  );
+  chmodSync(gh, 0o755);
+  const nested = path.join(caller, "checkouts", "other");
+  mkdirSync(nested, { recursive: true });
+  for (const cwd of [root, nested]) {
+    const script = path.relative(cwd, path.join(root, "skills/merged-commits/scripts/count.js"));
+    const report = JSON.parse(
+      execFileSync(process.execPath, [script, "2020-01-01", "--timezone", "UTC"], {
+        cwd,
+        encoding: "utf8",
+        env: { ...process.env, PATH: caller + path.delimiter + process.env.PATH, EXPECTED_ROOT: root, GH_REPO: "fixture/other", GIT_DIR: nested },
+      }),
+    );
+    expect(report.workspace).toBe("fixture/workspace");
+    expect(report.repositories.map((entry: { repo: string }) => entry.repo)).toEqual([...loadManifest(root).repos, "fixture/workspace"]);
+  }
 });

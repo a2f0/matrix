@@ -365,7 +365,7 @@ export const RULES: readonly Rule[] = [
           .split("\n")
           .map(line => line.trim())
           .filter(line => line && !line.startsWith("#") && !/^set -/.test(line));
-        const root = /^(\w+)="?\$\(git\s+rev-parse\s+--show-toplevel\)"?$/.exec(commands[0] ?? "");
+        const root = /^(\w+)="?\$\(git\s+rev-parse\s+--show-toplevel\)"?(?:\s*\|\|\s*exit(?:\s+\d+)?)?$/.exec(commands[0] ?? "");
         if (!root) return false;
         const helper = /^exec\s+"?\$(?:\{(\w+)\}|(\w+))\//.exec(commands[1] ?? "");
         return root[1] === (helper?.[1] ?? helper?.[2]);
