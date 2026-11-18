@@ -17,7 +17,7 @@ export interface AgentToolTeardown {
   unavailable: string[];
   skipped: Array<{ file: string }>;
   /** The agent session's background `-c` shells still running (agent-tool 0.1.65+); never their arguments. */
-  sessionShells?: Array<{ pid: number; ageSeconds: number; shell: string; chars: number }>;
+  sessionShells?: Array<{ pid: number; ageSeconds: number; shell: string }>;
   notes?: string[];
 }
 
@@ -100,8 +100,9 @@ export function teardownAll(
   const repos = targets.map(({ repo, path }) => {
     try {
       const report = inspect(path, apply);
+      const summary = summarize(repo, path, report);
       session = report;
-      return summarize(repo, path, report);
+      return summary;
     } catch (error) {
       return { repo, path, ok: false, leftover: [], listeners: [], kept: [], stopped: [], worktrees: [], problems: [errorMessage(error)] };
     }

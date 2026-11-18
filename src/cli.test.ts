@@ -189,6 +189,24 @@ test("teardown inspects the workspace and each present checkout, and exits 1 whi
   ]);
 });
 
+test("teardown lists the session's background shells without failing or stopping them", () => {
+  const shells = [{ pid: 4242, ageSeconds: 3_900, shell: "zsh", chars: 812 }];
+  const applies: boolean[] = [];
+  const { services, writes } = fakeServices({
+    teardown: (_root, _directory, apply) => {
+      applies.push(apply);
+      return { ...CLEAN_TEARDOWN, sessionShells: shells, notes: [] };
+    },
+  });
+  for (const args of [["teardown"], ["teardown", "--apply"]]) {
+    writes.length = 0;
+    expect(main(args, root, undefined, services)).toBe(0);
+    expect(JSON.parse(writes.join(""))).toMatchObject({ ok: true, sessionShells: ["pid 4242 zsh, running 1h 5m"], notes: [] });
+  }
+  // --apply reaches agent-tool, whose teardown never stops session shells.
+  expect(applies).toContain(true);
+});
+
 test("health suggests stopping what teardown finds", () => {
   const { services, writes } = fakeServices({
     teardown: (_root, directory) => (directory === root ? CLEAN_TEARDOWN : { ...CLEAN_TEARDOWN, ok: false, unavailable: ["listening ports (lsof)"] }),

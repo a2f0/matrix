@@ -40,6 +40,14 @@ test("lists the session's background shells once, without failing teardown", () 
   expect(result.notes).toEqual([]);
   const ordered = teardownAll([targets[0]!], () => ({ ...base, sessionShells: [...shells].reverse(), notes: [] }), false);
   expect(ordered.sessionShells).toEqual(["pid 7 bash, running 1m", "pid 42 zsh, running 2h 5m"]);
+  // A report that fails to summarize is a failed inspection and leaves the snapshot alone.
+  const malformed = [
+    () => ({ ...base, sessionShells: shells, notes: [] }),
+    () => ({ ...base, worktrees: [null], sessionShells: [], notes: [] }) as unknown as AgentToolTeardown,
+  ];
+  const kept = teardownAll(targets.slice(0, 2), () => malformed.shift()!(), false);
+  expect(kept.repos.map(item => item.ok)).toEqual([true, false]);
+  expect(kept.sessionShells).toEqual(["pid 7 bash, running 1m", "pid 42 zsh, running 2h 5m"]);
   // An agent-tool older than 0.1.65 reports neither field, and the harness may be unknown.
   expect(teardownAll([targets[0]!], () => base, false)).toMatchObject({ ok: true, sessionShells: [], notes: [] });
   const missing = teardownAll([targets[0]!], () => ({ ...base, sessionShells: [], notes: ["no agent harness found"] }), false);

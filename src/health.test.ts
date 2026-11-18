@@ -188,7 +188,7 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
       "- Checkouts: 1 of 1 ready; no stale installs; no unmanaged entries.",
       "- Audit (1 rule): every audited checkout passes; a2f0/one not audited.",
       "- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.",
-      "- Running: nothing left running.",
+      "- Running: repository teardown checks pass.",
       "- Discovery: matrix.json matches the owner's repositories.",
       "- Default branches: not checked; run with --remote.",
       "- Sweeps: 0 ledgers read; no unresolved recurring friction; nothing unfinished.",
@@ -199,6 +199,17 @@ test("renders a clean remote report with Git on SSH and nothing running", () => 
       "",
     ].join("\n"),
   );
+  // The session's background shells are informational: listed on the Running line, never a next step.
+  const shells = assessHealth({
+    statuses: [status("a2f0/one")],
+    unmanaged: [],
+    audit: cleanAudit,
+    retro: quietRetro,
+    running: { ok: true, applied: false, repos: [], sessionShells: ["pid 4242 zsh, running 1h 5m"], notes: [] },
+  });
+  const markdown = markdownHealth(shells, new Date("2026-10-28T12:00:00Z"));
+  expect(markdown).toContain("- Running: repository teardown checks pass; this session still runs 1 background shell (pid 4242 zsh, running 1h 5m).");
+  expect(markdown).not.toContain("Stop what earlier work left running");
 });
 
 test("reports default-branch CI and asks for a red branch's repair before standards", () => {
