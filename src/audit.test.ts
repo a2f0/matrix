@@ -81,7 +81,7 @@ describe("audit", () => {
   });
 
   test("detects a wrapper that executes a helper from the caller's Git root", () => {
-    const forward = 'ROOT="$(git rev-parse --show-toplevel)"\nexec "${ROOT}/scripts/website.sh" "$@"';
+    const forward = `ROOT="$(git rev-parse --show-toplevel)"\nexec "\${ROOT}/scripts/website.sh" "$@"`;
     const repo = checkout("paths", {
       "packages/site/scripts/deploy/prod.sh": `#!/bin/bash\n# Deploy production\nset -euo pipefail\n${forward}`,
       "scripts/deploy/staging.sh": 'ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"\nexec "$ROOT/scripts/website.sh"',
