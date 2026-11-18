@@ -96,7 +96,8 @@ describe("audit", () => {
       "scripts/testing/fixtures/prod.sh": forward,
     });
     expect(failures(repo, ["script-relative-paths"])).toEqual({
-      "script-relative-paths": "resolve the helper from the script location in packages/site/scripts/deploy/prod.sh, scripts/deploy/guarded.sh, scripts/deploy/options.sh",
+      "script-relative-paths":
+        "resolve the helper from the script location in packages/site/scripts/deploy/prod.sh, scripts/deploy/guarded.sh, scripts/deploy/options.sh",
     });
   });
 
