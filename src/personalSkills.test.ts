@@ -27,7 +27,11 @@ test("finds Claude Code configuration directories as Claude Code and agent-tool 
 
 test("reads the managed skill names from the workspace's skills manifest", () => {
   const root = tempDir("matrix-root");
-  expect(managedSkillNames(root)).toEqual([]);
+  expect(managedSkillNames(root)).toBeUndefined();
+  writeFileSync(path.join(root, ".agent-tool-skills.json"), "{ not json");
+  expect(managedSkillNames(root)).toBeUndefined();
+  writeFileSync(path.join(root, ".agent-tool-skills.json"), JSON.stringify({ schemaVersion: 1 }));
+  expect(managedSkillNames(root)).toBeUndefined();
   const files = {
     ".claude/skills/ship-pr/SKILL.md": "x",
     ".agents/skills/ship-pr/SKILL.md": "x",

@@ -40,16 +40,17 @@ function isDirectory(file: string): boolean {
   }
 }
 
-/** The skill names the workspace's `.agent-tool-skills.json` installs; empty when it cannot be read. */
-export function managedSkillNames(root: string): string[] {
+/** The skill names the workspace's `.agent-tool-skills.json` installs; undefined when it is missing or unreadable. */
+export function managedSkillNames(root: string): string[] | undefined {
   let manifest: unknown;
   try {
     manifest = JSON.parse(readFileSync(path.join(root, ".agent-tool-skills.json"), "utf8"));
   } catch {
-    return [];
+    return undefined;
   }
-  const files = Object.keys(object(object(manifest)?.files) ?? {});
-  const names = files.flatMap(file => /^\.(?:claude|agents)\/skills\/([^/]+)\//.exec(file)?.[1] ?? []);
+  const files = object(object(manifest)?.files);
+  if (!files) return undefined;
+  const names = Object.keys(files).flatMap(file => /^\.(?:claude|agents)\/skills\/([^/]+)\//.exec(file)?.[1] ?? []);
   return [...new Set(names)].sort();
 }
 

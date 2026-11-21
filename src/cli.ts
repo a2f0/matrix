@@ -266,9 +266,11 @@ const SERVICES: Services = {
   stateMachines,
   screenshotLinks,
   personalSkills: root => {
-    // A home directory health cannot read leaves the report without the field; health still exits 0.
+    // Without the skills manifest or a readable home directory, the report leaves the field out
+    // rather than claiming nothing overrides a managed skill; health still exits 0.
     try {
-      return shadowingSkills(managedSkillNames(root));
+      const managed = managedSkillNames(root);
+      return managed && shadowingSkills(managed);
     } catch {
       return undefined;
     }
