@@ -2,8 +2,9 @@
 
 This repository is a workspace for making one change across many repositories.
 `matrix.json` lists the managed repositories, and `bun run sync` clones each
-into `checkouts/<name>`. `checkouts/` is gitignored; never commit its contents
-here.
+into `checkouts/<name>` and links the
+[user-wide skills](docs/tooling.md#user-wide-skills) they declare.
+`checkouts/` is gitignored; never commit its contents here.
 
 Resolve GitHub identity with `gh repo view --json nameWithOwner` from the
 directory you are working in, never from a folder name. Work on feature

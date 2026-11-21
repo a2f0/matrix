@@ -8,15 +8,18 @@
 import { homedir } from "node:os";
 import { object } from "./packageJson";
 
+const STATUSES = ["create", "repair", "unchanged", "kept", "conflict"] as const;
+const RESULTS = ["written", "failed"] as const;
+
 /** One entry of agent-tool's `skills link` or `skills check-links` report (0.1.67+), as far as matrix reads it. */
 export interface UserSkillLink {
   readonly skill: string;
   readonly path: string;
   readonly target: string;
-  /** `create`, `repair`, `unchanged`, `kept` (a link to the same skill in another clone), or `conflict`. */
-  readonly status: string;
-  /** After `--apply`: `written` or `failed`. */
-  readonly result?: string;
+  /** `kept` is a link to the same skill in another clone, which stays. */
+  readonly status: (typeof STATUSES)[number];
+  /** After `--apply`, for each link it tried to write. */
+  readonly result?: (typeof RESULTS)[number];
   readonly error?: string;
 }
 
@@ -48,8 +51,9 @@ function isLink(value: unknown): value is UserSkillLink {
     typeof entry?.skill === "string" &&
     typeof entry.path === "string" &&
     typeof entry.target === "string" &&
-    typeof entry.status === "string" &&
-    (entry.result === undefined || typeof entry.result === "string") &&
+    // A status or result a later agent-tool adds makes the report unreadable rather than silently fine.
+    (STATUSES as readonly unknown[]).includes(entry.status) &&
+    (entry.result === undefined || (RESULTS as readonly unknown[]).includes(entry.result)) &&
     (entry.error === undefined || typeof entry.error === "string")
   );
 }

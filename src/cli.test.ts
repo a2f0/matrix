@@ -1,10 +1,10 @@
 import { beforeEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { MINIMUM_AGENT_TOOL, RULES } from "./audit";
-import { main, parseBaseHealthReport, parsePushGateReport, parseScreenshotLinks, type Services } from "./cli";
+import { main, parseBaseHealthReport, parsePushGateReport, parseScreenshotLinks, type Services, userSkills } from "./cli";
 import { checkoutFixture, gitIn, gitInit, tempDir } from "./testFixtures";
 import { tilde } from "./userSkills";
 
@@ -215,7 +215,15 @@ test("sync links user-wide skills for the named checkouts and reports what needs
       };
     },
   });
-  main(["sync", "good"], root, undefined, services);
+  // A fetch that fails at once keeps this test off the network; the checkout stays ready.
+  const ssh = process.env.GIT_SSH_COMMAND;
+  process.env.GIT_SSH_COMMAND = "false";
+  try {
+    main(["sync", "good"], root, undefined, services);
+  } finally {
+    if (ssh === undefined) delete process.env.GIT_SSH_COMMAND;
+    else process.env.GIT_SSH_COMMAND = ssh;
+  }
   const good = path.join(root, "checkouts", "good");
   // Named checkouts only, as with teardown; the workspace links when no names are given.
   expect(asked).toEqual([{ directory: good, apply: true }]);
@@ -225,6 +233,48 @@ test("sync links user-wide skills for the named checkouts and reports what needs
     problems: ["~/.agents/skills/b (held by something other than a link to b)"],
   });
   expect(warnings.join("")).toContain("user skills: ~/.agents/skills/b (held by something other than a link to b)\n");
+
+  // A checkout with a local change, like one on a feature branch, is not linked from.
+  writeFileSync(path.join(good, "README.md"), "# Changed\n");
+  asked.length = 0;
+  const check = fakeServices({ userSkills: (_root, directory, apply) => (asked.push({ directory, apply }), { links: [] }) });
+  expect(main(["health"], root, undefined, check.services)).toBe(0);
+  expect(asked).toEqual([{ directory: root, apply: false }]);
+});
+
+test("runs the workspace's agent-tool for user-wide skills and reads its report, even on exit 1", () => {
+  const bin = path.join(root, "node_modules", ".bin");
+  mkdirSync(bin, { recursive: true });
+  const args = path.join(root, "args");
+  // Stands in for agent-tool: records its arguments, then answers as FAKE_MODE says.
+  writeFileSync(
+    path.join(bin, "agent-tool"),
+    `#!/bin/sh
+printf '%s\\n' "$*" > ${JSON.stringify(args)}
+case "$FAKE_MODE" in
+  conflict) echo '{"applied":false,"changes":[{"skill":"a","path":"/h/a","target":"/r/a","status":"conflict"}]}'; exit 1 ;;
+  error) echo 'Error: Declared user skill a has no source.' >&2; exit 1 ;;
+  crash) echo 'partial' ; exit 2 ;;
+esac
+echo '{"ok":true,"changes":[]}'
+`,
+  );
+  chmodSync(path.join(bin, "agent-tool"), 0o755);
+  const run = (mode: string, apply: boolean) => {
+    process.env.FAKE_MODE = mode;
+    try {
+      return userSkills(root, "/checkout", apply);
+    } finally {
+      delete process.env.FAKE_MODE;
+    }
+  };
+  expect(run("ok", false)).toEqual({ links: [] });
+  expect(readFileSync(args, "utf8")).toBe("--repo /checkout skills check-links\n");
+  expect(run("conflict", true)).toEqual({ links: [{ skill: "a", path: "/h/a", target: "/r/a", status: "conflict" }] });
+  expect(readFileSync(args, "utf8")).toBe("--repo /checkout skills link --apply\n");
+  expect(run("error", true)).toEqual({ error: "Error: Declared user skill a has no source." });
+  expect(run("crash", false)).toEqual({ error: "partial" });
+  expect(userSkills(path.join(root, "nowhere"), "/checkout", false)).toMatchObject({ error: expect.stringContaining("agent-tool could not run") });
 });
 
 test("reads which clones the take-screenshots skill's link --all dry run would link and which wait", () => {

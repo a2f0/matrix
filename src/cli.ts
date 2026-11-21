@@ -109,7 +109,7 @@ function teardown(root: string, directory: string, apply: boolean): AgentToolTea
 }
 
 /** Link a repository's user-wide skills, or check them; both exit 1 with a report on a conflict, and without one on an error. */
-function userSkills(root: string, directory: string, apply: boolean): UserSkillReport {
+export function userSkills(root: string, directory: string, apply: boolean): UserSkillReport {
   const args = ["--repo", directory, "skills", ...(apply ? ["link", "--apply"] : ["check-links"])];
   const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   if (result.error) return { error: `agent-tool could not run: ${result.error.message}` };
@@ -293,6 +293,20 @@ function workspaceTargets(root: string, manifest: Manifest, names: string[]): Ar
   return names.length > 0 ? checkouts : [{ repo: "workspace", path: root }, ...checkouts];
 }
 
+/**
+ * Where user-wide skills link from: the workspace (unless checkouts are named) and each named or
+ * present checkout that is ready, so a feature branch, a local change, or a failed sync cannot add
+ * a skill that every session on the machine loads.
+ */
+function userSkillTargets(
+  root: string,
+  manifest: Manifest,
+  names: string[],
+  statusOf: (repo: string) => CheckoutStatus,
+): Array<{ repo: string; path: string }> {
+  return workspaceTargets(root, manifest, names).filter(target => target.repo === "workspace" || statusOf(target.repo).ready);
+}
+
 function json(services: Services, value: unknown): void {
   services.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -452,9 +466,12 @@ const COMMANDS = new Map<string, Handler>([
         return result;
       });
       const ok = results.every(result => result.action !== "error");
-      // After cloning, so a new checkout's skills link too; a problem here is reported, not a sync failure.
+      // After syncing, so a new checkout's skills link too; a problem here is reported, not a sync failure.
       const userSkills = summarizeSync(
-        workspaceTargets(root, manifest, names).map(({ repo, path: directory }) => ({ repo, report: services.userSkills(root, directory, true) })),
+        userSkillTargets(root, manifest, names, statusReader(root, manifest)).map(({ repo, path: directory }) => ({
+          repo,
+          report: services.userSkills(root, directory, true),
+        })),
       );
       for (const problem of userSkills.problems) services.warn(`user skills: ${problem}\n`);
       output({ ok, results, unmanaged: unmanagedCheckouts(root, manifest.repos), userSkills });
@@ -528,7 +545,7 @@ const COMMANDS = new Map<string, Handler>([
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
         screenshots: services.screenshotLinks(root),
         userSkills: summarizeCheck(
-          workspaceTargets(root, manifest, []).map(({ repo, path: directory }) => ({ repo, report: services.userSkills(root, directory, false) })),
+          userSkillTargets(root, manifest, [], statusOf).map(({ repo, path: directory }) => ({ repo, report: services.userSkills(root, directory, false) })),
         ),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),

@@ -3,7 +3,12 @@ import { parseUserSkillReport, summarizeCheck, summarizeSync, tilde, type UserSk
 
 const HOME = "/home/me";
 
-function link(status: string, skill = "space-cleanup", directory = `${HOME}/.claude2/skills`, extra: Partial<UserSkillLink> = {}): UserSkillLink {
+function link(
+  status: UserSkillLink["status"],
+  skill = "space-cleanup",
+  directory = `${HOME}/.claude2/skills`,
+  extra: Partial<UserSkillLink> = {},
+): UserSkillLink {
   return { skill, path: `${directory}/${skill}`, target: `${HOME}/github/matrix/skills/${skill}`, status, ...extra };
 }
 
@@ -13,6 +18,9 @@ test("reads the changes of a skills link or check-links report, and nothing else
   expect(parseUserSkillReport(JSON.stringify({ ok: true, changes: [] }))).toEqual([]);
   expect(parseUserSkillReport("Error: Declared user skill 'x' has no source.")).toBeUndefined();
   expect(parseUserSkillReport(JSON.stringify({ changes: [{ skill: "x" }] }))).toBeUndefined();
+  // An entry this matrix does not know how to judge is not read as fine.
+  expect(parseUserSkillReport(JSON.stringify({ changes: [{ ...link("create"), status: "stale" }] }))).toBeUndefined();
+  expect(parseUserSkillReport(JSON.stringify({ changes: [{ ...link("create"), result: "skipped" }] }))).toBeUndefined();
   expect(parseUserSkillReport(JSON.stringify([]))).toBeUndefined();
 });
 
