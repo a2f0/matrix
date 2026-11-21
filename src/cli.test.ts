@@ -87,6 +87,7 @@ function fakeServices(overrides: Partial<Services> = {}) {
     gitTransport: () => SSH_ONLY,
     stateMachines: () => 0,
     screenshotLinks: () => ({ unlinked: [], blocked: [] }),
+    personalSkills: () => [],
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -151,6 +152,45 @@ test("health suggests linking clones that miss the shared screenshot store, afte
   const unread = fakeServices({ screenshotLinks: () => undefined });
   expect(main(["health", "--markdown"], root, undefined, unread.services)).toBe(0);
   expect(unread.writes.join("")).not.toContain("Screenshots");
+});
+
+test("health suggests removing personal skills that override managed ones, with the machine's other suggestions", () => {
+  const personal = ["~/.agents/skills/space-cleanup", "~/.claude2/skills/seo-optimization"];
+  const { services, writes } = fakeServices({
+    personalSkills: () => personal,
+    gitTransport: () => ({ ...SSH_ONLY, ghProtocol: "https", problems: ["gh uses https for github.com"] }),
+  });
+  expect(main(["health"], root, undefined, services)).toBe(0);
+  const report = JSON.parse(writes.join("")) as { personalSkills: unknown; suggestions: string[] };
+  expect(report.personalSkills).toEqual(personal);
+  expect(report.suggestions.slice(0, 2)).toEqual([
+    "Keep Git on SSH: gh uses https for github.com; see docs/health.md#github-over-ssh.",
+    "Remove 2 personal skills that override agent-tool's managed copies (~/.agents/skills/space-cleanup, ~/.claude2/skills/seo-optimization); see docs/tooling.md#shared-skills.",
+  ]);
+  const markdown = fakeServices({ personalSkills: () => personal });
+  expect(main(["health", "--markdown"], root, undefined, markdown.services)).toBe(0);
+  expect(markdown.writes.join("")).toContain("- Personal skills: ~/.agents/skills/space-cleanup, ~/.claude2/skills/seo-optimization override managed skills.");
+  const none = fakeServices();
+  expect(main(["health", "--markdown"], root, undefined, none.services)).toBe(0);
+  expect(none.writes.join("")).toContain("- Personal skills: none override a managed skill.");
+  expect(none.writes.join("")).not.toContain("Remove ");
+});
+
+test("sync reports each named checkout and exits 1 when one fails", () => {
+  const { services, writes, warnings } = fakeServices();
+  // A fetch that fails at once keeps this test off the network; the checkout stays as it was.
+  const ssh = process.env.GIT_SSH_COMMAND;
+  process.env.GIT_SSH_COMMAND = "false";
+  try {
+    expect(main(["sync", "good"], root, undefined, services)).toBe(1);
+  } finally {
+    if (ssh === undefined) delete process.env.GIT_SSH_COMMAND;
+    else process.env.GIT_SSH_COMMAND = ssh;
+  }
+  const report = JSON.parse(writes.join("")) as { ok: boolean; results: Array<{ repo: string; action: string }>; unmanaged: unknown };
+  expect(report).toMatchObject({ ok: false, results: [{ repo: "a2f0/good", action: "error" }], unmanaged: [] });
+  expect(Object.keys(report).sort()).toEqual(["ok", "results", "unmanaged"]);
+  expect(warnings.join("")).toStartWith("a2f0/good: error (");
 });
 
 test("reads which clones agent-tool's screenshots link --all dry run would link and which wait", () => {

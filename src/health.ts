@@ -54,6 +54,8 @@ export interface HealthInputs {
   readonly defaultBranches?: DefaultBranchHealth[];
   /** Clones on this machine whose .screenshots does not link the shared store; absent when that could not be read. */
   readonly screenshots?: ScreenshotLinks;
+  /** Personal skills (`~/...` paths) named like a skill agent-tool manages here, which override that managed copy. */
+  readonly personalSkills?: string[];
 }
 
 export interface Health {
@@ -87,6 +89,7 @@ export interface Health {
     readonly unknown: Array<{ repo: string; detail: string }>;
   };
   readonly screenshots?: ScreenshotLinks;
+  readonly personalSkills?: string[];
   readonly sweeps: {
     readonly read: string[];
     readonly recurring: Array<Pick<Recurrence, "kind" | "cause" | "repos" | "sweeps">>;
@@ -106,7 +109,7 @@ function gib(bytes: number): string {
   return `${Math.floor(bytes / GIB)} GiB`;
 }
 
-/** Suggestions about this machine: disk space, leftover processes, and Git transport. */
+/** Suggestions about this machine: disk space, leftover processes, Git transport, and personal skills that override managed ones. */
 function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string[]): string[] {
   const suggestions: string[] = [];
   if (low)
@@ -118,6 +121,11 @@ function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string
       `Stop what earlier work left running in ${list(leftover)}: \`bun run teardown\` lists it, \`--apply\` stops recorded processes, and untracked ones need stopping by hand.`,
     );
   for (const problem of inputs.git?.problems ?? []) suggestions.push(`Keep Git on SSH: ${problem}; see docs/health.md#github-over-ssh.`);
+  const personal = inputs.personalSkills ?? [];
+  if (personal.length > 0)
+    suggestions.push(
+      `Remove ${plural(personal.length, "personal skill")} that override agent-tool's managed copies (${list(personal)}); see docs/tooling.md#shared-skills.`,
+    );
   return suggestions;
 }
 
@@ -213,6 +221,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     ...(inputs.git && { git: inputs.git }),
     ...(inputs.defaultBranches && { defaultBranches: groupDefaultBranches(inputs.defaultBranches) }),
     ...(inputs.screenshots && { screenshots: inputs.screenshots }),
+    ...(inputs.personalSkills && { personalSkills: inputs.personalSkills }),
     sweeps: {
       read: inputs.retro.sweeps,
       recurring: inputs.retro.recurring.map(({ kind, cause, repos, sweeps }) => ({ kind, cause, repos, sweeps })),
@@ -287,7 +296,7 @@ function sweepsLine(sweeps: Health["sweeps"]): string {
 
 /** The report as Markdown, for a person, a scheduled run's message, or an issue. */
 export function markdownHealth(health: Health, at = new Date()): string {
-  const { checkouts, audit, discovery, disk, running, git, defaultBranches, screenshots, sweeps } = health;
+  const { checkouts, audit, discovery, disk, running, git, defaultBranches, screenshots, personalSkills, sweeps } = health;
   const lines = [
     "# Matrix health",
     "",
@@ -301,6 +310,9 @@ export function markdownHealth(health: Health, at = new Date()): string {
     discoveryLine(discovery),
     defaultBranchesLine(defaultBranches),
     ...(screenshots ? [screenshotsLine(screenshots)] : []),
+    ...(personalSkills
+      ? [`- Personal skills: ${personalSkills.length === 0 ? "none override a managed skill" : `${list(personalSkills)} override managed skills`}.`]
+      : []),
     sweepsLine(sweeps),
     "",
     "## Next steps",

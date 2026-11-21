@@ -15,7 +15,9 @@ It reads and reports only, and always exits 0; `bun run audit` is the check
 that fails. Suggestions come in this order: free disk space below 50 GiB on the
 volume holding the checkouts, repositories where `bun run teardown` fails,
 ways Git or gh can leave SSH for GitHub ([below](#github-over-ssh)),
-checkouts that are not ready, red default branches
+personal skills that override agent-tool's managed copies
+([shared skills](tooling.md#shared-skills)), checkouts that are not ready, red
+default branches
 ([base freshness](tooling.md#base-freshness)), stale installs,
 clones not linked to the [screenshot store](artifacts.md),
 repositories to onboard or that discovery lost, failing audit rules, recurring

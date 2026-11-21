@@ -26,6 +26,7 @@
           "src/markdown.ts",
           "src/options.ts",
           "src/packageJson.ts",
+          "src/personalSkills.ts",
           "src/teardown.ts",
           "src/testFixtures.ts",
           "src/testSetup.ts",

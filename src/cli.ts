@@ -10,6 +10,7 @@ import { assessHealth, type DefaultBranchHealth, type DiskSpace, markdownHealth,
 import { checkoutPath, cloneUrl, loadManifest, type Manifest, parseManifest, saveManifest, selectRepos } from "./manifest";
 import { count, parseOptions } from "./options";
 import { object } from "./packageJson";
+import { managedSkillNames, shadowingSkills } from "./personalSkills";
 import { type PushGateResult, strictFreshness } from "./pushGates";
 import { deployAll, secretsRoot } from "./secrets";
 import { listSweeps } from "./sweepLedger";
@@ -79,6 +80,8 @@ export interface Services {
   stateMachines(root: string, directories: string[], flags: string[]): number;
   /** Clones not linked to the shared screenshot store, from agent-tool's `screenshots link --all` dry run; undefined when unreadable. */
   screenshotLinks(root: string): ScreenshotLinks | undefined;
+  /** Personal skills on this machine named like a skill the workspace's agent-tool manages. */
+  personalSkills(root: string): string[];
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -262,6 +265,7 @@ const SERVICES: Services = {
   gitTransport: root => inspectGitTransport(root),
   stateMachines,
   screenshotLinks,
+  personalSkills: root => shadowingSkills(managedSkillNames(root)),
 };
 
 /** The workspace, then every checkout present, or only the named checkouts. */
@@ -500,6 +504,7 @@ const COMMANDS = new Map<string, Handler>([
         git: services.gitTransport(root),
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
         screenshots: services.screenshotLinks(root),
+        personalSkills: services.personalSkills(root),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
           defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),

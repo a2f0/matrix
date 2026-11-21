@@ -639,6 +639,14 @@ describe("audit", () => {
       "scripts/ship.sh": "gh pr checks --watch\n",
       "docs/network.md": "Force HTTPS: `GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:`.\n",
       "docs/timings.md": "Read the last push with `sh scripts/git/showPushGateTimings.sh`.\n",
+      "docs/skills.md": [
+        "Capture with `bun ~/.agents/skills/take-screenshots/scripts/artifacts.ts capture --apply`.",
+        "Free space with `bun ../matrix/skills/space-cleanup/scripts/space-cleanup.ts`.",
+        "Measure with `bun skills/performance-pass/scripts/perf.ts measure`.",
+        "Probe with `sh skills/seo-optimization/scripts/probe.sh example.com`.",
+        "Link with `bun run agent-tool skills link --apply`, and check with `agent-tool skills check-links`.",
+        "",
+      ].join("\n"),
     });
     expect(failures(repo)["superseded-guidance"]).toBe(
       [
@@ -648,6 +656,8 @@ describe("audit", () => {
         "push-head-upstream at docs/shipping.md:1 (use agent-tool branch push <reviewed-head> --remote origin)",
         "push-delete at docs/shipping.md:2 (use agent-tool repo cleanup)",
         "push-gate-timings at docs/timings.md:1 (use agent-tool runs list)",
+        "skill-scripts at docs/skills.md:1, docs/skills.md:2, docs/skills.md:3, docs/skills.md:4 (use agent-tool screenshots, space, perf, or seo probe)",
+        "skills-link at docs/skills.md:5 (use the managed skills agent-tool skills install --apply writes)",
         "https-insteadof at docs/network.md:1 (use SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh))",
       ].join("; "),
     );

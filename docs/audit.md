@@ -68,6 +68,8 @@ which the agent-tool pin updates:
 | `git push -u origin HEAD` | `agent-tool branch push <reviewed-head> --remote origin` |
 | `git push ... --delete`, except a `--force-with-lease` deletion that a checkout requires | `agent-tool repo cleanup` |
 | `showPushGateTimings`, the hand-written push timing log | `agent-tool runs list`, which lists each push gate's run-group report |
+| A `scripts/` path inside the take-screenshots, space-cleanup, performance-pass, or seo-optimization skill, which ran those skills from a clone's copy | `agent-tool screenshots`, `space`, `perf`, or `seo probe` (0.1.70–0.1.74) |
+| The personal skill `link` and `check-links` subcommands, which agent-tool 0.1.71 removed | The managed skills `agent-tool skills install --apply` writes ([shared skills](tooling.md#shared-skills)) |
 | `url.https://github.com/.insteadOf`, which sends GitHub SSH URLs to HTTPS and its keychain helper | SSH through `ssh.github.com:443` ([GitHub over SSH](health.md#github-over-ssh)) |
 
 ## Changing the audit

@@ -536,6 +536,9 @@ into `~/.agents/skills` or a Claude Code configuration directory's `skills/`.
 Claude Code prefers a personal skill to the project's managed copy of the same
 name, and reads personal skills only from the configuration directory it runs
 with, so a link would override every repository's pin and reach only one of
-`~/.claude` and dotfiles' `~/.claude2`. Login, folder trust, plugins, and
+`~/.claude` and dotfiles' `~/.claude2`. `bun run health` lists each personal
+skill named like one the workspace's agent-tool manages, link or not, in
+`~/.agents/skills` and every configuration directory agent-tool would find.
+Login, folder trust, plugins, and
 user-scope MCP servers such as [Sentry](secrets.md#sentry-mcp) stay per
 configuration directory.
