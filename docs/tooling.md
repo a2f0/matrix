@@ -525,17 +525,14 @@ repositories that lack the files or the check.
 
 Some skills serve every repository, not only the one that owns them: matrix's
 space-cleanup, performance-pass, and take-screenshots, and balebase's
-seo-optimization, app-store-readiness, and audit-trails. Skills agent-tool
-manages, such as explicit-state-machines, are never shared this way: Claude Code
-prefers a personal skill to a project's skill of the same name, so a shared copy
-would replace the one each repository's agent-tool pin installs. The owning repository lists them under
-`skills.user` in its `agent-tool.json`, and `agent-tool skills link --apply`
-links each into `~/.agents/skills` and into `skills/` in every Claude Code
-configuration directory: `~/.claude`, the one `CLAUDE_CONFIG_DIR` names, and
-any other `~/.claude*` directory holding `settings.json` or `.claude.json`, such
-as the `~/.claude2` that dotfiles' `claude2` runs a second account with. Claude
-Code reads user skills only from the directory it runs with, so each needs its
-own links.
+seo-optimization, app-store-readiness, and audit-trails. The owning repository
+lists them under `skills.user` in its `agent-tool.json`, and
+`agent-tool skills link --apply` links each into `~/.agents/skills` and into
+`skills/` in every Claude Code configuration directory: `~/.claude`, the one
+`CLAUDE_CONFIG_DIR` names, and any other `~/.claude*` directory holding
+`settings.json` or `.claude.json`, such as the `~/.claude2` that dotfiles'
+`claude2` runs a second account with. Claude Code reads user skills only from
+the directory it runs with, so each needs its own links.
 
 `bun run sync` links them for the workspace and every ready checkout with the
 workspace's pinned agent-tool, so a checkout's feature branch or local change
