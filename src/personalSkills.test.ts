@@ -55,4 +55,11 @@ test("reports personal skills named like a managed skill, whatever holds the nam
     "~/.claude2/skills/take-screenshots",
   ]);
   expect(shadowingSkills([], dir, {})).toEqual([]);
+  // A configuration directory outside the home directory keeps its absolute path.
+  const outside = tempDir("matrix-outside");
+  mkdirSync(path.join(outside, "skills", "space-cleanup"), { recursive: true });
+  expect(shadowingSkills(["space-cleanup"], dir, { CLAUDE_CONFIG_DIR: outside })).toEqual([
+    "~/.agents/skills/space-cleanup",
+    path.join(outside, "skills", "space-cleanup"),
+  ]);
 });

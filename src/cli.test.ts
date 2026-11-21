@@ -170,6 +170,14 @@ test("health suggests removing personal skills that override managed ones, with 
   const markdown = fakeServices({ personalSkills: () => personal });
   expect(main(["health", "--markdown"], root, undefined, markdown.services)).toBe(0);
   expect(markdown.writes.join("")).toContain("- Personal skills: ~/.agents/skills/space-cleanup, ~/.claude2/skills/seo-optimization override managed skills.");
+  const one = fakeServices({ personalSkills: () => ["/elsewhere/skills/space-cleanup"] });
+  expect(main(["health"], root, undefined, one.services)).toBe(0);
+  expect((JSON.parse(one.writes.join("")) as { suggestions: string[] }).suggestions[0]).toBe(
+    "Remove 1 personal skill that overrides agent-tool's managed copies (/elsewhere/skills/space-cleanup); see docs/tooling.md#shared-skills.",
+  );
+  const oneMarkdown = fakeServices({ personalSkills: () => ["~/.claude/skills/space-cleanup"] });
+  expect(main(["health", "--markdown"], root, undefined, oneMarkdown.services)).toBe(0);
+  expect(oneMarkdown.writes.join("")).toContain("- Personal skills: ~/.claude/skills/space-cleanup overrides a managed skill.");
   const none = fakeServices();
   expect(main(["health", "--markdown"], root, undefined, none.services)).toBe(0);
   expect(none.writes.join("")).toContain("- Personal skills: none override a managed skill.");

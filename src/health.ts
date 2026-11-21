@@ -54,7 +54,7 @@ export interface HealthInputs {
   readonly defaultBranches?: DefaultBranchHealth[];
   /** Clones on this machine whose .screenshots does not link the shared store; absent when that could not be read. */
   readonly screenshots?: ScreenshotLinks;
-  /** Personal skills (`~/...` paths) named like a skill agent-tool manages here, which override that managed copy. */
+  /** Personal skills named like a skill agent-tool manages here, which override that managed copy; `~/...` under the home directory. */
   readonly personalSkills?: string[];
 }
 
@@ -124,7 +124,7 @@ function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string
   const personal = inputs.personalSkills ?? [];
   if (personal.length > 0)
     suggestions.push(
-      `Remove ${plural(personal.length, "personal skill")} that override agent-tool's managed copies (${list(personal)}); see docs/tooling.md#shared-skills.`,
+      `Remove ${plural(personal.length, "personal skill")} that ${personal.length === 1 ? "overrides" : "override"} agent-tool's managed copies (${list(personal)}); see docs/tooling.md#shared-skills.`,
     );
   return suggestions;
 }
@@ -290,6 +290,11 @@ function screenshotsLine({ unlinked, blocked }: ScreenshotLinks): string {
   return `- Screenshots: ${parts.length === 0 ? "every clone links the shared store" : parts.join("; ")}.`;
 }
 
+function personalSkillsLine(paths: string[]): string {
+  if (paths.length === 0) return "- Personal skills: none override a managed skill.";
+  return `- Personal skills: ${list(paths)} ${paths.length === 1 ? "overrides a managed skill" : "override managed skills"}.`;
+}
+
 function sweepsLine(sweeps: Health["sweeps"]): string {
   return `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no unresolved recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}${sweeps.resolved.length > 0 ? ` (${sweeps.resolved.length} resolved)` : ""}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`;
 }
@@ -310,9 +315,7 @@ export function markdownHealth(health: Health, at = new Date()): string {
     discoveryLine(discovery),
     defaultBranchesLine(defaultBranches),
     ...(screenshots ? [screenshotsLine(screenshots)] : []),
-    ...(personalSkills
-      ? [`- Personal skills: ${personalSkills.length === 0 ? "none override a managed skill" : `${list(personalSkills)} override managed skills`}.`]
-      : []),
+    ...(personalSkills ? [personalSkillsLine(personalSkills)] : []),
     sweepsLine(sweeps),
     "",
     "## Next steps",

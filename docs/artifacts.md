@@ -121,8 +121,7 @@ changes before it ends is `failed`.
 How a clone's namespace is chosen and reserved (the `repository.json` owner
 file, renames and transfers, `--project`, and `MATRIX_ARTIFACTS_NO_GH`) is
 agent-tool's
-[shared store layout](https://github.com/a2f0/agent-tool/blob/a8225b0474d541d84553a6af00f7d7c30f7e44ac/docs/screenshots.md#layout),
-for the release this workspace pins.
+[shared store layout](https://github.com/a2f0/agent-tool/blob/main/docs/screenshots.md#layout).
 
 ## Locks
 
