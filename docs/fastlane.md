@@ -156,8 +156,9 @@ unverified.
 balebase owns `skills/app-store-readiness/` and `APP_DIR/fastlane/lib/readiness.rb`,
 `readiness_artifacts.rb`, `readiness_stores.rb`, and
 `fastlane/test/readiness.test.ts`. nc and ct keep byte-identical copies;
-change every copy together. `~/.claude/skills` and `~/.agents/skills` link to
-balebase's skill. Bring a newly onboarded store app to them.
+change every copy together. balebase shares its skill as a
+[user-wide skill](tooling.md#user-wide-skills). Bring a newly onboarded store
+app to them.
 
 ## Validation
 

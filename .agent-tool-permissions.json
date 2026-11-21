@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "agentToolVersion": "0.1.65",
+  "agentToolVersion": "0.1.67",
   "claude": {
     "allow": [
       "Bash(bun run agent-tool --help)",
@@ -30,6 +30,7 @@
       "Bash(bun run agent-tool dependencies diff *)",
       "Bash(bun run agent-tool skills list *)",
       "Bash(bun run agent-tool skills check *)",
+      "Bash(bun run agent-tool skills check-links *)",
       "Bash(bun run agent-tool hooks check *)",
       "Bash(bun run agent-tool push-gate hook *)",
       "Bash(bun run agent-tool push-gate check *)",
@@ -97,6 +98,7 @@
       "Bash(node_modules/.bin/agent-tool dependencies diff *)",
       "Bash(node_modules/.bin/agent-tool skills list *)",
       "Bash(node_modules/.bin/agent-tool skills check *)",
+      "Bash(node_modules/.bin/agent-tool skills check-links *)",
       "Bash(node_modules/.bin/agent-tool hooks check *)",
       "Bash(node_modules/.bin/agent-tool push-gate hook *)",
       "Bash(node_modules/.bin/agent-tool push-gate check *)",
@@ -164,6 +166,7 @@
       "Bash(agent-tool dependencies diff *)",
       "Bash(agent-tool skills list *)",
       "Bash(agent-tool skills check *)",
+      "Bash(agent-tool skills check-links *)",
       "Bash(agent-tool hooks check *)",
       "Bash(agent-tool push-gate hook *)",
       "Bash(agent-tool push-gate check *)",
@@ -209,6 +212,6 @@
   },
   "codex": {
     "file": ".codex/rules/agent-tool.rules",
-    "sha256": "7cc68966032e8998f4a8d83ff6ce0c4ec669c6cf9d4e0138eee137639ca525c8"
+    "sha256": "521c434bb5d6c381f34ae4953d36604dda1de52e382e7c8a906df1c4787df414"
   }
 }

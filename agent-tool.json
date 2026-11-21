@@ -13,6 +13,9 @@
     "exempt": ["main"],
     "maxLength": null
   },
+  "skills": {
+    "user": ["explicit-state-machines", "performance-pass", "space-cleanup", "take-screenshots"]
+  },
   "graph": {
     "include": ["src/**", "skills/**", "scripts/**"],
     "tests": ["**/*.test.ts"],
@@ -29,7 +32,8 @@
           "src/teardown.ts",
           "src/testFixtures.ts",
           "src/testSetup.ts",
-          "src/text.ts"
+          "src/text.ts",
+          "src/userSkills.ts"
         ]
       },
       {

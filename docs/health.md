@@ -15,7 +15,8 @@ It reads and reports only, and always exits 0; `bun run audit` is the check
 that fails. Suggestions come in this order: free disk space below 50 GiB on the
 volume holding the checkouts, repositories where `bun run teardown` fails,
 ways Git or gh can leave SSH for GitHub ([below](#github-over-ssh)),
-checkouts that are not ready, red default branches
+[user-wide skill](tooling.md#user-wide-skills) links this machine lacks or
+cannot make, checkouts that are not ready, red default branches
 ([base freshness](tooling.md#base-freshness)), stale installs,
 clones not linked to the [screenshot store](artifacts.md),
 repositories to onboard or that discovery lost, failing audit rules, recurring
@@ -81,8 +82,8 @@ removes only git-ignored, untracked, regenerable paths in repositories no
 other process is working in, and adds build output (`--builds`), installed
 dependencies (`--deps`), and machine-wide developer caches (`--machine`) only
 when asked. From a single checkout or any other repository, run the skill's
-script directly; the skill says how. matrix owns the skill, and
-`~/.claude/skills` and `~/.agents/skills` link to it in the primary clone.
+script directly; the skill says how. matrix owns the skill and shares it as a
+[user-wide skill](tooling.md#user-wide-skills).
 
 A suggestion is a proposal. Acting on one is a normal change under the request
 that authorizes it: a sweep for a failing rule, a lesson PR for recurring

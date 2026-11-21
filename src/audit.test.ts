@@ -64,6 +64,7 @@ describe("audit", () => {
         { rule: "brand-images", detail: "no assets/brand" },
         { rule: "screenshots-store", detail: "captures no screenshots" },
         { rule: "screenshots-gallery", detail: "no website that shows captured screenshots" },
+        { rule: "user-skills-setup", detail: "declares no user-wide skills" },
         { rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" },
         { rule: "mise-lock", detail: "declares no mise tools" },
         { rule: "push-gate", detail: "no pre-push hook" },
@@ -293,6 +294,26 @@ describe("audit", () => {
     };
     expect(rule("agent-tool", producer)).toBe("no tracked skills/explicit-state-machines/SKILL.md");
     expect(rule("agent-tool-shipping", { ...producer, "skills/explicit-state-machines/SKILL.md": "# Explicit State Machines\n" })).toBeUndefined();
+  });
+
+  test("asks a repository that declares user-wide skills to link them from a package script", () => {
+    const rule = (name: string, files: Record<string, string | null>) => failures(checkout(name, files), ["user-skills-setup"])["user-skills-setup"];
+    const declares = { "agent-tool.json": JSON.stringify({ schemaVersion: 1, skills: { user: ["seo-optimization"] } }) };
+    const scripts = (extra: Record<string, string>) =>
+      JSON.stringify({
+        name: "x",
+        scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", ...extra },
+        devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL },
+      });
+    expect(rule("unlinked", declares)).toBe("no package script runs agent-tool skills link --apply; run it from the local setup script, such as hooks:install");
+    // A preview or a check alone does not link anything.
+    expect(
+      rule("preview-only", { ...declares, "package.json": scripts({ "hooks:check": "agent-tool skills check-links && agent-tool skills link" }) }),
+    ).toBeDefined();
+    expect(
+      rule("linked", { ...declares, "package.json": scripts({ "hooks:install": "agent-tool hooks install --apply && agent-tool skills link --apply" }) }),
+    ).toBeUndefined();
+    expect(rule("none-declared", { "agent-tool.json": JSON.stringify({ schemaVersion: 1, skills: { user: [] } }) })).toBeUndefined();
   });
 
   // README cases run only the README rules: a whole audit per fixture made

@@ -106,6 +106,15 @@ codex mcp add sentry -- ~/github/matrix/scripts/sentry/mcp.sh
 hermes mcp add sentry --command ~/github/matrix/scripts/sentry/mcp.sh
 ```
 
+Claude Code keeps user-scope servers in its configuration directory's
+`.claude.json`, so register it once per directory: an install that sets
+`CLAUDE_CONFIG_DIR`, such as dotfiles' `claude2` for `~/.claude2`, needs its
+own registration:
+
+```sh
+CLAUDE_CONFIG_DIR="$HOME/.claude2" claude mcp add --scope user sentry -- ~/github/matrix/scripts/sentry/mcp.sh
+```
+
 For omp, use `/mcp add` in an interactive session, select **User level**, and
 register the same launcher as a stdio command. Equivalently, merge this entry
 into the active profile's user `mcp.json` (`~/.omp/agent/mcp.json` by default),
