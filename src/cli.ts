@@ -294,9 +294,9 @@ function workspaceTargets(root: string, manifest: Manifest, names: string[]): Ar
 }
 
 /**
- * Where user-wide skills link from: the workspace (unless checkouts are named) and each named or
- * present checkout that is ready, so a feature branch, a local change, or a failed sync cannot add
- * a skill that every session on the machine loads.
+ * Where user-wide skills link from: the workspace (unless checkouts are named), whatever branch it
+ * is on, and each named or present checkout that is ready, so a checkout's feature branch or local
+ * change does not add a skill that every session on the machine loads.
  */
 function userSkillTargets(
   root: string,

@@ -585,7 +585,7 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "user-skills-setup",
-    summary: "With user-wide skills in agent-tool.json: a package script that links them, for the local setup to run",
+    summary: "With user-wide skills in agent-tool.json: a package script that links them",
     source: "docs/tooling.md#user-wide-skills",
     check: checkout => {
       const declared = object(checkout.agentToolJson?.skills)?.user;

@@ -93,14 +93,20 @@ function split(reports: RepoUserSkills[]): { links: UserSkillLink[]; errors: str
   };
 }
 
-/** Summarize `skills link --apply` across repositories: links written, then failed writes and conflicts, then unreadable reports. */
+/** What sync could not do about one link: a failed write, a conflict, or a link left unwritten because a conflict blocked the repository's apply. */
+function syncProblem(link: UserSkillLink, home: string): string[] {
+  if (link.result === "failed") return [`${tilde(link.path, home)}: ${link.error ?? "could not be written"}`];
+  if (link.status === "conflict") return [conflict(link, home)];
+  if ((link.status === "create" || link.status === "repair") && link.result === undefined)
+    return [`${tilde(link.path, home)}: not linked, since a conflict in the same repository stopped every write`];
+  return [];
+}
+
+/** Summarize `skills link --apply` across repositories: links written, then what each repository could not link, then unreadable reports. */
 export function summarizeSync(reports: RepoUserSkills[], home = homedir()): UserSkillSync {
   const { links, errors } = split(reports);
   const linked = links.filter(link => link.result === "written").map(link => `${tilde(link.path, home)} -> ${tilde(link.target, home)}`);
-  const problems = links.flatMap(link => {
-    if (link.result === "failed") return [`${tilde(link.path, home)}: ${link.error ?? "could not be written"}`];
-    return link.status === "conflict" ? [conflict(link, home)] : [];
-  });
+  const problems = links.flatMap(link => syncProblem(link, home));
   return { linked: unique(linked), problems: unique([...problems, ...errors]) };
 }
 

@@ -536,9 +536,9 @@ Code reads user skills only from the directory it runs with, so each needs its
 own links.
 
 `bun run sync` links them for the workspace and every ready checkout with the
-workspace's pinned agent-tool, so an unreviewed branch or local change cannot
-add a skill that every session loads, and `bun run health` suggests linking
-whatever `agent-tool skills check-links` still finds missing. An owning
+workspace's pinned agent-tool, so a checkout's feature branch or local change
+does not add a skill that every session loads, and `bun run health` suggests
+linking whatever `agent-tool skills check-links` still finds missing. An owning
 repository also links them from a package script its local setup runs, so a
 clone used outside a workspace gets them too; the `user-skills-setup` audit rule
 checks for it. A link that already resolves to the same skill in another clone

@@ -44,7 +44,11 @@ test("sync lists links it wrote and reports conflicts, failed writes, and unread
           ],
         },
       },
-      { repo: "a2f0/balebase", report: { links: [link("conflict", "seo-optimization", `${HOME}/.agents/skills`)] } },
+      // A conflict stops the repository's whole apply, so its other links stay unwritten.
+      {
+        repo: "a2f0/balebase",
+        report: { links: [link("conflict", "seo-optimization", `${HOME}/.agents/skills`), link("create", "audit-trails")] },
+      },
       { repo: "a2f0/old", report: { error: "Unknown sync option" } },
       // The same link reported twice is listed once.
       { repo: "a2f0/again", report: { links: [link("create", "space-cleanup", undefined, { result: "written" })] } },
@@ -56,6 +60,7 @@ test("sync lists links it wrote and reports conflicts, failed writes, and unread
     problems: [
       "~/.claude2/skills/explicit-state-machines: EACCES",
       "~/.agents/skills/seo-optimization (held by something other than a link to seo-optimization)",
+      "~/.claude2/skills/audit-trails: not linked, since a conflict in the same repository stopped every write",
       "a2f0/old: Unknown sync option",
     ],
   });
