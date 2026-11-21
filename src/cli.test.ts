@@ -1,12 +1,10 @@
 import { beforeEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { MINIMUM_AGENT_TOOL, RULES } from "./audit";
-import { main, parseBaseHealthReport, parsePushGateReport, parseScreenshotLinks, type Services, userSkills } from "./cli";
+import { main, parseBaseHealthReport, parsePushGateReport, parseScreenshotLinks, type Services } from "./cli";
 import { checkoutFixture, gitIn, gitInit, tempDir } from "./testFixtures";
-import { tilde } from "./userSkills";
 
 let root: string;
 
@@ -89,7 +87,6 @@ function fakeServices(overrides: Partial<Services> = {}) {
     gitTransport: () => SSH_ONLY,
     stateMachines: () => 0,
     screenshotLinks: () => ({ unlinked: [], blocked: [] }),
-    userSkills: () => ({ links: [] }),
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -156,128 +153,7 @@ test("health suggests linking clones that miss the shared screenshot store, afte
   expect(unread.writes.join("")).not.toContain("Screenshots");
 });
 
-test("health checks user-wide skill links in the workspace and each checkout, after Git transport", () => {
-  const home = homedir();
-  const asked: Array<{ directory: string; apply: boolean }> = [];
-  const { services, writes } = fakeServices({
-    userSkills: (_root, directory, apply) => {
-      asked.push({ directory, apply });
-      if (directory === root)
-        return {
-          links: [
-            { skill: "space-cleanup", path: `${home}/.claude2/skills/space-cleanup`, target: `${root}/skills/space-cleanup`, status: "create" },
-            { skill: "take-screenshots", path: `${home}/.claude/skills/take-screenshots`, target: `${root}/skills/take-screenshots`, status: "unchanged" },
-          ],
-        };
-      return {
-        links: [
-          { skill: "seo-optimization", path: `${home}/.agents/skills/seo-optimization`, target: `${directory}/skills/seo-optimization`, status: "conflict" },
-        ],
-      };
-    },
-  });
-  expect(main(["health"], root, undefined, services)).toBe(0);
-  // The workspace, then each checkout present; a2f0/missing has none.
-  expect(asked).toEqual([
-    { directory: root, apply: false },
-    { directory: path.join(root, "checkouts", "good"), apply: false },
-  ]);
-  const report = JSON.parse(writes.join("")) as { userSkills: unknown; suggestions: string[] };
-  expect(report.userSkills).toEqual({
-    missing: ["~/.claude2/skills/space-cleanup"],
-    conflicts: ["~/.agents/skills/seo-optimization (held by something other than a link to seo-optimization)"],
-    unreadable: [],
-  });
-  expect(report.suggestions.slice(0, 2)).toEqual([
-    "Link 1 user-wide skill (~/.claude2/skills/space-cleanup): `bun run sync` links every skill a repository declares; see docs/tooling.md#user-wide-skills.",
-    "Clear 1 user-wide skill name that `skills link` will not replace: ~/.agents/skills/seo-optimization (held by something other than a link to seo-optimization); see docs/tooling.md#user-wide-skills.",
-  ]);
-
-  const markdown = fakeServices({ userSkills: () => ({ error: "agent-tool exited 2" }) });
-  expect(main(["health", "--markdown"], root, undefined, markdown.services)).toBe(0);
-  expect(markdown.writes.join("")).toContain("- User-wide skills: 2 unread.");
-  const linked = fakeServices();
-  expect(main(["health", "--markdown"], root, undefined, linked.services)).toBe(0);
-  expect(linked.writes.join("")).toContain("- User-wide skills: every declared link in place.");
-});
-
-test("sync links user-wide skills for the named checkouts and reports what needs a person without failing on it", () => {
-  const asked: Array<{ directory: string; apply: boolean }> = [];
-  const home = homedir();
-  const { services, writes, warnings } = fakeServices({
-    userSkills: (_root, directory, apply) => {
-      asked.push({ directory, apply });
-      return {
-        links: [
-          { skill: "a", path: `${home}/.claude2/skills/a`, target: `${directory}/skills/a`, status: "create", result: "written" },
-          { skill: "b", path: `${home}/.agents/skills/b`, target: `${directory}/skills/b`, status: "conflict" },
-        ],
-      };
-    },
-  });
-  // A fetch that fails at once keeps this test off the network; the checkout stays ready.
-  const ssh = process.env.GIT_SSH_COMMAND;
-  process.env.GIT_SSH_COMMAND = "false";
-  try {
-    main(["sync", "good"], root, undefined, services);
-  } finally {
-    if (ssh === undefined) delete process.env.GIT_SSH_COMMAND;
-    else process.env.GIT_SSH_COMMAND = ssh;
-  }
-  const good = path.join(root, "checkouts", "good");
-  // Named checkouts only, as with teardown; the workspace links when no names are given.
-  expect(asked).toEqual([{ directory: good, apply: true }]);
-  const report = JSON.parse(writes.join("")) as { userSkills: unknown };
-  expect(report.userSkills).toEqual({
-    linked: [`~/.claude2/skills/a -> ${tilde(good)}/skills/a`],
-    problems: ["~/.agents/skills/b (held by something other than a link to b)"],
-  });
-  expect(warnings.join("")).toContain("user skills: ~/.agents/skills/b (held by something other than a link to b)\n");
-
-  // A checkout with a local change, like one on a feature branch, is not linked from.
-  writeFileSync(path.join(good, "README.md"), "# Changed\n");
-  asked.length = 0;
-  const check = fakeServices({ userSkills: (_root, directory, apply) => (asked.push({ directory, apply }), { links: [] }) });
-  expect(main(["health"], root, undefined, check.services)).toBe(0);
-  expect(asked).toEqual([{ directory: root, apply: false }]);
-});
-
-test("runs the workspace's agent-tool for user-wide skills and reads its report, even on exit 1", () => {
-  const bin = path.join(root, "node_modules", ".bin");
-  mkdirSync(bin, { recursive: true });
-  const args = path.join(root, "args");
-  // Stands in for agent-tool: records its arguments, then answers as FAKE_MODE says.
-  writeFileSync(
-    path.join(bin, "agent-tool"),
-    `#!/bin/sh
-printf '%s\\n' "$*" > ${JSON.stringify(args)}
-case "$FAKE_MODE" in
-  conflict) echo '{"applied":false,"changes":[{"skill":"a","path":"/h/a","target":"/r/a","status":"conflict"}]}'; exit 1 ;;
-  error) echo 'Error: Declared user skill a has no source.' >&2; exit 1 ;;
-  crash) echo 'partial' ; exit 2 ;;
-esac
-echo '{"ok":true,"changes":[]}'
-`,
-  );
-  chmodSync(path.join(bin, "agent-tool"), 0o755);
-  const run = (mode: string, apply: boolean) => {
-    process.env.FAKE_MODE = mode;
-    try {
-      return userSkills(root, "/checkout", apply);
-    } finally {
-      delete process.env.FAKE_MODE;
-    }
-  };
-  expect(run("ok", false)).toEqual({ links: [] });
-  expect(readFileSync(args, "utf8")).toBe("--repo /checkout skills check-links\n");
-  expect(run("conflict", true)).toEqual({ links: [{ skill: "a", path: "/h/a", target: "/r/a", status: "conflict" }] });
-  expect(readFileSync(args, "utf8")).toBe("--repo /checkout skills link --apply\n");
-  expect(run("error", true)).toEqual({ error: "Error: Declared user skill a has no source." });
-  expect(run("crash", false)).toEqual({ error: "partial" });
-  expect(userSkills(path.join(root, "nowhere"), "/checkout", false)).toMatchObject({ error: expect.stringContaining("agent-tool could not run") });
-});
-
-test("reads which clones the take-screenshots skill's link --all dry run would link and which wait", () => {
+test("reads which clones agent-tool's screenshots link --all dry run would link and which wait", () => {
   const results = [
     { name: "tearleads", before: "linked" },
     { name: "tearleads2", before: "missing", action: "link" },

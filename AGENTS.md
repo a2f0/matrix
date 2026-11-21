@@ -2,9 +2,8 @@
 
 This repository is a workspace for making one change across many repositories.
 `matrix.json` lists the managed repositories, and `bun run sync` clones each
-into `checkouts/<name>` and links the
-[user-wide skills](docs/tooling.md#user-wide-skills) they declare.
-`checkouts/` is gitignored; never commit its contents here.
+into `checkouts/<name>`. `checkouts/` is gitignored; never commit its contents
+here.
 
 Resolve GitHub identity with `gh repo view --json nameWithOwner` from the
 directory you are working in, never from a folder name. Work on feature
@@ -74,9 +73,10 @@ command, add the old spelling to the audit's superseded patterns.
 `bun run health [--remote]` combines status, the audit, discovery, and sweep
 retro into suggested next steps ([docs/health.md](docs/health.md)); start there
 when a session has no specific task. Acting on a suggestion still needs a
-request that authorizes it. Shared skills work here or in any repository:
-[space-cleanup](skills/space-cleanup/SKILL.md) for disk space and
-[performance-pass](skills/performance-pass/SKILL.md) for page loads. Here,
+request that authorizes it. agent-tool installs shared skills in every
+repository: [space-cleanup](.claude/skills/space-cleanup/SKILL.md) for disk
+space and [performance-pass](.claude/skills/performance-pass/SKILL.md) for page
+loads. Here,
 [merged-commits](skills/merged-commits/SKILL.md) counts original PR commits.
 Before reporting work done, `bun run teardown` must pass.
 
@@ -178,7 +178,7 @@ build.
 
 Screenshots are captured once into `../matrix-artifacts` and shared by every
 clone; capture and check them with the
-[take-screenshots skill](skills/take-screenshots/SKILL.md)
+[take-screenshots skill](.claude/skills/take-screenshots/SKILL.md)
 ([docs/artifacts.md](docs/artifacts.md)), never per deploy.
 
 ## Store releases
@@ -188,8 +188,8 @@ Repositories that ship iOS or Android store builds follow
 same lane and package-script names, `NATIVE_RELEASE_TIER` for a staging app,
 and store secrets in `.secrets/<tier>/` under the names it lists. Bring a newly
 onboarded app to it, and change it there before diverging in one repository.
-Store apps also carry the app-store-readiness skill and readiness lanes that
-balebase owns ([docs/fastlane.md](docs/fastlane.md#readiness)); audit a store
+Store apps also carry agent-tool's app-store-readiness skill and the readiness
+lanes balebase owns ([docs/fastlane.md](docs/fastlane.md#readiness)); audit a store
 candidate with them and record its findings in the PR. Maestro's driver uses
 port 7001 for every device, so one Maestro run drives this machine at a time,
 whatever its session: check for a running `maestro` before starting one, and
@@ -197,13 +197,11 @@ boot your own simulator or emulator and name it explicitly.
 
 ## Search indexing
 
-Repositories that serve websites follow the
-[seo-optimization skill](https://github.com/a2f0/balebase/blob/main/skills/seo-optimization/SKILL.md),
-which balebase owns and shares as a
-[user-wide skill](docs/tooling.md#user-wide-skills):
+Repositories that serve websites follow agent-tool's
+[seo-optimization skill](.claude/skills/seo-optimization/SKILL.md):
 non-production hosts are noindexed, production pages carry full metadata. Bring
-a newly onboarded site to it, and change the skill before diverging in one
-repository.
+a newly onboarded site to it, and change the skill in agent-tool before
+diverging in one repository.
 
 ## State machines
 

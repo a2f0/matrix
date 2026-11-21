@@ -33,8 +33,9 @@ regenerable by capturing again, so it needs no backup.
 
 ## Commands
 
-The commands are the [take-screenshots skill](../skills/take-screenshots/SKILL.md)'s
-script. From this workspace:
+The commands are agent-tool's `screenshots status|link|capture`, which the
+managed [take-screenshots skill](../.claude/skills/take-screenshots/SKILL.md)
+runs. From this workspace:
 
 ```sh
 bun run artifacts status [repo...] [--all]    # link state and newest capture
@@ -42,8 +43,7 @@ bun run artifacts link [repo...] [--all] [--apply] [--supersede]   # point .scre
 bun run artifacts capture <repo> [--apply] [--allow-dirty] [-- args...]
 ```
 
-From any other clone, run the same script by path:
-`bun ~/.agents/skills/take-screenshots/scripts/artifacts.ts <command>`. Each
+From any other clone, run its pinned `agent-tool screenshots <command>`. Each
 is a dry run until `--apply`; `--json` prints the report as JSON. With no
 names, the workspace selects every checkout that captures screenshots, and a
 clone selects itself.
@@ -150,9 +150,9 @@ runs, the error names the group to stop; delete the file once it is gone.
 What a repository that captures screenshots must provide (the `screenshots`
 package script, the ignore pattern, the output layout, and how builds read
 captures) is
-[adding capture to a repository](../skills/take-screenshots/references/adding-capture.md).
+[adding capture to a repository](../.claude/skills/take-screenshots/references/adding-capture.md).
 `bun run audit --rule screenshots-store` checks the script and ignore pattern,
 and `--rule screenshots-gallery` checks that a website stages captures with
 agent-tool.
 
-Agents follow the [take-screenshots skill's rules](../skills/take-screenshots/SKILL.md#rules).
+Agents follow the [take-screenshots skill's rules](../.claude/skills/take-screenshots/SKILL.md#rules).

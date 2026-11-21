@@ -19,6 +19,14 @@ const SUPERSEDED: ReadonlyArray<{ id: string; pattern: string; replacement: stri
   { id: "push-delete", pattern: "git push [^`]*--delete", replacement: "agent-tool repo cleanup", exempt: /--force-with-lease/ },
   // agent-tool's push gate records each push's step timings as a run-group report (a2f0/matrix#86).
   { id: "push-gate-timings", pattern: "showPushGateTimings", replacement: "agent-tool runs list" },
+  // agent-tool 0.1.70-0.1.74 ship the shared skills as managed skills, and their scripts as commands.
+  {
+    id: "skill-scripts",
+    pattern: "(take-screenshots|space-cleanup|performance-pass|seo-optimization)/scripts/",
+    replacement: "agent-tool screenshots, space, perf, or seo probe",
+  },
+  // agent-tool 0.1.71 removed personal skill links in favor of managed skills.
+  { id: "skills-link", pattern: "agent-tool skills (link|check-links)", replacement: "the managed skills agent-tool skills install --apply writes" },
   // Rewriting GitHub SSH URLs to HTTPS reaches the keychain credential helper (a2f0/matrix#61).
   {
     id: "https-insteadof",

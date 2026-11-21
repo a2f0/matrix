@@ -6,6 +6,8 @@ export default {
   entry: ["src/**/*.test.ts"],
   project: ["src/**/*.ts", "skills/**/*.{ts,js}"],
   // Host tools the scripts and tests run, not package dependencies.
-  ignoreBinaries: ["gpg", "du", "openssl"],
+  ignoreBinaries: ["gpg"],
+  // `bun run perf measure|shot` (agent-tool perf) loads Playwright from the workspace's node_modules.
+  ignoreDependencies: ["playwright"],
   treatConfigHintsAsErrors: true,
 } satisfies KnipConfig;

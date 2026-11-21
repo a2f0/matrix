@@ -51,7 +51,7 @@ export function gitIn(root: string, ...args: string[]): string {
 }
 
 /** Write each file under `root`, creating its directories. */
-export function write(root: string, files: Record<string, string>): void {
+function write(root: string, files: Record<string, string>): void {
   for (const [file, content] of Object.entries(files)) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     writeFileSync(path.join(root, file), content);

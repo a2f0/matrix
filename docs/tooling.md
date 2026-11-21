@@ -521,29 +521,21 @@ hold them until the user asks. Package scripts are not classified, so
 `bun run` and `agent:run` keep the harness default. `bun run audit --rule harness-permissions` reports
 repositories that lack the files or the check.
 
-## User-wide skills
+## Shared skills
 
-Some skills serve every repository, not only the one that owns them: matrix's
-space-cleanup, performance-pass, and take-screenshots, and balebase's
-seo-optimization, app-store-readiness, and audit-trails. The owning repository
-lists them under `skills.user` in its `agent-tool.json`, and
-`agent-tool skills link --apply` links each into `~/.agents/skills` and into
-`skills/` in every Claude Code configuration directory: `~/.claude`, the one
-`CLAUDE_CONFIG_DIR` names, and any other `~/.claude*` directory holding
-`settings.json` or `.claude.json`, such as the `~/.claude2` that dotfiles'
-`claude2` runs a second account with. Claude Code reads user skills only from
-the directory it runs with, so each needs its own links.
+A skill every repository uses ships in agent-tool's managed bundle, so each
+repository pins, installs, and checks it like the rest: space-cleanup,
+performance-pass, and take-screenshots, which matrix owned, and
+seo-optimization, app-store-readiness, and audit-trails, which balebase owned.
+Their scripts are agent-tool commands (`space`, `perf`, `screenshots`, and
+`seo probe`), run with each checkout's pin. A skill only one repository uses
+stays in that repository's skill folders.
 
-`bun run sync` links them for the workspace and every ready checkout with the
-workspace's pinned agent-tool, so a checkout's feature branch or local change
-does not add a skill that every session loads, and `bun run health` suggests
-linking whatever `agent-tool skills check-links` still finds missing. An owning
-repository also links them from a package script its local setup runs, so a
-clone used outside a workspace gets them too; the `user-skills-setup` audit rule
-checks for it. A link that already resolves to the same skill in another clone
-stays; a file, directory, or different skill holding the name is reported and
-never replaced. A link follows its clone's working tree, so a branch checked out
-there is what every session reads until the clone returns to its default
-branch. Claude Code's `skills/synced` store stays per directory, as do its
-login, folder trust, plugins, and user-scope MCP servers such as
-[Sentry](secrets.md#sentry-mcp).
+Install them only through a repository's pin, never by linking a clone's copy
+into `~/.agents/skills` or a Claude Code configuration directory's `skills/`.
+Claude Code prefers a personal skill to the project's managed copy of the same
+name, and reads personal skills only from the configuration directory it runs
+with, so a link would override every repository's pin and reach only one of
+`~/.claude` and dotfiles' `~/.claude2`. Login, folder trust, plugins, and
+user-scope MCP servers such as [Sentry](secrets.md#sentry-mcp) stay per
+configuration directory.
