@@ -80,8 +80,8 @@ export interface Services {
   stateMachines(root: string, directories: string[], flags: string[]): number;
   /** Clones not linked to the shared screenshot store, from agent-tool's `screenshots link --all` dry run; undefined when unreadable. */
   screenshotLinks(root: string): ScreenshotLinks | undefined;
-  /** Personal skills on this machine named like a skill the workspace's agent-tool manages. */
-  personalSkills(root: string): string[];
+  /** Personal skills on this machine named like a skill the workspace's agent-tool manages; undefined when unreadable. */
+  personalSkills(root: string): string[] | undefined;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -265,7 +265,14 @@ const SERVICES: Services = {
   gitTransport: root => inspectGitTransport(root),
   stateMachines,
   screenshotLinks,
-  personalSkills: root => shadowingSkills(managedSkillNames(root)),
+  personalSkills: root => {
+    // A home directory health cannot read leaves the report without the field; health still exits 0.
+    try {
+      return shadowingSkills(managedSkillNames(root));
+    } catch {
+      return undefined;
+    }
+  },
 };
 
 /** The workspace, then every checkout present, or only the named checkouts. */

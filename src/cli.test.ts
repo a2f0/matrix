@@ -174,6 +174,9 @@ test("health suggests removing personal skills that override managed ones, with 
   expect(main(["health", "--markdown"], root, undefined, none.services)).toBe(0);
   expect(none.writes.join("")).toContain("- Personal skills: none override a managed skill.");
   expect(none.writes.join("")).not.toContain("Remove ");
+  const unread = fakeServices({ personalSkills: () => undefined });
+  expect(main(["health", "--markdown"], root, undefined, unread.services)).toBe(0);
+  expect(unread.writes.join("")).not.toContain("Personal skills");
 });
 
 test("sync reports each named checkout and exits 1 when one fails", () => {
