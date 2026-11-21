@@ -25,16 +25,22 @@ dry runs until `--apply`; `--json` gives agents the report.
 
 | Command | Does |
 | --- | --- |
-| `status [repo...]` | Link state of each clone and its newest capture relative to HEAD |
-| `link [repo...] [--apply] [--supersede]` | Point `.screenshots` at the store; moves an existing capture into an empty store, or with `--supersede` to `<project>/superseded/` |
-| `capture [repo] [--apply] [--allow-dirty] [-- args...]` | Run the repository's `screenshots` package script under the project lock and record `capture.json` |
+| `status [repo...] [--all]` | Link state of each clone and its newest capture relative to HEAD |
+| `link [repo...] [--all] [--apply] [--supersede]` | Point `.screenshots` at the store; moves an existing capture into an empty store, or with `--supersede` to `<project>/superseded/` |
+| `capture [repo] [--apply] [--allow-dirty] [-- args...]` | Link every clone of the store's projects that has no `.screenshots`, then run the repository's `screenshots` package script under the project lock and record `capture.json` |
+
+`--all` selects every clone on this machine whose project the store already
+holds, beside the store or in a matrix workspace's checkouts, worktrees
+included: `link --all --apply` links them all in one run.
 
 `MATRIX_ARTIFACTS_DIR` overrides the store location.
 
 ## Procedure
 
 1. `status` first. If the clone is not `linked`, run `link`, then
-   `link --apply`. A `blocked` result names what a person must decide (two
+   `link --apply`; `capture` links a clone with no `.screenshots` itself, and
+   `status --all` or `link --all` covers every clone on this machine. A
+   `blocked` result names what a person must decide (two
    different captures: compare their dates and commits, and if the store's is
    newer rerun with `--supersede`, a link that points elsewhere, a `.screenshots/` ignore
    pattern that needs its trailing slash removed in a PR).

@@ -77,6 +77,8 @@ export interface Services {
   gitTransport(root: string): GitTransport;
   /** agent-tool's `state-machines` over the given repositories, printing straight to the terminal; returns its exit status. */
   stateMachines(root: string, directories: string[], flags: string[]): number;
+  /** Clones not linked to the shared screenshot store, from the take-screenshots skill's `status --all`; undefined when unreadable. */
+  screenshotLinks(root: string): string[] | undefined;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -203,6 +205,35 @@ function stateMachines(root: string, directories: string[], flags: string[]): nu
   return result.status ?? 1;
 }
 
+/**
+ * The skill runs as its own process: matrix's commands sit below skills, which
+ * stand alone so they run by path from any repository.
+ */
+function screenshotLinks(root: string): string[] | undefined {
+  const script = path.join(root, "skills", "take-screenshots", "scripts", "artifacts.ts");
+  const result = spawnSync(process.execPath, [script, "status", "--all", "--json"], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  // It exits 1 when a clone is not linked, with the same report.
+  if (result.error || (result.status !== 0 && result.status !== 1)) return undefined;
+  return unlinkedClones(result.stdout);
+}
+
+/** The clones `status --all --json` reports as not linked, or linked to another repository's namespace; undefined for any other output. */
+export function unlinkedClones(stdout: string): string[] | undefined {
+  let report: unknown;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    return undefined;
+  }
+  if (Array.isArray(report)) return report.length === 0 ? [] : undefined;
+  const entries = (report as { entries?: unknown } | null)?.entries;
+  if (!Array.isArray(entries)) return undefined;
+  return entries.flatMap(entry => {
+    const { name, link, foreign } = (entry ?? {}) as { name?: unknown; link?: { state?: unknown }; foreign?: unknown };
+    return typeof name === "string" && (link?.state !== "linked" || foreign !== undefined) ? [name] : [];
+  });
+}
+
 function diskSpace(directory: string): DiskSpace {
   const stats = statfsSync(directory);
   return { free: stats.bavail * stats.bsize, total: stats.blocks * stats.bsize };
@@ -224,6 +255,7 @@ const SERVICES: Services = {
   teardown,
   gitTransport: root => inspectGitTransport(root),
   stateMachines,
+  screenshotLinks,
 };
 
 /** The workspace, then every checkout present, or only the named checkouts. */
@@ -461,6 +493,7 @@ const COMMANDS = new Map<string, Handler>([
         disk: services.diskSpace(root),
         git: services.gitTransport(root),
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
+        unlinkedScreenshots: services.screenshotLinks(root),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
           defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),

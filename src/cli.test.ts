@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { MINIMUM_AGENT_TOOL, RULES } from "./audit";
-import { main, parseBaseHealthReport, parsePushGateReport, type Services } from "./cli";
+import { main, parseBaseHealthReport, parsePushGateReport, type Services, unlinkedClones } from "./cli";
 import { checkoutFixture, gitIn, gitInit, tempDir } from "./testFixtures";
 
 let root: string;
@@ -86,6 +86,7 @@ function fakeServices(overrides: Partial<Services> = {}) {
     teardown: () => CLEAN_TEARDOWN,
     gitTransport: () => SSH_ONLY,
     stateMachines: () => 0,
+    screenshotLinks: () => [],
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -126,6 +127,33 @@ test("health reports findings without the network unless asked, and exits zero",
   expect(markdown).toContain("- Default branches: 1 green.");
   expect(markdown).toContain("Onboard a2f0/new: `bun run discover --apply`");
   expect(markdown).toContain("- Git: GitHub over SSH through ssh.github.com:443, no HTTPS credential helper, gh on SSH.");
+});
+
+test("health suggests linking clones that miss the shared screenshot store, after stale installs", () => {
+  const { services, writes } = fakeServices({ screenshotLinks: () => ["tearleads2", "matrix5/checkouts/nc"] });
+  expect(main(["health"], root, undefined, services)).toBe(0);
+  const report = JSON.parse(writes.join("")) as { screenshots: unknown; suggestions: string[] };
+  expect(report.screenshots).toEqual({ unlinked: ["tearleads2", "matrix5/checkouts/nc"] });
+  expect(report.suggestions.at(-2)).toStartWith("Reinstall dependencies in a2f0/good");
+  expect(report.suggestions.at(-1)).toBe(
+    "Link 2 clones to the shared screenshot store (tearleads2, matrix5/checkouts/nc): `bun run artifacts link --all --apply`; see docs/artifacts.md.",
+  );
+  // A report that could not be read leaves health as it was.
+  const unread = fakeServices({ screenshotLinks: () => undefined });
+  expect(main(["health", "--markdown"], root, undefined, unread.services)).toBe(0);
+  expect(unread.writes.join("")).not.toContain("Screenshots");
+});
+
+test("reads unlinked clones from the take-screenshots skill's status --all report", () => {
+  const entries = [
+    { name: "tearleads", link: { state: "linked" } },
+    { name: "tearleads2", link: { state: "missing" } },
+    { name: "fork", link: { state: "linked" }, foreign: "the store holds captures of a2f0/app, not someone/app" },
+    { name: "own", link: { state: "directory", entries: 2 } },
+  ];
+  expect(unlinkedClones(JSON.stringify({ artifacts: "/store", entries }))).toEqual(["tearleads2", "fork", "own"]);
+  expect(unlinkedClones("[]")).toEqual([]);
+  for (const output of ["", "not json", "null", "{}", '[{"name":"x"}]']) expect(unlinkedClones(output)).toBeUndefined();
 });
 
 test("health suggests keeping Git on SSH right after disk and leftover processes", () => {

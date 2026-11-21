@@ -6,7 +6,7 @@ import { targetFor } from "./namespace";
 import { LINK, lexists, type Target } from "./store";
 
 // Kept in sync with space-cleanup/scripts/targets.ts isMatrixWorkspace.
-function isMatrixWorkspace(root: string): boolean {
+export function isMatrixWorkspace(root: string): boolean {
   return existsSync(path.join(root, "matrix.json")) && existsSync(path.join(root, "checkouts"));
 }
 
@@ -32,7 +32,7 @@ export function packageScripts(root: string): Record<string, unknown> {
 }
 
 /** Whether a repository captures screenshots: a `screenshots` script, or a capture left in .screenshots. */
-function captures(root: string): boolean {
+export function captures(root: string): boolean {
   return typeof packageScripts(root).screenshots === "string" || lexists(path.join(root, LINK));
 }
 

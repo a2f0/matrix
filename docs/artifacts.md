@@ -37,8 +37,8 @@ The commands are the [take-screenshots skill](../skills/take-screenshots/SKILL.m
 script. From this workspace:
 
 ```sh
-bun run artifacts status [repo...]            # link state and newest capture
-bun run artifacts link [repo...] [--apply] [--supersede]   # point .screenshots at the store
+bun run artifacts status [repo...] [--all]    # link state and newest capture
+bun run artifacts link [repo...] [--all] [--apply] [--supersede]   # point .screenshots at the store
 bun run artifacts capture <repo> [--apply] [--allow-dirty] [-- args...]
 ```
 
@@ -57,11 +57,25 @@ clone selects itself.
   refuse them until one capture through `capture` records a commit. It also refuses when the root
   `.gitignore` lists `.screenshots/` with a trailing slash, which does not
   match a symlink.
+- `--all` selects every clone on this machine whose project the store already
+  holds: Git repositories beside the store, linked worktrees included, and the
+  checkouts of matrix workspaces beside it, which are exactly the places a
+  clone that resolves this store can be. It reads each clone's identity from
+  origin's URL, without GitHub, so a run over dozens of clones takes about a
+  second; a renamed repository's clones join once one clone has recorded the
+  rename online. A repository joins the store when one clone runs `link` or
+  `capture`. `link --all --apply` links every clone in one run, and `status
+  --all` exits 1 while any is not linked; `bun run health` suggests the link
+  when one is not. `--supersede` still names its clone.
 - `capture` runs the repository's `screenshots` package script, forwarding
   arguments after `--`, under the project's lock, so two clones never capture
   into the store at once. The capture runs in its own process group, which
   receives `SIGINT` and `SIGTERM`, and the lock is held until every process in
-  that group has exited. It refuses a clone with local changes, which would publish
+  that group has exited. Before it starts, it links every clone of the store's
+  projects, itself first, whose `.screenshots` is missing or an empty
+  directory, so new clones and worktrees join without anyone running `link`.
+  A clone holding its own capture, or one `link` refuses, is reported and left
+  for a person. It refuses a clone with local changes, which would publish
   uncommitted work, unless `--allow-dirty`, which records `dirty: true` so
   builds refuse to publish it until a clean recapture. It records the commit, branch,
   whether that commit is on origin's default branch, and the outcome.
