@@ -19,6 +19,16 @@ const MIN_FREE_DISK_GIB = 50;
 const GIB = 1024 ** 3;
 
 /**
+ * Clones of the screenshot store's projects whose .screenshots does not link it
+ * (docs/artifacts.md): `unlinked` ones `link --all --apply` links, and
+ * `blocked` ones wait on a person, such as a clone holding its own capture.
+ */
+export interface ScreenshotLinks {
+  readonly unlinked: string[];
+  readonly blocked: string[];
+}
+
+/**
  * A default branch's CI, from agent-tool's `repo base-health`: `red` names the
  * failing checks and the merges since they last passed, and `unknown` says why
  * GitHub could not be read.
@@ -42,6 +52,8 @@ export interface HealthInputs {
   readonly git?: GitTransport;
   /** Present only with --remote: each checkout's default-branch CI. */
   readonly defaultBranches?: DefaultBranchHealth[];
+  /** Clones on this machine whose .screenshots does not link the shared store; absent when that could not be read. */
+  readonly screenshots?: ScreenshotLinks;
 }
 
 export interface Health {
@@ -74,6 +86,7 @@ export interface Health {
     readonly red: Array<{ repo: string; detail: string }>;
     readonly unknown: Array<{ repo: string; detail: string }>;
   };
+  readonly screenshots?: ScreenshotLinks;
   readonly sweeps: {
     readonly read: string[];
     readonly recurring: Array<Pick<Recurrence, "kind" | "cause" | "repos" | "sweeps">>;
@@ -118,12 +131,26 @@ function defaultBranchSuggestions(branches: DefaultBranchHealth[]): string[] {
   });
 }
 
-/** Suggestions about the checkouts themselves: their state, installs, and repositories discovery adds or loses. */
+function screenshotSuggestions(links: ScreenshotLinks | undefined): string[] {
+  const suggestions: string[] = [];
+  if (links?.unlinked.length)
+    suggestions.push(
+      `Link ${plural(links.unlinked.length, "clone")} to the shared screenshot store (${list(links.unlinked)}): \`bun run artifacts link --all --apply\`; see docs/artifacts.md.`,
+    );
+  if (links?.blocked.length)
+    suggestions.push(
+      `Decide how to link ${plural(links.blocked.length, "clone")} to the shared screenshot store (${list(links.blocked)}): \`bun run artifacts link --all\` says what each needs; see docs/artifacts.md.`,
+    );
+  return suggestions;
+}
+
+/** Suggestions about the checkouts themselves: their state, installs, screenshot links, and repositories discovery adds or loses. */
 function checkoutSuggestions(inputs: HealthInputs, notReadyList: Array<{ repo: string; reason: string }>, stale: string[]): string[] {
   const suggestions: string[] = [];
   for (const { repo, reason } of notReadyList) suggestions.push(`Inspect ${repo} before the next sweep: ${reason}.`);
   suggestions.push(...defaultBranchSuggestions(inputs.defaultBranches ?? []));
   if (stale.length > 0) suggestions.push(`Reinstall dependencies in ${list(stale)}; their node_modules hold a different agent-tool than they pin.`);
+  suggestions.push(...screenshotSuggestions(inputs.screenshots));
   for (const repo of inputs.discovery?.added ?? []) suggestions.push(`Onboard ${repo}: \`bun run discover --apply\`, then the onboarding steps in AGENTS.md.`);
   for (const repo of inputs.discovery?.notDiscovered ?? [])
     suggestions.push(`Check ${repo}: it is managed, but discovery no longer finds it (renamed, archived, or no longer public?).`);
@@ -185,6 +212,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     ...(inputs.running && { running: { leftover, sessionShells: inputs.running.sessionShells, notes: inputs.running.notes } }),
     ...(inputs.git && { git: inputs.git }),
     ...(inputs.defaultBranches && { defaultBranches: groupDefaultBranches(inputs.defaultBranches) }),
+    ...(inputs.screenshots && { screenshots: inputs.screenshots }),
     sweeps: {
       read: inputs.retro.sweeps,
       recurring: inputs.retro.recurring.map(({ kind, cause, repos, sweeps }) => ({ kind, cause, repos, sweeps })),
@@ -245,13 +273,21 @@ function defaultBranchesLine(branches: Health["defaultBranches"]): string {
   return `- Default branches: ${parts.join(", ")}.`;
 }
 
+function screenshotsLine({ unlinked, blocked }: ScreenshotLinks): string {
+  const parts = [
+    ...(unlinked.length > 0 ? [`${list(unlinked)} not linked to the shared store`] : []),
+    ...(blocked.length > 0 ? [`${list(blocked)} waiting on a decision`] : []),
+  ];
+  return `- Screenshots: ${parts.length === 0 ? "every clone links the shared store" : parts.join("; ")}.`;
+}
+
 function sweepsLine(sweeps: Health["sweeps"]): string {
   return `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no unresolved recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}${sweeps.resolved.length > 0 ? ` (${sweeps.resolved.length} resolved)` : ""}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`;
 }
 
 /** The report as Markdown, for a person, a scheduled run's message, or an issue. */
 export function markdownHealth(health: Health, at = new Date()): string {
-  const { checkouts, audit, discovery, disk, running, git, defaultBranches, sweeps } = health;
+  const { checkouts, audit, discovery, disk, running, git, defaultBranches, screenshots, sweeps } = health;
   const lines = [
     "# Matrix health",
     "",
@@ -264,6 +300,7 @@ export function markdownHealth(health: Health, at = new Date()): string {
     ...(running ? [runningLine(running)] : []),
     discoveryLine(discovery),
     defaultBranchesLine(defaultBranches),
+    ...(screenshots ? [screenshotsLine(screenshots)] : []),
     sweepsLine(sweeps),
     "",
     "## Next steps",

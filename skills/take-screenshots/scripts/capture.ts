@@ -117,25 +117,29 @@ export interface Timing {
   readonly killMs?: number;
 }
 
-export async function capture(
-  target: Target,
-  artifacts: string,
-  options: { apply: boolean; allowDirty: boolean; args: string[] },
-  runner: Runner = RUNNER,
-  timing: Timing = {},
-): Promise<CapturePlan> {
+export interface CaptureOptions {
+  readonly apply: boolean;
+  readonly allowDirty: boolean;
+  readonly args: string[];
+}
+
+export async function capture(target: Target, artifacts: string, options: CaptureOptions, runner: Runner = RUNNER, timing: Timing = {}): Promise<CapturePlan> {
   const plan = planCapture(target, artifacts, options);
   if (!options.apply) return plan;
   return runCapture(target, artifacts, plan, options.args, runner, timing);
 }
 
-/** Checks the repository can be captured and describes the capture, changing nothing. */
-function planCapture(target: Target, artifacts: string, options: { allowDirty: boolean; args: string[] }): PlannedCapture {
+/**
+ * Checks the repository can be captured and describes the capture, changing
+ * nothing. `willLink` plans a clone that is not linked yet as linked, for a
+ * caller that links it before capturing; capture() itself never passes it.
+ */
+export function planCapture(target: Target, artifacts: string, options: Omit<CaptureOptions, "apply">, willLink = false): PlannedCapture {
   if (typeof packageScripts(target.root).screenshots !== "string") {
     throw new Error(`${target.name} has no \`screenshots\` package script; see the take-screenshots skill's repository contract`);
   }
   const state = linkState(target, artifacts);
-  if (state.state !== "linked") throw new Error(`${target.name}/${LINK} is ${state.state}, not linked to the store; run \`link --apply\` first`);
+  if (state.state !== "linked" && !willLink) throw new Error(`${target.name}/${LINK} is ${state.state}, not linked to the store; run \`link --apply\` first`);
   const commit = gitValue(target.root, "rev-parse", "HEAD");
   if (!commit) throw new Error(`${target.name} has no commit to capture`);
   const dirty = isDirty(target.root);

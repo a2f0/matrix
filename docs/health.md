@@ -17,6 +17,7 @@ volume holding the checkouts, repositories where `bun run teardown` fails,
 ways Git or gh can leave SSH for GitHub ([below](#github-over-ssh)),
 checkouts that are not ready, red default branches
 ([base freshness](tooling.md#base-freshness)), stale installs,
+clones not linked to the [screenshot store](artifacts.md),
 repositories to onboard or that discovery lost, failing audit rules, recurring
 sweep friction without a recorded resolution, unfinished sweep entries, and
 unmanaged checkout entries. JSON output has the same parts for agents;

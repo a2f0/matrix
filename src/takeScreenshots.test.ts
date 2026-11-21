@@ -6,6 +6,7 @@ import path from "node:path";
 import { resolveTargets as cleanupTargets } from "../skills/space-cleanup/scripts/targets";
 import { main, parseOptions } from "../skills/take-screenshots/scripts/artifacts";
 import { drainGroup, type Runner } from "../skills/take-screenshots/scripts/capture";
+import { sharedStore } from "../skills/take-screenshots/scripts/clones";
 import { link, linkState } from "../skills/take-screenshots/scripts/link";
 import { acquireLock } from "../skills/take-screenshots/scripts/lock";
 import { claimNamespace, existingCase, githubRepo, targetFor, updateOwner } from "../skills/take-screenshots/scripts/namespace";
@@ -271,7 +272,10 @@ describe("take-screenshots artifacts", () => {
 
   test("refuses dirty trees and unlinked clones, and records failed captures", SPAWNS, async () => {
     const { home, app } = workspace();
+    // A clone holding its own capture is not linked automatically, even into an empty store: a person decides.
+    write(app, { ".screenshots/web/home.png": "own" });
     await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("not linked");
+    rmSync(path.join(app, LINK), { recursive: true });
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     write(app, { "src/wip.ts": "x" });
     await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("local changes");
@@ -812,6 +816,134 @@ console.log(error ? "lost" : "won");
     await expect(main(["capture", "app", "lib"], root, ok, say)).rejects.toThrow("capture runs one repository at a time; name it");
   });
 
+  test("--all finds every clone of the store's projects beside it and links the ones that need no decision", SPAWNS, async () => {
+    const { home, root, app } = workspace();
+    const artifacts = path.join(home, "matrix-artifacts");
+    const lines: string[] = [];
+    const say = (text: string) => {
+      lines.push(text);
+    };
+    // Nothing joins the store until one clone links or captures.
+    expect(await main(["status", "--all"], app, undefined, say)).toBe(0);
+    expect(lines.at(-1)).toBe(`No clone on this machine captures into ${artifacts}.`);
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    write(app, { ".screenshots/web/home.png": "shared" });
+
+    const day = repo(path.join(home, "app-day"), ".screenshots\n");
+    gitIn(day, "worktree", "add", "-q", "-b", "wt", path.join(home, "app-wt"));
+    const second = path.join(home, "matrix2");
+    write(second, { "matrix.json": "{}" });
+    gitInit(second);
+    repo(path.join(second, "checkouts", "app"), ".screenshots\n");
+    const own = repo(path.join(home, "app-own"), ".screenshots\n");
+    write(own, { ".screenshots/web/home.png": "own" });
+    const empty = repo(path.join(home, "app-empty"), ".screenshots\n");
+    mkdirSync(path.join(empty, LINK));
+    repo(path.join(home, "app-slashed"), ".screenshots/\n");
+    // A pre-rename remote joins through the alias GitHub confirmed earlier, offline.
+    gitIn(repo(path.join(home, "app-old-name"), ".screenshots\n"), "remote", "set-url", "origin", "git@github.com:a2f0/OldApp.git");
+    writeFileSync(path.join(artifacts, "app", "repository.json"), `${JSON.stringify({ repo: "a2f0/app", aliases: ["a2f0/oldapp"] })}\n`);
+    // Left out: another project, another owner's repository of the same name, no GitHub origin, a symlinked name.
+    gitIn(repo(path.join(home, "other"), ".screenshots\n"), "remote", "set-url", "origin", "git@github.com:a2f0/other.git");
+    gitIn(repo(path.join(home, "fork-app"), ".screenshots\n"), "remote", "set-url", "origin", "git@github.com:someone/app.git");
+    gitIn(repo(path.join(home, "local-app"), ".screenshots\n"), "remote", "set-url", "origin", "/srv/git/app.git");
+    symlinkSync(day, path.join(home, "day-link"));
+
+    const names = ["app-day", "app-empty", "app-old-name", "app-own", "app-slashed", "app-wt", "matrix/checkouts/app", "matrix2/checkouts/app"];
+    lines.length = 0;
+    expect(await main(["status", "--all", "--json"], root, undefined, say)).toBe(1);
+    const report = JSON.parse(lines.join("\n"));
+    expect(report.artifacts).toBe(artifacts);
+    expect(report.entries.map((entry: { name: string }) => entry.name)).toEqual(names);
+    expect(report.entries.find((entry: { name: string }) => entry.name === "matrix/checkouts/app").link).toEqual({ state: "linked" });
+
+    lines.length = 0;
+    expect(await main(["link", "--all", "--apply"], day, undefined, say)).toBe(1);
+    expect(lines.map(line => line.replaceAll(home, "<home>"))).toEqual([
+      "app-day [app] done link -> <home>/matrix-artifacts/app/screenshots",
+      "app-empty [app] done replace-empty-directory -> <home>/matrix-artifacts/app/screenshots",
+      "app-old-name [app] done link -> <home>/matrix-artifacts/app/screenshots",
+      "app-own [app] blocked: .screenshots holds a capture and the store already holds another; compare them, then rerun with --supersede to move this clone's aside",
+      "app-slashed [app] blocked: the root .gitignore must list .screenshots without a trailing slash, so the link is ignored",
+      "app-wt [app] done link -> <home>/matrix-artifacts/app/screenshots",
+      "matrix/checkouts/app [app] already linked",
+      "matrix2/checkouts/app [app] done link -> <home>/matrix-artifacts/app/screenshots",
+    ]);
+    for (const clone of [day, path.join(home, "app-wt"), empty, path.join(second, "checkouts", "app")]) {
+      expect(readFileSync(path.join(clone, ".screenshots/web/home.png"), "utf8")).toBe("shared");
+      expect(gitIn(clone, "status", "--porcelain")).toBe("");
+    }
+    expect(readFileSync(path.join(own, ".screenshots/web/home.png"), "utf8")).toBe("own");
+    // Outside a repository, --all needs the store named.
+    expect(() => sharedStore(home, {})).toThrow("is not inside a git repository");
+    expect(sharedStore(home, { MATRIX_ARTIFACTS_DIR: artifacts })).toBe(artifacts);
+  });
+
+  test("capture links every clone that has no .screenshots, itself first, and reports the rest", SPAWNS, async () => {
+    const { home, app } = workspace();
+    expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
+    const day = repo(path.join(home, "app-day"), ".screenshots\n");
+    const fresh = repo(path.join(home, "app-fresh"), ".screenshots\n");
+    const own = repo(path.join(home, "app-own"), ".screenshots\n");
+    write(own, { ".screenshots/web/home.png": "own" });
+    const lines: string[] = [];
+    const run = async (argv: string[], runner?: Runner) => {
+      lines.length = 0;
+      const code = await main(argv, fresh, runner, text => {
+        lines.push(text);
+      });
+      return { code, lines: lines.map(line => line.replaceAll(home, "<home>").replace(/\b[0-9a-f]{10}\b/g, "<short>")) };
+    };
+    const blocked = "app-own [app] blocked: .screenshots holds this clone's own capture; run `link` there to decide";
+    // A capture that is refused links nothing, here or in any other clone.
+    write(fresh, { "src/wip.ts": "x" });
+    await expect(run(["capture", "--apply"])).rejects.toThrow("local changes");
+    for (const clone of [day, fresh]) expect(lstatSync(path.join(clone, LINK), { throwIfNoEntry: false })).toBeUndefined();
+    rmSync(path.join(fresh, "src"), { recursive: true });
+    expect(await run(["capture"])).toEqual({
+      code: 0,
+      lines: [
+        "app-fresh [app] would link -> <home>/matrix-artifacts/app/screenshots",
+        "app-day [app] would link -> <home>/matrix-artifacts/app/screenshots",
+        blocked,
+        "Would run `bun run screenshots` in <home>/app-fresh at <short>, writing <home>/matrix-artifacts/app/screenshots.",
+        "Dry run; rerun with --apply.",
+      ],
+    });
+    expect(lstatSync(path.join(fresh, LINK), { throwIfNoEntry: false })).toBeUndefined();
+    const ok: Runner = {
+      async capture(cwd) {
+        write(cwd, { ".screenshots/web/light/home.png": "png" });
+        return { code: 0 };
+      },
+    };
+    expect(await run(["capture", "--apply"], ok)).toEqual({
+      code: 0,
+      lines: [
+        "app-fresh [app] done link -> <home>/matrix-artifacts/app/screenshots",
+        "app-day [app] done link -> <home>/matrix-artifacts/app/screenshots",
+        blocked,
+        "Capture complete (exit 0); recorded in <home>/matrix-artifacts/app/screenshots/capture.json.",
+      ],
+    });
+    for (const clone of [app, day, fresh]) expect(readFileSync(path.join(clone, ".screenshots/web/light/home.png"), "utf8")).toBe("png");
+    // Once every clone that can be linked is, only the ones waiting on a decision are reported, now against the
+    // store's capture; JSON carries them as links.
+    const json = await run(["capture", "--json"]);
+    expect(JSON.parse(json.lines.join("\n")).links).toEqual([
+      {
+        name: "app-own",
+        project: "app",
+        store: "<home>/matrix-artifacts/app/screenshots",
+        before: "directory",
+        blocked: ".screenshots holds a capture and the store already holds another; compare them, then rerun with --supersede to move this clone's aside",
+      },
+    ]);
+    rmSync(path.join(own, LINK), { recursive: true });
+    expect(await main(["link", "--apply"], own, undefined, print)).toBe(0);
+    expect(Object.keys(JSON.parse((await run(["capture", "--json"])).lines.join("\n")))).not.toContain("links");
+  });
+
   test("parses commands and rejects options that do not apply", async () => {
     expect(parseOptions(["capture", "app", "--apply", "--", "--project", "x"])).toMatchObject({ names: ["app"], apply: true, captureArgs: ["--project", "x"] });
     expect(() => parseOptions(["status", "--apply"])).toThrow("changes nothing");
@@ -822,6 +954,7 @@ console.log(error ? "lost" : "won");
     expect(parseOptions(["link", "a", "--project", "p", "--json", "--supersede", "b"])).toEqual({
       command: "link",
       names: ["a", "b"],
+      all: false,
       apply: false,
       json: true,
       allowDirty: false,
@@ -829,7 +962,21 @@ console.log(error ? "lost" : "won");
       captureArgs: [],
       project: "p",
     });
-    expect(parseOptions(["status"])).toEqual({ command: "status", names: [], apply: false, json: false, allowDirty: false, supersede: false, captureArgs: [] });
+    expect(parseOptions(["status"])).toEqual({
+      command: "status",
+      names: [],
+      all: false,
+      apply: false,
+      json: false,
+      allowDirty: false,
+      supersede: false,
+      captureArgs: [],
+    });
+    expect(parseOptions(["link", "--all", "--apply"])).toMatchObject({ command: "link", names: [], all: true, apply: true });
+    expect(() => parseOptions(["capture", "--all"])).toThrow("links the other clones itself");
+    expect(() => parseOptions(["link", "--all", "--supersede"])).toThrow("--supersede needs the clone named");
+    expect(() => parseOptions(["status", "--all", "app"])).toThrow("name no repository");
+    expect(() => parseOptions(["link", "--all", "--project", "p"])).toThrow("name no repository");
     expect(parseOptions(["capture", "--allow-dirty", "--"])).toMatchObject({ allowDirty: true, captureArgs: [] });
     expect(() => parseOptions(["link", "--project"])).toThrow("--project needs a name");
     expect(() => parseOptions(["status", "--force"])).toThrow("unknown option --force\n\nUsage:");

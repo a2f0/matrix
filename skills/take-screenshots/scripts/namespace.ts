@@ -78,7 +78,7 @@ function namespaceName(root: string, repo: string | undefined, project: string |
 }
 
 /** The repository a namespace belongs to, reserved by the first clone that links or captures into it. */
-const OWNER = "repository.json";
+export const OWNER = "repository.json";
 
 /** A namespace's owner file: its repository and the remote names GitHub confirmed for it. */
 interface Owner {
@@ -296,7 +296,7 @@ export function knownNamespace(target: Target, artifacts: string): Target {
 }
 
 /** The namespace this clone's link points into, when it links to a namespace's screenshots in this store. */
-function linkedNamespace(target: Target, artifacts: string): string | undefined {
+export function linkedNamespace(target: Target, artifacts: string): string | undefined {
   try {
     const relative = path.relative(artifacts, path.resolve(target.root, readlinkSync(path.join(target.root, LINK)))).split(path.sep);
     if (relative.length === 2 && relative[1] === "screenshots") return relative[0];
