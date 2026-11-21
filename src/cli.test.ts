@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { MINIMUM_AGENT_TOOL, RULES } from "./audit";
-import { main, parseBaseHealthReport, parsePushGateReport, type Services, unlinkedClones } from "./cli";
+import { main, parseBaseHealthReport, parsePushGateReport, parseScreenshotLinks, type Services } from "./cli";
 import { checkoutFixture, gitIn, gitInit, tempDir } from "./testFixtures";
 
 let root: string;
@@ -86,7 +86,7 @@ function fakeServices(overrides: Partial<Services> = {}) {
     teardown: () => CLEAN_TEARDOWN,
     gitTransport: () => SSH_ONLY,
     stateMachines: () => 0,
-    screenshotLinks: () => [],
+    screenshotLinks: () => ({ unlinked: [], blocked: [] }),
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -130,30 +130,43 @@ test("health reports findings without the network unless asked, and exits zero",
 });
 
 test("health suggests linking clones that miss the shared screenshot store, after stale installs", () => {
-  const { services, writes } = fakeServices({ screenshotLinks: () => ["tearleads2", "matrix5/checkouts/nc"] });
+  const links = { unlinked: ["tearleads2", "matrix5/checkouts/nc"], blocked: ["app-own"] };
+  const { services, writes } = fakeServices({ screenshotLinks: () => links });
   expect(main(["health"], root, undefined, services)).toBe(0);
   const report = JSON.parse(writes.join("")) as { screenshots: unknown; suggestions: string[] };
-  expect(report.screenshots).toEqual({ unlinked: ["tearleads2", "matrix5/checkouts/nc"] });
-  expect(report.suggestions.at(-2)).toStartWith("Reinstall dependencies in a2f0/good");
-  expect(report.suggestions.at(-1)).toBe(
+  expect(report.screenshots).toEqual(links);
+  expect(report.suggestions.at(-3)).toStartWith("Reinstall dependencies in a2f0/good");
+  expect(report.suggestions.slice(-2)).toEqual([
     "Link 2 clones to the shared screenshot store (tearleads2, matrix5/checkouts/nc): `bun run artifacts link --all --apply`; see docs/artifacts.md.",
-  );
+    "Decide how to link 1 clone to the shared screenshot store (app-own): `bun run artifacts link --all` says what each needs; see docs/artifacts.md.",
+  ]);
+  const markdown = fakeServices({ screenshotLinks: () => links });
+  expect(main(["health", "--markdown"], root, undefined, markdown.services)).toBe(0);
+  expect(markdown.writes.join("")).toContain("- Screenshots: tearleads2, matrix5/checkouts/nc not linked to the shared store; app-own waiting on a decision.");
+  const linked = fakeServices();
+  expect(main(["health", "--markdown"], root, undefined, linked.services)).toBe(0);
+  expect(linked.writes.join("")).toContain("- Screenshots: every clone links the shared store.");
+  expect(linked.writes.join("")).not.toContain("shared screenshot store");
   // A report that could not be read leaves health as it was.
   const unread = fakeServices({ screenshotLinks: () => undefined });
   expect(main(["health", "--markdown"], root, undefined, unread.services)).toBe(0);
   expect(unread.writes.join("")).not.toContain("Screenshots");
 });
 
-test("reads unlinked clones from the take-screenshots skill's status --all report", () => {
-  const entries = [
-    { name: "tearleads", link: { state: "linked" } },
-    { name: "tearleads2", link: { state: "missing" } },
-    { name: "fork", link: { state: "linked" }, foreign: "the store holds captures of a2f0/app, not someone/app" },
-    { name: "own", link: { state: "directory", entries: 2 } },
+test("reads which clones the take-screenshots skill's link --all dry run would link and which wait", () => {
+  const results = [
+    { name: "tearleads", before: "linked" },
+    { name: "tearleads2", before: "missing", action: "link" },
+    { name: "fork", before: "linked", blocked: "the store holds captures of a2f0/app, not someone/app" },
+    { name: "own", before: "directory", blocked: ".screenshots holds a capture and the store already holds another" },
+    { name: "first", before: "directory", action: "move-and-link" },
   ];
-  expect(unlinkedClones(JSON.stringify({ artifacts: "/store", entries }))).toEqual(["tearleads2", "fork", "own"]);
-  expect(unlinkedClones("[]")).toEqual([]);
-  for (const output of ["", "not json", "null", "{}", '[{"name":"x"}]']) expect(unlinkedClones(output)).toBeUndefined();
+  expect(parseScreenshotLinks(JSON.stringify({ artifacts: "/store", apply: false, results }))).toEqual({
+    unlinked: ["tearleads2", "first"],
+    blocked: ["fork", "own"],
+  });
+  expect(parseScreenshotLinks("[]")).toEqual({ unlinked: [], blocked: [] });
+  for (const output of ["", "not json", "null", "{}", '[{"name":"x"}]']) expect(parseScreenshotLinks(output)).toBeUndefined();
 });
 
 test("health suggests keeping Git on SSH right after disk and leftover processes", () => {

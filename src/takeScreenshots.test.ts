@@ -275,7 +275,6 @@ describe("take-screenshots artifacts", () => {
     // A clone holding its own capture is not linked automatically, even into an empty store: a person decides.
     write(app, { ".screenshots/web/home.png": "own" });
     await expect(main(["capture", "--apply"], app, undefined, print)).rejects.toThrow("not linked");
-    expect(output.at(-1)).toBe("app [app] blocked: .screenshots holds this clone's own capture; run `link` there to decide");
     rmSync(path.join(app, LINK), { recursive: true });
     expect(await main(["link", "--apply"], app, undefined, print)).toBe(0);
     write(app, { "src/wip.ts": "x" });
@@ -896,6 +895,11 @@ console.log(error ? "lost" : "won");
       return { code, lines: lines.map(line => line.replaceAll(home, "<home>").replace(/\b[0-9a-f]{10}\b/g, "<short>")) };
     };
     const blocked = "app-own [app] blocked: .screenshots holds this clone's own capture; run `link` there to decide";
+    // A capture that is refused links nothing, here or in any other clone.
+    write(fresh, { "src/wip.ts": "x" });
+    await expect(run(["capture", "--apply"])).rejects.toThrow("local changes");
+    for (const clone of [day, fresh]) expect(lstatSync(path.join(clone, LINK), { throwIfNoEntry: false })).toBeUndefined();
+    rmSync(path.join(fresh, "src"), { recursive: true });
     expect(await run(["capture"])).toEqual({
       code: 0,
       lines: [

@@ -71,9 +71,10 @@ clone selects itself.
   arguments after `--`, under the project's lock, so two clones never capture
   into the store at once. The capture runs in its own process group, which
   receives `SIGINT` and `SIGTERM`, and the lock is held until every process in
-  that group has exited. Before it starts, it links every clone of the store's
-  projects, itself first, whose `.screenshots` is missing or an empty
-  directory, so new clones and worktrees join without anyone running `link`.
+  that group has exited. Once its checks pass, and before it starts, it links
+  every clone of the store's projects, itself first, whose `.screenshots` is
+  missing or an empty directory, so new clones and worktrees join without
+  anyone running `link`; a refused capture links nothing.
   A clone holding its own capture, or one `link` refuses, is reported and left
   for a person. It refuses a clone with local changes, which would publish
   uncommitted work, unless `--allow-dirty`, which records `dirty: true` so

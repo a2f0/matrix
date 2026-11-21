@@ -19,15 +19,25 @@ export function sharedStore(cwd: string, env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
+ * The store with its directory resolved through symlinks (such as macOS's /tmp),
+ * so the clones beside it compare and name by real paths. The store itself may
+ * be a link elsewhere; its clones still sit beside the link.
+ */
+function realStore(artifacts: string): string {
+  const parent = path.dirname(artifacts);
+  return path.join(realPath(parent)[0] ?? parent, path.basename(artifacts));
+}
+
+/**
  * Where a clone that resolves this store lives: directly beside it (a clone
  * outside a workspace keeps matrix-artifacts beside itself), or in the
  * checkouts of a matrix workspace beside it. Linked worktrees count as clones.
  */
-function candidateRoots(artifacts: string): string[] {
-  const parent = path.dirname(artifacts);
+function candidateRoots(store: string): string[] {
+  const parent = path.dirname(store);
   const roots = directories(parent).flatMap(name => {
     const directory = path.join(parent, name);
-    if (directory === artifacts) return [];
+    if (directory === store) return [];
     if (isMatrixWorkspace(directory)) return [directory, ...checkoutsOf(directory)];
     return lexists(path.join(directory, ".git")) ? [directory] : [];
   });
@@ -74,9 +84,10 @@ const OFFLINE = () => undefined;
  * the store, where status reports it as foreign.
  */
 export function clonesSharing(artifacts: string): Target[] {
-  return candidateRoots(artifacts).flatMap(root => {
+  const store = realStore(artifacts);
+  return candidateRoots(store).flatMap(root => {
     try {
-      return sharingClone(root, artifacts);
+      return sharingClone(root, artifacts, path.dirname(store));
     } catch {
       // A clone that cannot be read, such as one without a GitHub origin, which names its namespace with
       // --project one clone at a time, is left out rather than stopping the others or a capture.
@@ -85,12 +96,12 @@ export function clonesSharing(artifacts: string): Target[] {
   });
 }
 
-function sharingClone(root: string, artifacts: string): Target[] {
+function sharingClone(root: string, artifacts: string, parent: string): Target[] {
   if (!captures(root)) return [];
   const target = existingCase(knownNamespace(targetFor(root, undefined, OFFLINE), artifacts), artifacts);
   if (!lexists(path.join(artifacts, target.project, OWNER))) return [];
   if (claimNamespace(target, artifacts, false) && linkedNamespace(target, artifacts) === undefined) return [];
-  return [{ ...target, name: path.relative(path.dirname(artifacts), root) }];
+  return [{ ...target, name: path.relative(parent, root) }];
 }
 
 /** Link actions that need no one's decision: creating a missing link, or replacing an empty directory with one. */
@@ -110,7 +121,15 @@ export function linkAutomatically(targets: Target[], artifacts: string, apply: b
       return linkOne(target, artifacts, apply);
     } catch (error) {
       // One clone that cannot be linked never stops the others, or the capture that asked.
-      return [{ name: target.name, project: target.project, store: storeDir(target, artifacts), before, blocked: (error as Error).message }];
+      return [
+        {
+          name: target.name,
+          project: target.project,
+          store: storeDir(target, artifacts),
+          before,
+          blocked: error instanceof Error ? error.message : String(error),
+        },
+      ];
     }
   });
 }

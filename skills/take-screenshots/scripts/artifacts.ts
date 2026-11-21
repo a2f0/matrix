@@ -17,7 +17,7 @@
  * Uses only Node built-ins so it runs by path from any repository.
  */
 import path from "node:path";
-import { type CapturePlan, capture, RUNNER, type Runner, type Timing } from "./capture";
+import { type CapturePlan, capture, planCapture, RUNNER, type Runner, type Timing } from "./capture";
 import { clonesSharing, linkAutomatically, sharedStore } from "./clones";
 import { type LinkResult, type LinkState, link, linkState } from "./link";
 import { type LockInfo, readLock } from "./lock";
@@ -246,14 +246,12 @@ function linkOutcome(result: LinkResult): string {
 /**
  * Links the capturing clone first, so a clone with no .screenshots can capture,
  * then every other clone of the store's projects, so all of them see it.
- * `linking` says the capturing clone is not linked yet but would be.
  */
-function linkBeforeCapture(target: Target, artifacts: string, options: Options, print: (text: string) => void): { links: LinkResult[]; linking: boolean } {
-  const own = linkAutomatically([target], artifacts, options.apply);
+function linkBeforeCapture(target: Target, artifacts: string, options: Options, print: (text: string) => void): LinkResult[] {
   const others = clonesSharing(artifacts).filter(clone => clone.root !== target.root);
-  const links = [...own, ...linkAutomatically(others, artifacts, options.apply)];
+  const links = linkAutomatically([target, ...others], artifacts, options.apply);
   if (!options.json) for (const result of links) print(`${result.name} [${result.project}] ${linkOutcome(result)}`);
-  return { links, linking: own.some(result => !result.blocked) };
+  return links;
 }
 
 async function captureCommand(
@@ -264,8 +262,12 @@ async function captureCommand(
   print: (text: string) => void,
   timing: Timing,
 ): Promise<number> {
-  const { links, linking } = linkBeforeCapture(target, artifacts, options, print);
-  const plan = await capture(target, artifacts, { apply: options.apply, allowDirty: options.allowDirty, args: options.captureArgs, linking }, runner, timing);
+  const captureOptions = { allowDirty: options.allowDirty, args: options.captureArgs };
+  // Every refusal comes before any link is made, so a capture that will not run changes nothing.
+  const willLink = linkAutomatically([target], artifacts, false).some(result => !result.blocked);
+  const planned = planCapture(target, artifacts, captureOptions, willLink);
+  const links = linkBeforeCapture(target, artifacts, options, print);
+  const plan = options.apply ? await capture(target, artifacts, { ...captureOptions, apply: true }, runner, timing) : planned;
   if (options.json) print(JSON.stringify(links.length > 0 ? { ...plan, links } : plan, null, 2));
   else printCapture(target, plan, print);
   return plan.applied && plan.record.status !== "complete" ? 1 : 0;
