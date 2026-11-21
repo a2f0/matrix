@@ -14,7 +14,7 @@
     "maxLength": null
   },
   "skills": {
-    "user": ["explicit-state-machines", "performance-pass", "space-cleanup", "take-screenshots"]
+    "user": ["performance-pass", "space-cleanup", "take-screenshots"]
   },
   "graph": {
     "include": ["src/**", "skills/**", "scripts/**"],

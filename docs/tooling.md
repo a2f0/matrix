@@ -524,9 +524,11 @@ repositories that lack the files or the check.
 ## User-wide skills
 
 Some skills serve every repository, not only the one that owns them: matrix's
-space-cleanup, performance-pass, and take-screenshots, its installed copy of
-agent-tool's explicit-state-machines, and balebase's seo-optimization,
-app-store-readiness, and audit-trails. The owning repository lists them under
+space-cleanup, performance-pass, and take-screenshots, and balebase's
+seo-optimization, app-store-readiness, and audit-trails. Skills agent-tool
+manages, such as explicit-state-machines, are never shared this way: Claude Code
+prefers a personal skill to a project's skill of the same name, so a shared copy
+would replace the one each repository's agent-tool pin installs. The owning repository lists them under
 `skills.user` in its `agent-tool.json`, and `agent-tool skills link --apply`
 links each into `~/.agents/skills` and into `skills/` in every Claude Code
 configuration directory: `~/.claude`, the one `CLAUDE_CONFIG_DIR` names, and
@@ -545,8 +547,6 @@ checks for it. A link that already resolves to the same skill in another clone
 stays; a file, directory, or different skill holding the name is reported and
 never replaced. A link follows its clone's working tree, so a branch checked out
 there is what every session reads until the clone returns to its default
-branch. Claude Code prefers a personal skill to a project's skill of the same
-name, so the shared explicit-state-machines copy, which matrix's agent-tool pin
-installs, also stands in for each checkout's own. Claude Code's `skills/synced`
-store stays per directory, as do its login, folder trust, plugins, and
-user-scope MCP servers such as [Sentry](secrets.md#sentry-mcp).
+branch. Claude Code's `skills/synced` store stays per directory, as do its
+login, folder trust, plugins, and user-scope MCP servers such as
+[Sentry](secrets.md#sentry-mcp).
