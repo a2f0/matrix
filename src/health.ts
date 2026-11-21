@@ -4,6 +4,7 @@ import type { GitTransport } from "./gitTransport";
 import type { Recurrence, Retro } from "./sweepRetro";
 import { leftoverRepos, type Teardown } from "./teardown";
 import { plural } from "./text";
+import type { UserSkillsHealth } from "./userSkills";
 
 /** Bytes available to this user, and the volume's size. */
 export interface DiskSpace {
@@ -54,6 +55,8 @@ export interface HealthInputs {
   readonly defaultBranches?: DefaultBranchHealth[];
   /** Clones on this machine whose .screenshots does not link the shared store; absent when that could not be read. */
   readonly screenshots?: ScreenshotLinks;
+  /** User-wide skill links the workspace and its checkouts declare but this machine lacks, from `skills check-links`. */
+  readonly userSkills?: UserSkillsHealth;
 }
 
 export interface Health {
@@ -87,6 +90,7 @@ export interface Health {
     readonly unknown: Array<{ repo: string; detail: string }>;
   };
   readonly screenshots?: ScreenshotLinks;
+  readonly userSkills?: UserSkillsHealth;
   readonly sweeps: {
     readonly read: string[];
     readonly recurring: Array<Pick<Recurrence, "kind" | "cause" | "repos" | "sweeps">>;
@@ -106,7 +110,7 @@ function gib(bytes: number): string {
   return `${Math.floor(bytes / GIB)} GiB`;
 }
 
-/** Suggestions about this machine: disk space, leftover processes, and Git transport. */
+/** Suggestions about this machine: disk space, leftover processes, Git transport, and user-wide skill links. */
 function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string[]): string[] {
   const suggestions: string[] = [];
   if (low)
@@ -118,6 +122,22 @@ function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string
       `Stop what earlier work left running in ${list(leftover)}: \`bun run teardown\` lists it, \`--apply\` stops recorded processes, and untracked ones need stopping by hand.`,
     );
   for (const problem of inputs.git?.problems ?? []) suggestions.push(`Keep Git on SSH: ${problem}; see docs/health.md#github-over-ssh.`);
+  suggestions.push(...userSkillSuggestions(inputs.userSkills));
+  return suggestions;
+}
+
+function userSkillSuggestions(skills: UserSkillsHealth | undefined): string[] {
+  if (!skills) return [];
+  const suggestions: string[] = [];
+  if (skills.missing.length > 0)
+    suggestions.push(
+      `Link ${plural(skills.missing.length, "user-wide skill")} (${list(skills.missing)}): \`bun run sync\` links every skill a repository declares; see docs/tooling.md#user-wide-skills.`,
+    );
+  if (skills.conflicts.length > 0)
+    suggestions.push(
+      `Clear ${plural(skills.conflicts.length, "user-wide skill name")} that \`skills link\` will not replace: ${list(skills.conflicts)}; see docs/tooling.md#user-wide-skills.`,
+    );
+  if (skills.unreadable.length > 0) suggestions.push(`Check user-wide skills by hand where agent-tool could not: ${list(skills.unreadable)}.`);
   return suggestions;
 }
 
@@ -213,6 +233,7 @@ export function assessHealth(inputs: HealthInputs): Health {
     ...(inputs.git && { git: inputs.git }),
     ...(inputs.defaultBranches && { defaultBranches: groupDefaultBranches(inputs.defaultBranches) }),
     ...(inputs.screenshots && { screenshots: inputs.screenshots }),
+    ...(inputs.userSkills && { userSkills: inputs.userSkills }),
     sweeps: {
       read: inputs.retro.sweeps,
       recurring: inputs.retro.recurring.map(({ kind, cause, repos, sweeps }) => ({ kind, cause, repos, sweeps })),
@@ -281,13 +302,22 @@ function screenshotsLine({ unlinked, blocked }: ScreenshotLinks): string {
   return `- Screenshots: ${parts.length === 0 ? "every clone links the shared store" : parts.join("; ")}.`;
 }
 
+function userSkillsLine({ missing, conflicts, unreadable }: UserSkillsHealth): string {
+  const parts = [
+    ...(missing.length > 0 ? [`${missing.length} to link`] : []),
+    ...(conflicts.length > 0 ? [`${plural(conflicts.length, "name")} held by something else`] : []),
+    ...(unreadable.length > 0 ? [`${unreadable.length} unread`] : []),
+  ];
+  return `- User-wide skills: ${parts.length === 0 ? "every declared link in place" : parts.join("; ")}.`;
+}
+
 function sweepsLine(sweeps: Health["sweeps"]): string {
   return `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no unresolved recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}${sweeps.resolved.length > 0 ? ` (${sweeps.resolved.length} resolved)` : ""}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`;
 }
 
 /** The report as Markdown, for a person, a scheduled run's message, or an issue. */
 export function markdownHealth(health: Health, at = new Date()): string {
-  const { checkouts, audit, discovery, disk, running, git, defaultBranches, screenshots, sweeps } = health;
+  const { checkouts, audit, discovery, disk, running, git, defaultBranches, screenshots, userSkills, sweeps } = health;
   const lines = [
     "# Matrix health",
     "",
@@ -301,6 +331,7 @@ export function markdownHealth(health: Health, at = new Date()): string {
     discoveryLine(discovery),
     defaultBranchesLine(defaultBranches),
     ...(screenshots ? [screenshotsLine(screenshots)] : []),
+    ...(userSkills ? [userSkillsLine(userSkills)] : []),
     sweepsLine(sweeps),
     "",
     "## Next steps",

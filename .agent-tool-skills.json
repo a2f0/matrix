@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "agentToolVersion": "0.1.65",
+  "agentToolVersion": "0.1.67",
   "files": {
     ".agents/skills/cross-agent-review/SKILL.md": "61087439df8ee1dfbe4ff55a803aad2e0ae567e209096129097c212025fbdac3",
     ".agents/skills/open-pr/SKILL.md": "5d6d45b635ee153a0d53b83ef58d94cbd05bbf5d2933df647909a95b6f5c0bf2",

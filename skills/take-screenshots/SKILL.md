@@ -91,6 +91,7 @@ output layout every repository shares, and the Playwright (web) and Maestro
 
 matrix (`a2f0/matrix`) owns this skill at `skills/take-screenshots/`, with its
 tests in `src/takeScreenshots.test.ts` and the store described in
-`docs/artifacts.md`. `~/.claude/skills/take-screenshots` and
-`~/.agents/skills/take-screenshots` link to it in the primary matrix clone.
-Change it there rather than copying it into a checkout.
+`docs/artifacts.md`. matrix lists it under `skills.user` in its
+`agent-tool.json`, so `bun run sync` links it into `~/.agents/skills` and every
+Claude Code configuration directory's `skills/`. Change it there rather than
+copying it into a checkout.

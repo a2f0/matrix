@@ -86,8 +86,8 @@ The script enforces these; keep them when cleaning by hand:
 
 ## Ownership
 
-matrix (`a2f0/matrix`) owns this skill at `skills/space-cleanup/`;
-`~/.claude/skills/space-cleanup` and `~/.agents/skills/space-cleanup` link to
-it in the primary matrix clone, so every repository and harness sees the same
-copy. Change it there, with its tests in `src/spaceCleanup.test.ts`, rather
-than copying it into a checkout.
+matrix (`a2f0/matrix`) owns this skill at `skills/space-cleanup/` and lists it
+under `skills.user` in its `agent-tool.json`, so `bun run sync` links it into
+`~/.agents/skills` and every Claude Code configuration directory's `skills/`,
+and every repository and harness sees the same copy. Change it there, with its
+tests in `src/spaceCleanup.test.ts`, rather than copying it into a checkout.

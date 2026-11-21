@@ -198,7 +198,8 @@ boot your own simulator or emulator and name it explicitly.
 
 Repositories that serve websites follow the
 [seo-optimization skill](https://github.com/a2f0/balebase/blob/main/skills/seo-optimization/SKILL.md),
-which balebase owns and `~/.claude/skills` and `~/.agents/skills` link to:
+which balebase owns and shares as a
+[user-wide skill](docs/tooling.md#user-wide-skills):
 non-production hosts are noindexed, production pages carry full metadata. Bring
 a newly onboarded site to it, and change the skill before diverging in one
 repository.

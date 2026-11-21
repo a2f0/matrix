@@ -16,12 +16,15 @@ import { listSweeps } from "./sweepLedger";
 import { knownCauses, recordResolution, retro } from "./sweepRetro";
 import { markdownReport, parseUpdate, recordEntry, startSweep, sweepReport } from "./sweeps";
 import { type AgentToolTeardown, isAgentToolTeardown, teardownAll } from "./teardown";
+import { parseUserSkillReport, summarizeCheck, summarizeSync, type UserSkillReport } from "./userSkills";
 
 export const ROOT = path.resolve(import.meta.dir, "..");
 
 export const HELP = `Usage: matrix <command>
 
-  sync [repo...]        Clone missing checkouts, fetch, and fast-forward clean default branches
+  sync [repo...]        Clone missing checkouts, fetch, and fast-forward clean default branches,
+                        then link the user-wide skills each repository declares (agent-tool
+                        skills link --apply)
   status [repo...]      Report branch, local changes, and distance from origin's default branch
   discover [--apply]    Compare matrix.json with the owner's repositories; --apply adds new ones
   audit [repo...] [--rule id]... [--remote]
@@ -77,6 +80,11 @@ export interface Services {
   gitTransport(root: string): GitTransport;
   /** agent-tool's `state-machines` over the given repositories, printing straight to the terminal; returns its exit status. */
   stateMachines(root: string, directories: string[], flags: string[]): number;
+  /**
+   * agent-tool's `skills link --apply` (`apply`) or `skills check-links` for one repository, run
+   * with the workspace's pinned agent-tool; a report it cannot produce carries the reason.
+   */
+  userSkills(root: string, directory: string, apply: boolean): UserSkillReport;
   /** Clones not linked to the shared screenshot store, from the take-screenshots skill's `link --all` dry run; undefined when unreadable. */
   screenshotLinks(root: string): ScreenshotLinks | undefined;
 }
@@ -98,6 +106,16 @@ function teardown(root: string, directory: string, apply: boolean): AgentToolTea
   }
   if (!isAgentToolTeardown(report)) throw new Error(`agent-tool teardown printed no report: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
   return report;
+}
+
+/** Link a repository's user-wide skills, or check them; both exit 1 with a report on a conflict, and without one on an error. */
+function userSkills(root: string, directory: string, apply: boolean): UserSkillReport {
+  const args = ["--repo", directory, "skills", ...(apply ? ["link", "--apply"] : ["check-links"])];
+  const result = spawnSync(path.join(root, "node_modules", ".bin", "agent-tool"), args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  if (result.error) return { error: `agent-tool could not run: ${result.error.message}` };
+  const links = result.status === 0 || result.status === 1 ? parseUserSkillReport(result.stdout) : undefined;
+  if (links === undefined) return { error: (result.stderr || result.stdout).trim().split("\n").at(-1) || `agent-tool exited ${result.status}` };
+  return { links };
 }
 
 /** Reduce `push-gate check`'s report to what the audit needs; it exits 1 when the gate does not conform. */
@@ -264,6 +282,7 @@ const SERVICES: Services = {
   gitTransport: root => inspectGitTransport(root),
   stateMachines,
   screenshotLinks,
+  userSkills,
 };
 
 /** The workspace, then every checkout present, or only the named checkouts. */
@@ -425,14 +444,20 @@ const COMMANDS = new Map<string, Handler>([
   [
     "sync",
     (args, { root, manifest, services, output }) => {
-      const repos = selectRepos(manifest, parseOptions(args, {}, "sync").positional);
+      const names = parseOptions(args, {}, "sync").positional;
+      const repos = selectRepos(manifest, names);
       const results = repos.map(repo => {
         const result = syncRepo(root, repo, cloneUrl(repo, manifest.protocol));
         services.warn(`${repo}: ${result.action}${result.reason ? ` (${result.reason})` : ""}\n`);
         return result;
       });
       const ok = results.every(result => result.action !== "error");
-      output({ ok, results, unmanaged: unmanagedCheckouts(root, manifest.repos) });
+      // After cloning, so a new checkout's skills link too; a problem here is reported, not a sync failure.
+      const userSkills = summarizeSync(
+        workspaceTargets(root, manifest, names).map(({ repo, path: directory }) => ({ repo, report: services.userSkills(root, directory, true) })),
+      );
+      for (const problem of userSkills.problems) services.warn(`user skills: ${problem}\n`);
+      output({ ok, results, unmanaged: unmanagedCheckouts(root, manifest.repos), userSkills });
       return ok ? 0 : 1;
     },
   ],
@@ -502,6 +527,9 @@ const COMMANDS = new Map<string, Handler>([
         git: services.gitTransport(root),
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
         screenshots: services.screenshotLinks(root),
+        userSkills: summarizeCheck(
+          workspaceTargets(root, manifest, []).map(({ repo, path: directory }) => ({ repo, report: services.userSkills(root, directory, false) })),
+        ),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
           defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),
