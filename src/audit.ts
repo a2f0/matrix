@@ -584,18 +584,6 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
-    id: "user-skills-setup",
-    summary: "With user-wide skills in agent-tool.json: a package script that links them",
-    source: "docs/tooling.md#user-wide-skills",
-    check: checkout => {
-      const declared = object(checkout.agentToolJson?.skills)?.user;
-      if (!Array.isArray(declared) || declared.length === 0) return skip("declares no user-wide skills");
-      return Object.values(checkout.scripts).some(script => typeof script === "string" && script.includes("skills link --apply"))
-        ? pass
-        : fail("no package script runs agent-tool skills link --apply; run it from the local setup script, such as hooks:install");
-    },
-  },
-  {
     id: "import-cycle-guard",
     summary: "TypeScript or Python sources have a merge-gating guard against import cycles, type-only imports included",
     source: "docs/tooling.md#import-cycles-and-layering",

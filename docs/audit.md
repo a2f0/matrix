@@ -38,7 +38,6 @@ first and check `branch` for checkouts that are not on their default branch.
 | `screenshots-store` | With a `screenshots` package script or a `.screenshots` ignore rule: both, and the rule has no trailing slash, so `.screenshots` can link to the shared store | [Artifacts](artifacts.md#repository-contract) |
 | `screenshots-gallery` | With a `screenshots` package script and an Astro site: a `screenshots` target in `agent-tool.json`, a package script that runs `agent-tool screenshots build`, and no copy of the capture guard (`withSharedCapture`) outside tests | [Artifacts](artifacts.md#repository-contract) |
 | `harness-permissions` | `.agent-tool-permissions.json`, `.claude/settings.json`, and `.codex/rules/agent-tool.rules`, and `permissions check` in the `agents:check` script or a workflow; agent-tool itself is exempt | [Harness permissions](tooling.md#harness-permissions) |
-| `user-skills-setup` | With `skills.user` in `agent-tool.json`: a package script that runs `agent-tool skills link --apply` | [User-wide skills](tooling.md#user-wide-skills) |
 | `import-cycle-guard` | TypeScript sources have Biome `noImportCycles` at `error` with `ignoreTypes: false`, a type-aware error-level dependency-cruiser `no-circular` rule, agent-tool `graph check` configured and run by a package script, run group, workflow step, or runner under `scripts/`, or a module-graph test; a Python package has `test_module_graph.py` | [Import cycles and layering](tooling.md#import-cycles-and-layering) |
 | `mise-lock` | With tools in a root `mise.toml` or `.mise.toml`: no `lockfile = false`, a tracked `mise.lock` in format 4 or later with an entry for each declared tool, and every `jdx/mise-action` `version` pinned in a workflow or composite action at mise 2026.11.1 or later | [Toolchain lockfiles](dependency-upgrades.md#toolchain-lockfiles) |
 | `release-age-internal` | When the root `bunfig.toml` sets `[install] minimumReleaseAge`, its `minimumReleaseAgeExcludes` names every package in the repository owner's npm scope that a tracked `package.json` installs from the registry (any dependency kind; not the checkout's own workspace packages or `workspace:`, `file:`, `link:`, `portal:`, Git, or URL specifiers) | [Release age](dependency-upgrades.md#release-age) |
@@ -69,6 +68,8 @@ which the agent-tool pin updates:
 | `git push -u origin HEAD` | `agent-tool branch push <reviewed-head> --remote origin` |
 | `git push ... --delete`, except a `--force-with-lease` deletion that a checkout requires | `agent-tool repo cleanup` |
 | `showPushGateTimings`, the hand-written push timing log | `agent-tool runs list`, which lists each push gate's run-group report |
+| A `scripts/` path inside the take-screenshots, space-cleanup, performance-pass, or seo-optimization skill, which ran those skills from a clone's copy | `agent-tool screenshots`, `space`, `perf`, or `seo probe` (0.1.70–0.1.74) |
+| The personal skill `link` and `check-links` subcommands, which agent-tool 0.1.71 removed | The managed skills `agent-tool skills install --apply` writes ([shared skills](tooling.md#shared-skills)) |
 | `url.https://github.com/.insteadOf`, which sends GitHub SSH URLs to HTTPS and its keychain helper | SSH through `ssh.github.com:443` ([GitHub over SSH](health.md#github-over-ssh)) |
 
 ## Changing the audit

@@ -13,9 +13,6 @@
     "exempt": ["main"],
     "maxLength": null
   },
-  "skills": {
-    "user": ["performance-pass", "space-cleanup", "take-screenshots"]
-  },
   "graph": {
     "include": ["src/**", "skills/**", "scripts/**"],
     "tests": ["**/*.test.ts"],
@@ -29,11 +26,11 @@
           "src/markdown.ts",
           "src/options.ts",
           "src/packageJson.ts",
+          "src/personalSkills.ts",
           "src/teardown.ts",
           "src/testFixtures.ts",
           "src/testSetup.ts",
-          "src/text.ts",
-          "src/userSkills.ts"
+          "src/text.ts"
         ]
       },
       {

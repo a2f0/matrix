@@ -64,7 +64,6 @@ describe("audit", () => {
         { rule: "brand-images", detail: "no assets/brand" },
         { rule: "screenshots-store", detail: "captures no screenshots" },
         { rule: "screenshots-gallery", detail: "no website that shows captured screenshots" },
-        { rule: "user-skills-setup", detail: "declares no user-wide skills" },
         { rule: "import-cycle-guard", detail: "no TypeScript sources or Python package" },
         { rule: "mise-lock", detail: "declares no mise tools" },
         { rule: "push-gate", detail: "no pre-push hook" },
@@ -294,26 +293,6 @@ describe("audit", () => {
     };
     expect(rule("agent-tool", producer)).toBe("no tracked skills/explicit-state-machines/SKILL.md");
     expect(rule("agent-tool-shipping", { ...producer, "skills/explicit-state-machines/SKILL.md": "# Explicit State Machines\n" })).toBeUndefined();
-  });
-
-  test("asks a repository that declares user-wide skills to link them from a package script", () => {
-    const rule = (name: string, files: Record<string, string | null>) => failures(checkout(name, files), ["user-skills-setup"])["user-skills-setup"];
-    const declares = { "agent-tool.json": JSON.stringify({ schemaVersion: 1, skills: { user: ["seo-optimization"] } }) };
-    const scripts = (extra: Record<string, string>) =>
-      JSON.stringify({
-        name: "x",
-        scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", ...extra },
-        devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL },
-      });
-    expect(rule("unlinked", declares)).toBe("no package script runs agent-tool skills link --apply; run it from the local setup script, such as hooks:install");
-    // A preview or a check alone does not link anything.
-    expect(
-      rule("preview-only", { ...declares, "package.json": scripts({ "hooks:check": "agent-tool skills check-links && agent-tool skills link" }) }),
-    ).toBeDefined();
-    expect(
-      rule("linked", { ...declares, "package.json": scripts({ "hooks:install": "agent-tool hooks install --apply && agent-tool skills link --apply" }) }),
-    ).toBeUndefined();
-    expect(rule("none-declared", { "agent-tool.json": JSON.stringify({ schemaVersion: 1, skills: { user: [] } }) })).toBeUndefined();
   });
 
   // README cases run only the README rules: a whole audit per fixture made
@@ -660,6 +639,14 @@ describe("audit", () => {
       "scripts/ship.sh": "gh pr checks --watch\n",
       "docs/network.md": "Force HTTPS: `GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:`.\n",
       "docs/timings.md": "Read the last push with `sh scripts/git/showPushGateTimings.sh`.\n",
+      "docs/skills.md": [
+        "Capture with `bun ~/.agents/skills/take-screenshots/scripts/artifacts.ts capture --apply`.",
+        "Free space with `bun ../matrix/skills/space-cleanup/scripts/space-cleanup.ts`.",
+        "Measure with `bun skills/performance-pass/scripts/perf.ts measure`.",
+        "Probe with `sh skills/seo-optimization/scripts/probe.sh example.com`.",
+        "Link with `bun run agent-tool skills link --apply`, and check with `agent-tool skills check-links`.",
+        "",
+      ].join("\n"),
     });
     expect(failures(repo)["superseded-guidance"]).toBe(
       [
@@ -669,6 +656,8 @@ describe("audit", () => {
         "push-head-upstream at docs/shipping.md:1 (use agent-tool branch push <reviewed-head> --remote origin)",
         "push-delete at docs/shipping.md:2 (use agent-tool repo cleanup)",
         "push-gate-timings at docs/timings.md:1 (use agent-tool runs list)",
+        "skill-scripts at docs/skills.md:1, docs/skills.md:2, docs/skills.md:3, docs/skills.md:4 (use agent-tool screenshots, space, perf, or seo probe)",
+        "skills-link at docs/skills.md:5 (use the managed skills agent-tool skills install --apply writes)",
         "https-insteadof at docs/network.md:1 (use SSH through ssh.github.com:443 (matrix docs/health.md#github-over-ssh))",
       ].join("; "),
     );

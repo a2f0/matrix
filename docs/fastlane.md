@@ -149,16 +149,14 @@ to the gitignored `.readiness/<tier>/<platform>.json`. The release build lanes
 write the `<artifact>.build.json` source/hash receipt they check. Each
 repository's `docs/readiness.md` describes its lanes and the expectations its
 lanes pass in, and the
-[app-store-readiness skill](https://github.com/a2f0/balebase/blob/main/skills/app-store-readiness/SKILL.md)
+[app-store-readiness skill](../.claude/skills/app-store-readiness/SKILL.md)
 covers the store policy, device, and accessibility checks the lanes leave
 unverified.
 
-balebase owns `skills/app-store-readiness/` and `APP_DIR/fastlane/lib/readiness.rb`,
-`readiness_artifacts.rb`, `readiness_stores.rb`, and
-`fastlane/test/readiness.test.ts`. nc and ct keep byte-identical copies;
-change every copy together. balebase shares its skill as a
-[user-wide skill](tooling.md#user-wide-skills). Bring a newly onboarded store
-app to them.
+balebase owns `APP_DIR/fastlane/lib/readiness.rb`, `readiness_artifacts.rb`,
+`readiness_stores.rb`, and `fastlane/test/readiness.test.ts`. nc and ct keep
+byte-identical copies; change every copy together. agent-tool ships the skill
+to every repository it manages. Bring a newly onboarded store app to them.
 
 ## Validation
 

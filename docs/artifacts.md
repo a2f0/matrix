@@ -33,8 +33,9 @@ regenerable by capturing again, so it needs no backup.
 
 ## Commands
 
-The commands are the [take-screenshots skill](../skills/take-screenshots/SKILL.md)'s
-script. From this workspace:
+The commands are agent-tool's `screenshots status|link|capture`, which the
+managed [take-screenshots skill](../.claude/skills/take-screenshots/SKILL.md)
+runs. From this workspace:
 
 ```sh
 bun run artifacts status [repo...] [--all]    # link state and newest capture
@@ -42,8 +43,7 @@ bun run artifacts link [repo...] [--all] [--apply] [--supersede]   # point .scre
 bun run artifacts capture <repo> [--apply] [--allow-dirty] [-- args...]
 ```
 
-From any other clone, run the same script by path:
-`bun ~/.agents/skills/take-screenshots/scripts/artifacts.ts <command>`. Each
+From any other clone, run its pinned `agent-tool screenshots <command>`. Each
 is a dry run until `--apply`; `--json` prints the report as JSON. With no
 names, the workspace selects every checkout that captures screenshots, and a
 clone selects itself.
@@ -118,24 +118,10 @@ changes before it ends is `failed`.
 
 ## Namespaces
 
-The first clone to link or capture reserves the namespace in
-`<project>/repository.json` with its GitHub `owner/name`, as `gh repo view`
-reports it for origin, and GitHub's node `id` for it, which survives renames
-and transfers; owners compare case-insensitively, and `link` and `capture`
-refuse another owner's repository of the same name, or a repository with a
-different `id` that reuses a recorded name. When GitHub
-reports a different name than origin's URL (a rename, a transfer, or other
-casing), the old name is kept in the file's `aliases`, and a namespace still
-owned by the old name moves to the new one. Every clone, whichever name its
-remote uses and whether or not GitHub is reachable (origin's URL is used when
-it is not, or when `MATRIX_ARTIFACTS_NO_GH` is set), uses the namespace whose
-owner or confirmed aliases match it. A clone whose remote already uses a new
-name finds an older namespace only after one old-name clone has run `link`
-or `capture` online to record the rename. Pass `--project` to choose a
-namespace explicitly, as a repository without a GitHub origin must; such a
-namespace is marked `explicit`, and other clones use it only with the same
-`--project` or when already linked to it. Owner-file updates hold a short
-`repository.json.lock`, which, like the capture lock, is never broken automatically.
+How a clone's namespace is chosen and reserved (the `repository.json` owner
+file, renames and transfers, `--project`, and `MATRIX_ARTIFACTS_NO_GH`) is
+agent-tool's
+[shared store layout](https://github.com/a2f0/agent-tool/blob/main/docs/screenshots.md#layout).
 
 ## Locks
 
@@ -150,9 +136,9 @@ runs, the error names the group to stop; delete the file once it is gone.
 What a repository that captures screenshots must provide (the `screenshots`
 package script, the ignore pattern, the output layout, and how builds read
 captures) is
-[adding capture to a repository](../skills/take-screenshots/references/adding-capture.md).
+[adding capture to a repository](../.claude/skills/take-screenshots/references/adding-capture.md).
 `bun run audit --rule screenshots-store` checks the script and ignore pattern,
 and `--rule screenshots-gallery` checks that a website stages captures with
 agent-tool.
 
-Agents follow the [take-screenshots skill's rules](../skills/take-screenshots/SKILL.md#rules).
+Agents follow the [take-screenshots skill's rules](../.claude/skills/take-screenshots/SKILL.md#rules).
