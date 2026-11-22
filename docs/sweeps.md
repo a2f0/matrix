@@ -143,12 +143,22 @@ one as soon as its runs finish instead of keeping it for later checks. Never
 run `gradle --stop` or `./gradlew --stop` during a sweep: it stops every daemon
 of that Gradle version, including other delegates' builds.
 
+## Delegate briefs
+
 A delegate's brief names each checkout's commit limits: the subject length in
 its `agent-tool.json` or commitlint config (50 in several checkouts, 72 in
 others) and commitlint's 100-column body lines. Its `commit-msg` hook rejects
 a longer message before anything is pushed, so the cost is a rewrite, not a
-failed run. A brief also gives `pr checks --wait` a `--timeout` long enough
-for the checkout's slowest required job.
+failed run. `pr checks --wait` waits up to `merge.checksTimeoutSeconds` from
+`agent-tool.json`; where the checkout's slowest required job takes longer, the
+brief gives a `--timeout` in seconds (at most 86400).
+
+When the shell profile activates mise, as dotfiles' does, mise's hook runs on
+every `cd` and puts global tools such as `~/.bun/bin` back ahead of a
+checkout's pins, since it does not apply a checkout whose configuration it
+refuses. Agent shells also drop `PATH` between commands. A brief therefore has
+delegates set `PATH` in each command, after its `cd`, and check
+`bun --version` before an install: an older Bun rewrites `bun.lock`.
 
 ## Base health
 
