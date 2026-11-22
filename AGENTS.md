@@ -21,8 +21,8 @@ Give them paths, explicit guidance-reading instructions, rules, and commands.
 ## Changing matrix itself
 
 Use the Bun version pinned in `.mise.toml`. In agent shells, put its
-`~/.local/share/mise/installs/bun/<version>/bin` first on `PATH`; do not run
-`mise trust` to activate the checkout.
+`~/.local/share/mise/installs/bun/<version>/bin` first on `PATH` after any
+`cd`; do not run `mise trust` to activate the checkout.
 
 Validate with `bun run check`, which records each step of
 `scripts/testing/verify.json`. CI also validates the actual branch
@@ -261,8 +261,9 @@ directories can make delegated agents stop for permission prompts.
    normal hooks. Use the checkout's own pinned CLI; the audit's
    `agent-tool-pin` rule confirms every pin has these commands. Run the
    checkout's documented setup before committing so its hooks run. Put its
-   pinned tools from `~/.local/share/mise/installs` first on `PATH`, since agent
-   shells ignore mise; do not run `mise trust`. Commit only the sweep's change.
+   pinned tools from `~/.local/share/mise/installs` first on `PATH` after any
+   `cd`, since mise's directory hook resets `PATH` without activating an
+   untrusted checkout; do not run `mise trust`. Commit only the sweep's change.
 5. Ship each checkout independently with the `ship-pr` workflow. Use the
    checkout's own pinned agent-tool and `agent-tool.json`, or, when it has none,
    `node_modules/.bin/agent-tool --repo checkouts/<name>` from this workspace.

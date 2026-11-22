@@ -147,8 +147,14 @@ A delegate's brief names each checkout's commit limits: the subject length in
 its `agent-tool.json` or commitlint config (50 in several checkouts, 72 in
 others) and commitlint's 100-column body lines. Its `commit-msg` hook rejects
 a longer message before anything is pushed, so the cost is a rewrite, not a
-failed run. A brief also gives `pr checks --wait` a `--timeout` long enough
-for the checkout's slowest required job.
+failed run. A brief also gives `pr checks --wait` a `--timeout` in seconds
+(at most 86400) long enough for the checkout's slowest required job.
+
+The shell profile activates mise, whose hook runs on every `cd` and puts the
+global tools (such as `~/.bun/bin`) back ahead of a checkout's pins, because it
+does not activate an untrusted checkout. A brief tells delegates to set `PATH`
+in the same command, after the `cd`, and to check `bun --version` before an
+install: an older Bun rewrites `bun.lock`.
 
 ## Base health
 
