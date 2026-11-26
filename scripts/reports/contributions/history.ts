@@ -2,23 +2,29 @@ import { addDays, datesBetween, localDate } from "../../../skills/merged-commits
 import type { DayCount } from "../../../skills/merged-commits/scripts/github";
 
 /**
- * The profile repository's record of daily counts, which its web page's
- * contributions grid renders. The profile repository's `src/history.ts`
- * validates the same shape, and its tests and site build fail on a file it
- * cannot read, so a change here ships there too.
+ * The profile repository's record of daily counts by repository, which its
+ * web page's contributions grid renders and lets readers toggle. The profile
+ * repository's `src/history.ts` validates the same shape, and its tests and
+ * site build fail on a file it cannot read, so a change here ships there too.
  */
 export const HISTORY_FILE = "contributions/commits.json";
 
 /** The first run counts 53 weeks, enough for any one-year grid that ends today. */
 const BACKFILL_DAYS = 53 * 7 - 1;
 
+/** One day's merges by repository, `owner/name`, listing only the repositories with any. */
+export type RepositoryCounts = Record<string, DayCount>;
+
 export interface History {
-  schemaVersion: 1;
+  schemaVersion: 2;
   timeZone: string;
   /** When the latest count began; every stored day before its local date is final. */
   asOf: string;
-  days: Record<string, DayCount>;
+  days: Record<string, RepositoryCounts>;
 }
+
+/** A GitHub repository's `owner/name`. */
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** A UTC instant as `Date.toISOString` writes it, with optional fractional seconds. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
@@ -37,10 +43,20 @@ export function isDate(date: string): boolean {
   }
 }
 
+function invalidRepositories(date: string, repositories: unknown): string | undefined {
+  if (typeof repositories !== "object" || repositories === null || Array.isArray(repositories)) return `days.${date} must be an object of repositories`;
+  for (const [repo, count] of Object.entries(repositories)) {
+    if (!REPOSITORY.test(repo)) return `days.${date} has an invalid repository '${repo}'; use owner/name`;
+    if (!isCount(count)) return `days.${date}["${repo}"] needs non-negative integer commits and pullRequests`;
+  }
+  return undefined;
+}
+
 function invalidDay(days: object): string | undefined {
-  for (const [date, count] of Object.entries(days)) {
+  for (const [date, repositories] of Object.entries(days)) {
     if (!isDate(date)) return `days has an invalid date '${date}'`;
-    if (!isCount(count)) return `days.${date} needs non-negative integer commits and pullRequests`;
+    const problem = invalidRepositories(date, repositories);
+    if (problem) return problem;
   }
   return undefined;
 }
@@ -65,7 +81,7 @@ function isTimeZone(timeZone: unknown): boolean {
 function invalidHistory(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return "it must be a JSON object";
   const { schemaVersion, timeZone, asOf, days } = value as Record<string, unknown>;
-  if (schemaVersion !== 1) return "schemaVersion must be 1";
+  if (schemaVersion !== 2) return "schemaVersion must be 2";
   if (!isTimeZone(timeZone)) return "timeZone must be an IANA time zone";
   if (typeof asOf !== "string" || !ISO_INSTANT.test(asOf) || !isDate(asOf.slice(0, 10)) || Number.isNaN(Date.parse(asOf)))
     return "asOf must be an ISO 8601 instant";
@@ -98,19 +114,29 @@ export function datesToCount(history: History | null, today: string, since?: str
   return datesBetween(start, today).filter(date => !(history?.days[date] && date < finalBefore));
 }
 
-/** The history with `dates` replaced by `counts`, zero for days with no merges. */
-export function recordCounts(history: History | null, timeZone: string, asOf: string, dates: string[], counts: Map<string, DayCount>): History {
-  const days: Record<string, DayCount> = { ...history?.days };
-  for (const date of dates) days[date] = counts.get(date) ?? { commits: 0, pullRequests: 0 };
-  const sorted = Object.keys(days).sort();
-  return { schemaVersion: 1, timeZone, asOf, days: Object.fromEntries(sorted.map(date => [date, days[date]!])) };
+function sortedKeys<T>(record: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map(key => [key, record[key]!]),
+  );
+}
+
+/** The history with `dates` replaced by `counts`, empty for days with no merges, sorted by date and repository. */
+export function recordCounts(history: History | null, timeZone: string, asOf: string, dates: string[], counts: Map<string, RepositoryCounts>): History {
+  const days: Record<string, RepositoryCounts> = { ...history?.days };
+  for (const date of dates) days[date] = sortedKeys(counts.get(date) ?? {});
+  return { schemaVersion: 2, timeZone, asOf, days: sortedKeys(days) };
 }
 
 /** Two-space JSON with one line per day, so a run's diff shows only the days it counted. */
 export function serializeHistory(history: History): string {
-  const days = Object.entries(history.days).map(
-    ([date, count]) => `    ${JSON.stringify(date)}: { "commits": ${count.commits}, "pullRequests": ${count.pullRequests} }`,
-  );
+  const days = Object.entries(history.days).map(([date, repositories]) => {
+    const counts = Object.entries(repositories).map(
+      ([repo, count]) => `${JSON.stringify(repo)}: { "commits": ${count.commits}, "pullRequests": ${count.pullRequests} }`,
+    );
+    return `    ${JSON.stringify(date)}: ${counts.length === 0 ? "{}" : `{ ${counts.join(", ")} }`}`;
+  });
   const body = days.length === 0 ? "{}" : `{\n${days.join(",\n")}\n  }`;
-  return `{\n  "schemaVersion": 1,\n  "timeZone": ${JSON.stringify(history.timeZone)},\n  "asOf": ${JSON.stringify(history.asOf)},\n  "days": ${body}\n}\n`;
+  return `{\n  "schemaVersion": 2,\n  "timeZone": ${JSON.stringify(history.timeZone)},\n  "asOf": ${JSON.stringify(history.asOf)},\n  "days": ${body}\n}\n`;
 }
