@@ -259,6 +259,15 @@ test("the script backfills a new history, renders the profile, and then recounts
   const file = path.join(profile, "contributions/commits.json");
   writeFileSync(file, readFileSync(file, "utf8").replace('"timeZone": "UTC"', '"timeZone": "utc"'));
   expect(run("--timezone", "UTC").status).toBe(0);
+  expect(existsSync(`${file}.tmp`)).toBe(false);
+
+  // A history counted on a later date, from a clock that has since moved back, is left alone.
+  const skewed = readFileSync(file, "utf8").replace(/"asOf": "[^"]+"/, '"asOf": "2999-01-01T00:00:00.000Z"');
+  writeFileSync(file, skewed);
+  const behind = run();
+  expect(behind.status).toBe(1);
+  expect(behind.stderr).toContain("after today");
+  expect(readFileSync(file, "utf8")).toBe(skewed);
 });
 
 test("a failing renderer fails the run after the history is saved", SPAWNS, () => {

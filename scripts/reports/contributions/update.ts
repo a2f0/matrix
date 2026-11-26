@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -179,9 +179,11 @@ function main(args: string[]) {
   const timeZone = historyTimeZone(existing, values.timezone);
   const now = new Date();
   const today = localDate(now, timeZone);
+  // A history counted on a later date than today came from a clock that has
+  // since moved back; recording an earlier asOf would strand its later days.
+  if (existing && localDate(new Date(existing.asOf), timeZone) > today)
+    throw new Error(`${HISTORY_FILE} was counted at ${existing.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
   const dates = datesToCount(existing, today, validSince(values.since, today));
-  if (dates.length === 0)
-    throw new Error(`${HISTORY_FILE} was counted at ${existing?.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
   // Dates before today that are already final are skipped, not recounted.
   const window = onDates(selectRange(dates[0]!, today, timeZone, now), dates);
   const scope = includingWorkspace(repos, workspace);
@@ -194,7 +196,9 @@ function main(args: string[]) {
   }
   const history = recordCounts(existing, timeZone, window.asOf, dates, counts);
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, serializeHistory(history));
+  // Replace the file whole, so an interrupted run leaves the previous history.
+  writeFileSync(`${file}.tmp`, serializeHistory(history));
+  renameSync(`${file}.tmp`, file);
   render(profile);
   const counted = sum(dates.map(date => history.days[date]!));
   console.log(

@@ -104,7 +104,10 @@ ignoring changes to the files a run writes, which include any local edit to
 that README. `--profile` writes into another directory as it is. The run then
 calls that checkout's `contributions:render` package script and leaves the
 changes there to ship as a pull request. It pages each
-repository's merged PRs once for the whole range rather than once per day.
+repository's merged PRs once for the whole range rather than once per day. A day
+counted after it ended is final, so a repository added to `matrix.json` later
+counts only from the day it was added; delete those days from the history to
+count them again.
 
 ## Managed repositories
 
