@@ -41,13 +41,16 @@ const PULL_REQUEST_COMMIT_LIMIT = 250;
 
 const compare: Compare = (repo, base, head) => {
   const commits: Commit[] = [];
-  // Unlike a pull request's own list, a comparison pages past 250 commits.
+  // Unlike a pull request's own list, a comparison pages past 250 commits. Its
+  // response also carries every file's diff, so keep only the commit fields.
   for (let page = 1; ; page++) {
-    const response = JSON.parse(runGh(["api", `repos/${repo}/compare/${base}...${head}?per_page=100&page=${page}`])) as {
+    const url = `repos/${repo}/compare/${base}...${head}?per_page=100&page=${page}`;
+    const fields = "{total_commits, commits: [.commits[] | {sha, parents: (.parents | length)}]}";
+    const response = JSON.parse(runGh(["api", url, "--jq", fields])) as {
       total_commits: number;
-      commits: { sha: string; parents: unknown[] }[];
+      commits: { sha: string; parents: number }[];
     };
-    commits.push(...response.commits.map(commit => ({ oid: commit.sha, parents: { totalCount: commit.parents.length } })));
+    commits.push(...response.commits.map(commit => ({ oid: commit.sha, parents: { totalCount: commit.parents } })));
     if (response.commits.length === 0 || commits.length >= response.total_commits) return commits;
   }
 };

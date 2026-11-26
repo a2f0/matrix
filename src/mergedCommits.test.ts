@@ -342,18 +342,19 @@ describe("pull requests over GitHub's 250-commit list", () => {
     const page = (from: number, count: number, total: number) =>
       JSON.stringify({
         total_commits: total,
-        commits: Array.from({ length: count }, (_, index) => ({ sha: `c${from + index}`, parents: from + index === 299 ? [{}, {}] : [{}] })),
+        commits: Array.from({ length: count }, (_, index) => ({ sha: `c${from + index}`, parents: from + index === 299 ? 2 : 1 })),
       });
     pages(300);
-    writeFileSync(path.join(bin, "gh"), `#!/bin/sh\necho "$2" >> "${bin}/calls"\ncat "${bin}/page-\${2##*page=}.json"\n`);
+    // Records each call's arguments and answers with the page that `--jq` would leave.
+    writeFileSync(path.join(bin, "gh"), `#!/bin/sh\necho "$2 $3" >> "${bin}/calls"\ncat "${bin}/page-\${2##*page=}.json"\n`);
     chmodSync(path.join(bin, "gh"), 0o755);
     const original = process.env.PATH;
     process.env.PATH = `${bin}${path.delimiter}${original}`;
     try {
       expect(countRepository("example/repo", day, request)).toMatchObject({ originalCommits: 300, existingMergeCommits: 1 });
       expect(readFileSync(path.join(bin, "calls"), "utf8").trim().split("\n")).toEqual([
-        "repos/example/repo/compare/base7...head7?per_page=100&page=1",
-        "repos/example/repo/compare/base7...head7?per_page=100&page=2",
+        "repos/example/repo/compare/base7...head7?per_page=100&page=1 --jq",
+        "repos/example/repo/compare/base7...head7?per_page=100&page=2 --jq",
       ]);
       // A total GitHub overstates still ends at the first empty page.
       pages(400);
