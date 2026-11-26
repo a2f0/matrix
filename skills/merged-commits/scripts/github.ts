@@ -1,37 +1,45 @@
 import { runGh } from "../../../src/gh";
+import type { Day } from "./day";
 
-/** @typedef {ReturnType<typeof import('./day.js').selectDay>} Day */
-/** @typedef {{number: number, url: string, mergedAt: string, updatedAt: string, commits: {totalCount: number}}} PullRequest */
-/** @typedef {{oid: string, parents: {totalCount: number}}} Commit */
-/** @template T @typedef {{nodes: T[], pageInfo: {hasNextPage: boolean, endCursor: string | null}}} Connection */
-/** @typedef {Connection<{commit: Commit}> & {totalCount: number}} Commits */
-/** @typedef {(query: string) => Record<string, unknown>} Graphql */
+export interface PullRequest {
+  number: number;
+  url: string;
+  mergedAt: string;
+  updatedAt: string;
+  commits: { totalCount: number };
+}
+export interface Commit {
+  oid: string;
+  parents: { totalCount: number };
+}
+interface Connection<T> {
+  nodes: T[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+export type Commits = Connection<{ commit: Commit }> & { totalCount: number };
+export type Graphql = (query: string) => Record<string, unknown>;
+type CommitFields = Record<string, { commits: Commits }>;
 
-/** @type {Graphql} */
-function graphql(query) {
-  const response = JSON.parse(runGh(["api", "graphql", "-f", `query=${query}`]));
+const graphql: Graphql = query => {
+  const response = JSON.parse(runGh(["api", "graphql", "-f", `query=${query}`])) as { data?: Record<string, unknown>; errors?: unknown[] };
   if (response.errors?.length) throw new Error(`GitHub GraphQL: ${JSON.stringify(response.errors)}`);
   if (!response.data) throw new Error("GitHub returned no GraphQL data.");
   return response.data;
-}
+};
 
-/** @param {string} repo @param {string} fields */
-function repositoryQuery(repo, fields) {
+function repositoryQuery(repo: string, fields: string) {
   const [owner, name] = repo.split("/");
   return `query { repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${fields} } }`;
 }
 
-/** @template T @param {Connection<T>} connection */
-function nextCursor(connection) {
+function nextCursor<T>(connection: Connection<T>) {
   if (!connection.pageInfo.hasNextPage) return null;
   if (!connection.pageInfo.endCursor) throw new Error("GitHub returned an incomplete pagination cursor.");
   return connection.pageInfo.endCursor;
 }
 
-/** @param {string} repo @param {Day} day @param {string} cutoff @param {Map<number, PullRequest>} selected @param {Graphql} request */
-function scanPullRequests(repo, day, cutoff, selected, request) {
-  /** @type {string | null} */
-  let cursor = null;
+function scanPullRequests(repo: string, day: Day, cutoff: string, selected: Map<number, PullRequest>, request: Graphql) {
+  let cursor: string | null = null;
   do {
     const data = request(
       repositoryQuery(
@@ -42,7 +50,7 @@ function scanPullRequests(repo, day, cutoff, selected, request) {
     }`,
       ),
     );
-    const repository = /** @type {{pullRequests: Connection<PullRequest>} | null} */ (data.repository);
+    const repository = data.repository as { pullRequests: Connection<PullRequest> } | null;
     if (!repository) throw new Error(`GitHub repository '${repo}' is not accessible.`);
     const connection = repository.pullRequests;
     for (const pr of connection.nodes) if (day.contains(pr.mergedAt)) selected.set(pr.number, pr);
@@ -52,10 +60,8 @@ function scanPullRequests(repo, day, cutoff, selected, request) {
   } while (cursor);
 }
 
-/** @param {string} repo @param {Day} day @param {Graphql} request */
-function mergedPullRequests(repo, day, request) {
-  /** @type {Map<number, PullRequest>} */
-  const selected = new Map();
+function mergedPullRequests(repo: string, day: Day, request: Graphql) {
+  const selected = new Map<number, PullRequest>();
   scanPullRequests(repo, day, day.updatedSince, selected, request);
   // A comment or label change can move an unread PR ahead of our cursor.
   // Recover PRs updated since the report began, deduplicating by PR number.
@@ -63,25 +69,22 @@ function mergedPullRequests(repo, day, request) {
   return [...selected.values()].sort((a, b) => a.number - b.number);
 }
 
-/** @param {number} number @param {string | null} [cursor] */
-function commitField(number, cursor = null) {
+function commitField(number: number, cursor: string | null = null) {
   return `p${number}: pullRequest(number: ${number}) { commits(first: 100, after: ${JSON.stringify(cursor)}) {
     totalCount pageInfo {hasNextPage endCursor} nodes {commit {oid parents {totalCount}}}
   } }`;
 }
 
-/** @param {string} repo @param {PullRequest[]} prs @param {Graphql} request */
-function originalCommits(repo, prs, request) {
-  /** @type {Map<string, Commit>} */
-  const unique = new Map();
+function originalCommits(repo: string, prs: PullRequest[], request: Graphql) {
+  const unique = new Map<string, Commit>();
   let occurrences = 0;
   // Bound GraphQL query size, independently of the number of PRs in the day.
   for (let offset = 0; offset < prs.length; offset += 20) {
     const batch = prs.slice(offset, offset + 20);
     const data = request(repositoryQuery(repo, batch.map(pr => commitField(pr.number)).join("\n")));
-    const repository = /** @type {Record<string, {commits: Commits}>} */ (data.repository);
+    const repository = data.repository as CommitFields;
     for (const pr of batch) {
-      const commits = readCommits(repo, pr, repository[`p${pr.number}`].commits, request);
+      const commits = readCommits(repo, pr, repository[`p${pr.number}`]!.commits, request);
       occurrences += commits.length;
       for (const commit of commits) unique.set(commit.oid, commit);
     }
@@ -89,18 +92,16 @@ function originalCommits(repo, prs, request) {
   return { unique, occurrences };
 }
 
-/** @param {string} repo @param {PullRequest} pr @param {Commits} connection @param {Graphql} request */
-function readCommits(repo, pr, connection, request) {
-  /** @type {Map<string, Commit>} */
-  const commits = new Map();
+function readCommits(repo: string, pr: PullRequest, connection: Commits, request: Graphql) {
+  const commits = new Map<string, Commit>();
   while (true) {
     if (connection.totalCount !== pr.commits.totalCount) throw new Error(`${pr.url}: commit count changed during the report; run again.`);
     for (const { commit } of connection.nodes) commits.set(commit.oid, commit);
     const cursor = nextCursor(connection);
     if (!cursor) break;
     const data = request(repositoryQuery(repo, commitField(pr.number, cursor)));
-    const repository = /** @type {Record<string, {commits: Commits}>} */ (data.repository);
-    connection = repository[`p${pr.number}`].commits;
+    const repository = data.repository as CommitFields;
+    connection = repository[`p${pr.number}`]!.commits;
   }
   if (commits.size !== pr.commits.totalCount) {
     throw new Error(`${pr.url}: incomplete commit list (${commits.size} of ${pr.commits.totalCount}); cannot compute a complete count.`);
@@ -108,8 +109,7 @@ function readCommits(repo, pr, connection, request) {
   return [...commits.values()];
 }
 
-/** @param {string} repo @param {Day} day @param {Graphql} [request] */
-export function countRepository(repo, day, request = graphql) {
+export function countRepository(repo: string, day: Day, request: Graphql = graphql) {
   const prs = mergedPullRequests(repo, day, request);
   const { unique, occurrences } = originalCommits(repo, prs, request);
   return {
@@ -125,8 +125,7 @@ export function countRepository(repo, day, request = graphql) {
   };
 }
 
-/** @param {ReturnType<typeof countRepository>[]} repositories */
-export function summarize(repositories) {
+export function summarize(repositories: ReturnType<typeof countRepository>[]) {
   return repositories.reduce(
     (total, repo) => ({
       repositories: total.repositories + 1,
@@ -151,8 +150,7 @@ export function summarize(repositories) {
   );
 }
 
-/** @param {string[]} repos @param {string} workspace @param {Day} day @param {Graphql} [request] */
-export function buildReport(repos, workspace, day, request = graphql) {
+export function buildReport(repos: string[], workspace: string, day: Day, request: Graphql = graphql) {
   const managed = repos.map(repo => countRepository(repo, day, request));
   const repositories = managed.some(repo => repo.repo.toLowerCase() === workspace.toLowerCase())
     ? managed

@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { selectDay } from "../skills/merged-commits/scripts/day.js";
-import { buildReport, type Commit, type Commits, countRepository, type Graphql, type PullRequest, summarize } from "../skills/merged-commits/scripts/github.js";
+import { selectDay } from "../skills/merged-commits/scripts/day";
+import { buildReport, type Commit, type Commits, countRepository, type Graphql, type PullRequest, summarize } from "../skills/merged-commits/scripts/github";
 
 import { loadManifest } from "./manifest";
 import { tempDir } from "./testFixtures";
@@ -166,7 +166,7 @@ test.each([
   });
 });
 
-test("the CLI finds its manifest and workspace identity from either invocation directory", () => {
+test("the executable script finds its manifest and workspace identity from either invocation directory", () => {
   const root = path.resolve(import.meta.dir, "..");
   const caller = realpathSync(tempDir("other checkout"));
   const gh = path.join(caller, "gh");
@@ -185,12 +185,14 @@ fi
   const nested = path.join(caller, "checkouts", "other");
   mkdirSync(nested, { recursive: true });
   for (const cwd of [root, nested]) {
-    const script = path.relative(cwd, path.join(root, "skills/merged-commits/scripts/count.js"));
+    // Run it through its shebang, with this Bun first on PATH, so the executable bit is tested too.
+    const script = `.${path.sep}${path.relative(cwd, path.join(root, "scripts/reports/mergedCommits.ts"))}`;
+    const PATH = [caller, path.dirname(process.execPath), process.env.PATH].join(path.delimiter);
     const report = JSON.parse(
-      execFileSync(process.execPath, [script, "2020-01-01", "--timezone", "UTC"], {
+      execFileSync(script, ["2020-01-01", "--timezone", "UTC"], {
         cwd,
         encoding: "utf8",
-        env: { ...process.env, PATH: caller + path.delimiter + process.env.PATH, EXPECTED_ROOT: root, GH_REPO: "fixture/other", GIT_DIR: nested },
+        env: { ...process.env, PATH, EXPECTED_ROOT: root, GH_REPO: "fixture/other", GIT_DIR: nested },
       }),
     );
     expect(report.workspace).toBe("fixture/workspace");
