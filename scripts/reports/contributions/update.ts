@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { localDate, selectRange } from "../../../skills/merged-commits/scripts/day";
+import { localDate, onDates, selectRange } from "../../../skills/merged-commits/scripts/day";
 import { countDays, type DayCount, includingWorkspace, matrixScope } from "../../../skills/merged-commits/scripts/github";
 import { checkoutPath } from "../../../src/manifest";
 import { datesToCount, HISTORY_FILE, type History, isDate, parseHistory, recordCounts, serializeHistory } from "./history";
@@ -93,7 +93,8 @@ function main(args: string[]) {
   const dates = datesToCount(existing, today, validSince(values.since, today));
   if (dates.length === 0)
     throw new Error(`${HISTORY_FILE} was counted at ${existing?.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
-  const window = selectRange(dates[0]!, today, timeZone, now);
+  // Dates before today that are already final are skipped, not recounted.
+  const window = onDates(selectRange(dates[0]!, today, timeZone, now), dates);
   const scope = includingWorkspace(repos, workspace);
   const counts = new Map<string, DayCount>();
   for (const repo of scope) {

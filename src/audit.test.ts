@@ -331,7 +331,7 @@ describe("audit", () => {
     [{ "README.md": "# a2f0\n\nHello\n", "docs/development.md": "# Development\n\n## Quick start\n" }, undefined],
     [{ "README.md": "# a2f0\n\n## Quick start\n" }, "no docs/development.md"],
     [{ "README.md": "# a2f0\n", "docs/development.md": "# Development\n" }, "docs/development.md has no Quick start section"],
-  ])("a profile repository keeps its Quick start in docs/development.md, out of the profile README (%#)", (files, detail) => {
+  ])("a profile repository's Quick start is checked in docs/development.md, not the profile README (%#)", (files, detail) => {
     expect(readme("a2f0", files)).toEqual(detail ? { "readme-quick-start": detail } : {});
   });
 

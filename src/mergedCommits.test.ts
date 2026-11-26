@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { selectDay, selectRange } from "../skills/merged-commits/scripts/day";
+import { onDates, selectDay, selectRange } from "../skills/merged-commits/scripts/day";
 import {
   buildReport,
   type Commit,
@@ -17,7 +17,7 @@ import {
 } from "../skills/merged-commits/scripts/github";
 
 import { loadManifest } from "./manifest";
-import { tempDir } from "./testFixtures";
+import { SPAWNS, tempDir } from "./testFixtures";
 
 const now = new Date("2026-11-06T23:46:10Z");
 const day = selectDay("yesterday", "America/New_York", now);
@@ -289,6 +289,22 @@ test("counts each local merge date once per repository and matches the single-da
   }
 });
 
+test("a range limited to some dates reads no commits of PRs merged on the others", () => {
+  const queried: number[] = [];
+  const { request } = fixture([pr(1, "2026-11-03T12:00:00Z", 1), pr(2, "2026-11-04T12:00:00Z", 1), pr(3, "2026-11-05T12:00:00Z", 1)], {
+    1: [commit("a")],
+    2: [commit("b")],
+    3: [commit("c")],
+  });
+  const recording: Graphql = query => {
+    queried.push(...[...query.matchAll(/p(\d+): pullRequest/g)].map(([, number]) => Number(number)));
+    return request(query);
+  };
+  const range = onDates(selectRange("2026-11-03", "2026-11-05", "UTC", now), ["2026-11-03", "2026-11-05"]);
+  expect([...countDays("example/repo", range, recording).keys()].sort()).toEqual(["2026-11-03", "2026-11-05"]);
+  expect(queried.sort()).toEqual([1, 3]);
+});
+
 test("a range reads commits in batches across days, not one query per day", () => {
   const many = Array.from({ length: 25 }, (_, index) => pr(index + 1, `2026-10-${String(index + 1).padStart(2, "0")}T12:00:00Z`, 1));
   const { request, calls } = fixture(many, Object.fromEntries(many.map(entry => [entry.number, [commit(`c${entry.number}`)]])));
@@ -328,7 +344,7 @@ describe("pull requests over GitHub's 250-commit list", () => {
     expect(() => countRepository("example/repo", day, request, short)).toThrow("incomplete commit list (249 of 300)");
   });
 
-  test("page GitHub's comparison until it has every commit or a page comes back empty", () => {
+  test("page GitHub's comparison until it has every commit or a page comes back empty", SPAWNS, () => {
     const bin = tempDir("compare");
     const pages = (total: number) => {
       for (const [index, [from, count]] of [

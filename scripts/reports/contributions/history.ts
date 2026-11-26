@@ -20,6 +20,9 @@ export interface History {
   days: Record<string, DayCount>;
 }
 
+/** A UTC instant as `Date.toISOString` writes it, with optional fractional seconds. */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+
 function isCount(value: unknown): value is DayCount {
   if (typeof value !== "object" || value === null) return false;
   const { commits, pullRequests } = value as Record<string, unknown>;
@@ -57,7 +60,7 @@ function invalidHistory(value: unknown): string | undefined {
   const { schemaVersion, timeZone, asOf, days } = value as Record<string, unknown>;
   if (schemaVersion !== 1) return "schemaVersion must be 1";
   if (!isTimeZone(timeZone)) return "timeZone must be an IANA time zone";
-  if (typeof asOf !== "string" || Number.isNaN(Date.parse(asOf))) return "asOf must be an ISO 8601 instant";
+  if (typeof asOf !== "string" || !ISO_INSTANT.test(asOf) || Number.isNaN(Date.parse(asOf))) return "asOf must be an ISO 8601 instant";
   if (typeof days !== "object" || days === null || Array.isArray(days)) return "days must be an object";
   return invalidDay(days);
 }

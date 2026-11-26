@@ -64,7 +64,11 @@ function isProducer(checkout: Checkout): boolean {
 /** Where a profile repository, whose README is its owner's GitHub profile, keeps its Quick start. */
 const PROFILE_GUIDE = "docs/development.md";
 
-/** GitHub shows the README of the repository named after its owner on the owner's profile. */
+/**
+ * GitHub shows the README of the repository named after a user on that user's
+ * profile. Organizations keep theirs in `.github/profile/README.md`, so their
+ * `<org>/<org>` is an ordinary repository; matrix's owner is a user.
+ */
 function isProfile(checkout: Checkout): boolean {
   const [owner, name] = checkout.repo.toLowerCase().split("/");
   return owner === name;

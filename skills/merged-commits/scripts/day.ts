@@ -73,6 +73,18 @@ export function selectRange(first: string, last: string, timeZone: string, now: 
   };
 }
 
+/** The window, counting only merges on `dates`, so other days' PRs are never read. */
+export function onDates(window: Window, dates: Iterable<string>): Window {
+  const counted = new Set(dates);
+  return {
+    ...window,
+    dateOf(mergedAt) {
+      const date = window.dateOf(mergedAt);
+      return date !== null && counted.has(date) ? date : null;
+    },
+  };
+}
+
 export function selectDay(selector: string, timeZone: string, now: Date): Day {
   const today = localDate(now, timeZone);
   const date = selector === "today" ? today : selector === "yesterday" ? addDays(today, -1) : selector;

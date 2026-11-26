@@ -86,6 +86,7 @@ test.each([
   ["{", "is not JSON"],
   ['{"schemaVersion":2}', "schemaVersion must be 1"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"soon","days":{}}', "asOf must be an ISO 8601 instant"],
+  ['{"schemaVersion":1,"timeZone":"UTC","asOf":"Nov 26 2026","days":{}}', "asOf must be an ISO 8601 instant"],
   ['{"schemaVersion":1,"timeZone":"Not/A_Zone","asOf":"2026-11-26T00:00:00Z","days":{}}', "timeZone must be an IANA time zone"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-02-30":{"commits":1,"pullRequests":0}}}', "invalid date '2026-02-30'"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"commits":-1,"pullRequests":0}}}', "non-negative integer"],
