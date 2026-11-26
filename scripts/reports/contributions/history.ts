@@ -34,8 +34,8 @@ export interface TotalsHistory {
   days: Record<string, DayCount>;
 }
 
-/** A GitHub repository's `owner/name`. */
-const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+/** A GitHub repository's `owner/name`, neither part only dots. */
+const REPOSITORY = /^(?!\.+\/)[A-Za-z0-9_.-]+\/(?!\.+$)[A-Za-z0-9_.-]+$/;
 
 /** A UTC instant as `Date.toISOString` writes it, with optional fractional seconds. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;

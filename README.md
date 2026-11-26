@@ -97,20 +97,20 @@ and the captured `asOf` cutoff makes today's report partial.
 grid, which the owner's `<owner>/<owner>` profile repository serves as a web
 page. It records each day's counts for every repository in the matrix and this
 workspace that merged a pull request that day, so the page can total any set
-of them, and a recounted day replaces every repository's count. A version 1
-history, which kept only each day's totals, is counted again in full from its
-oldest day. It counts
+of them, and a recounted day replaces every repository's count. It counts
 every day its `contributions/commits.json` is missing or counted before the day
 ended, so a run after a gap backfills the days in between, and the first run
 counts 53 weeks; `--since` adds earlier days, and every counted day stays in
-the history. It writes only into a profile checkout that `bun run status`
-reports ready, ignoring changes to the history it writes. `--profile` writes
-into another directory as it is. The run leaves the history there to ship as a
-pull request, and merging it deploys the page. It pages each repository's
-merged PRs once for the whole range rather than once per day. A day
-counted after it ended is final, so a repository added to `matrix.json` later
-counts only from the day it was added; delete those days from the history to
-count them again.
+the history. A version 1 history, which kept only each day's totals, is
+counted again in full from its oldest day with today's `matrix.json`, so its
+past totals change where the manifest has. It writes only into a profile
+checkout that `bun run status` reports ready, ignoring changes to the history
+it writes. `--profile` writes into another directory as it is. The run leaves
+the history there to ship as a pull request, and merging it deploys the page.
+It pages each repository's merged PRs once for the whole range rather than
+once per day. A day counted after it ended is final, so a repository added to
+`matrix.json` later counts only from the day it was added; delete those days
+from the history to count them again.
 
 ## Managed repositories
 

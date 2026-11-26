@@ -135,6 +135,10 @@ test.each([
     "days.2026-11-25 has an invalid repository 'commits'",
   ],
   [
+    '{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"../..":{"commits":1,"pullRequests":1}}}}',
+    "days.2026-11-25 has an invalid repository '../..'",
+  ],
+  [
     '{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"a2f0/app":{"commits":-1,"pullRequests":0}}}}',
     'days.2026-11-25["a2f0/app"] needs non-negative integer',
   ],
