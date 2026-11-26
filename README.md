@@ -97,7 +97,9 @@ and the captured `asOf` cutoff makes today's report partial.
 grid, which the owner's `<owner>/<owner>` profile repository serves as a web
 page. It records each day's counts for every repository in the matrix and this
 workspace that merged a pull request that day, so the page can total any set
-of them, and a recounted day replaces every repository's count. It counts
+of them, and a recounted day replaces every repository's count. A version 1
+history, which kept only each day's totals, is counted again in full from its
+oldest day. It counts
 every day its `contributions/commits.json` is missing or counted before the day
 ended, so a run after a gap backfills the days in between, and the first run
 counts 53 weeks; `--since` adds earlier days, and every counted day stays in

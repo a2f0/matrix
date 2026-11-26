@@ -6,7 +6,18 @@ import { countDays, type DayCount, includingWorkspace, matrixScope } from "../..
 import { checkoutStatus, notReady } from "../../../src/checkouts";
 import { gitOutput } from "../../../src/git";
 import { checkoutPath, cloneUrl, loadManifest } from "../../../src/manifest";
-import { datesToCount, HISTORY_FILE, type History, isDate, parseHistory, type RepositoryCounts, recordCounts, serializeHistory } from "./history";
+import {
+  datesToCount,
+  HISTORY_FILE,
+  type History,
+  isDate,
+  parseHistory,
+  type RepositoryCounts,
+  recordCounts,
+  serializeHistory,
+  type TotalsHistory,
+  upgradeHistory,
+} from "./history";
 
 const USAGE = `Usage: bun run contributions [--since YYYY-MM-DD] [--timezone IANA] [--profile DIR]
        scripts/reports/updateContributions.ts [same options]
@@ -100,7 +111,7 @@ function resolveTimeZone(timeZone: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone }).resolvedOptions().timeZone;
 }
 
-function historyTimeZone(history: History | null, requested: string | undefined): string {
+function historyTimeZone(history: History | TotalsHistory | null, requested: string | undefined): string {
   if (!history) return resolveTimeZone(requested ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
   // Compare resolved names, so a hand-written utc matches UTC.
   if (requested && resolveTimeZone(requested) !== resolveTimeZone(history.timeZone)) {
@@ -136,15 +147,16 @@ function main(args: string[]) {
   const { repos, workspace } = matrixScope(ROOT);
   const profile = values.profile ? path.resolve(values.profile) : profileCheckout(ROOT, repos, workspace);
   const file = path.join(profile, HISTORY_FILE);
-  const existing = existsSync(file) ? parseHistory(readFileSync(file, "utf8"), file) : null;
-  const timeZone = historyTimeZone(existing, values.timezone);
+  const stored = existsSync(file) ? parseHistory(readFileSync(file, "utf8"), file) : null;
+  const timeZone = historyTimeZone(stored, values.timezone);
   const now = new Date();
   const today = localDate(now, timeZone);
   // A history counted on a later date than today came from a clock that has
   // since moved back; recording an earlier asOf would strand its later days.
-  if (existing && localDate(new Date(existing.asOf), timeZone) > today)
-    throw new Error(`${HISTORY_FILE} was counted at ${existing.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
-  const dates = datesToCount(existing, today, validSince(values.since, today));
+  if (stored && localDate(new Date(stored.asOf), timeZone) > today)
+    throw new Error(`${HISTORY_FILE} was counted at ${stored.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
+  const { existing, since } = upgradeHistory(stored, validSince(values.since, today));
+  const dates = datesToCount(existing, today, since);
   // Dates before today that are already final are skipped, not recounted.
   const window = onDates(selectRange(dates[0]!, today, timeZone, now), dates);
   const scope = includingWorkspace(repos, workspace);

@@ -23,6 +23,17 @@ export interface History {
   days: Record<string, RepositoryCounts>;
 }
 
+/**
+ * A version 1 history, which kept only each day's totals. A run reads it only
+ * to count every day it holds again, by repository.
+ */
+export interface TotalsHistory {
+  schemaVersion: 1;
+  timeZone: string;
+  asOf: string;
+  days: Record<string, DayCount>;
+}
+
 /** A GitHub repository's `owner/name`. */
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -43,6 +54,10 @@ export function isDate(date: string): boolean {
   }
 }
 
+function invalidTotals(date: string, count: unknown): string | undefined {
+  return isCount(count) ? undefined : `days.${date} needs non-negative integer commits and pullRequests`;
+}
+
 function invalidRepositories(date: string, repositories: unknown): string | undefined {
   if (typeof repositories !== "object" || repositories === null || Array.isArray(repositories)) return `days.${date} must be an object of repositories`;
   for (const [repo, count] of Object.entries(repositories)) {
@@ -52,10 +67,18 @@ function invalidRepositories(date: string, repositories: unknown): string | unde
   return undefined;
 }
 
-function invalidDay(days: object): string | undefined {
-  for (const [date, repositories] of Object.entries(days)) {
+type CountsCheck = (date: string, counts: unknown) => string | undefined;
+
+/** How each schema version's days hold their counts: totals in version 1, repositories in version 2. */
+const COUNTS_CHECKS = new Map<unknown, CountsCheck>([
+  [1, invalidTotals],
+  [2, invalidRepositories],
+]);
+
+function invalidDay(days: object, invalidCounts: CountsCheck): string | undefined {
+  for (const [date, counts] of Object.entries(days)) {
     if (!isDate(date)) return `days has an invalid date '${date}'`;
-    const problem = invalidRepositories(date, repositories);
+    const problem = invalidCounts(date, counts);
     if (problem) return problem;
   }
   return undefined;
@@ -81,15 +104,16 @@ function isTimeZone(timeZone: unknown): boolean {
 function invalidHistory(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return "it must be a JSON object";
   const { schemaVersion, timeZone, asOf, days } = value as Record<string, unknown>;
-  if (schemaVersion !== 2) return "schemaVersion must be 2";
+  const invalidCounts = COUNTS_CHECKS.get(schemaVersion);
+  if (!invalidCounts) return "schemaVersion must be 2, or 1 to count again by repository";
   if (!isTimeZone(timeZone)) return "timeZone must be an IANA time zone";
   if (typeof asOf !== "string" || !ISO_INSTANT.test(asOf) || !isDate(asOf.slice(0, 10)) || Number.isNaN(Date.parse(asOf)))
     return "asOf must be an ISO 8601 instant";
   if (typeof days !== "object" || days === null || Array.isArray(days)) return "days must be an object";
-  return invalidDay(days) ?? lateDay(days, asOf, timeZone as string);
+  return invalidDay(days, invalidCounts) ?? lateDay(days, asOf, timeZone as string);
 }
 
-export function parseHistory(text: string, file: string): History {
+export function parseHistory(text: string, file: string): History | TotalsHistory {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -98,7 +122,18 @@ export function parseHistory(text: string, file: string): History {
   }
   const problem = invalidHistory(value);
   if (problem) throw new Error(`${file}: ${problem}.`);
-  return value as History;
+  return value as History | TotalsHistory;
+}
+
+/**
+ * The history a run builds on and the earliest day it must count. A version 1
+ * history holds no repository counts to build on, so every day it holds is
+ * counted again, from its oldest, and none is lost.
+ */
+export function upgradeHistory(stored: History | TotalsHistory | null, since?: string): { existing: History | null; since?: string } {
+  if (stored?.schemaVersion !== 1) return { existing: stored, since };
+  const oldest = Object.keys(stored.days).sort()[0];
+  return { existing: null, since: [since, oldest].filter(date => date !== undefined).sort()[0] };
 }
 
 /**
