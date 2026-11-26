@@ -1,9 +1,7 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { runGh } from "../../../src/gh";
-import { loadManifest } from "../../../src/manifest";
 import { selectDay } from "./day";
-import { buildReport } from "./github";
+import { buildReport, matrixScope } from "./github";
 
 const USAGE = `Usage: bun run merged-commits [today|yesterday|YYYY-MM-DD] [--timezone IANA]
        scripts/reports/mergedCommits.ts [today|yesterday|YYYY-MM-DD] [--timezone IANA]
@@ -25,9 +23,7 @@ function main(args: string[]) {
   }
   if (positionals.length > 1) throw new Error(USAGE);
   const day = selectDay(positionals[0] ?? "today", values.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, new Date());
-  const root = path.resolve(import.meta.dir, "../../..");
-  const { repos } = loadManifest(root);
-  const workspace = runGh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], root).trim();
+  const { repos, workspace } = matrixScope(path.resolve(import.meta.dir, "../../.."));
   console.log(JSON.stringify(buildReport(repos, workspace, day), null, 2));
 }
 

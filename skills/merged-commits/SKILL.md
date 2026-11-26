@@ -57,10 +57,12 @@ JSON visible, since these numbers are the requested result, not a noisy check.
 The helper reads merged PRs directly, not GitHub's search index. It paginates
 by update time until no older page can contain the day, rescans updates since
 `asOf` to recover PRs that moved ahead of its cursor, then fetches every selected
-PR's commits with pagination. A failed API call or incomplete commit list fails
-the entire report: never turn missing repositories into zeroes. An incomplete
-list reports the received and expected counts; it may reflect an API limit,
-so do not assume rerunning will fix it.
+PR's commits with pagination. GitHub lists at most 250 commits for a pull
+request, so for a larger one the helper pages the REST comparison of the PR's
+base and head commits instead, which must match the PR's commit count. A failed
+API call or incomplete commit list fails the entire report: never turn missing
+repositories into zeroes. An incomplete list reports the received and expected
+counts; do not assume rerunning will fix it.
 This is a read-time view, not an atomic historical snapshot; if GitHub reports
 changing commit lists, rerun rather than report a partial total.
 
@@ -76,5 +78,8 @@ of how the PRs actually merged.
 ## Ownership
 
 Matrix owns this skill and its TypeScript helpers; regression tests live in
-`src/mergedCommits.test.ts`. omp discovers `skills/` through the project config.
+`src/mergedCommits.test.ts`. `bun run contributions` counts the profile's
+contributions grid with the same helpers over a range of days (`countDays`),
+so a day's grid count equals this report's workspace-inclusive
+`originalCommits` for that day. omp discovers `skills/` through the project config.
 Other harnesses can follow the link in `AGENTS.md`; no global install is needed.

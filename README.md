@@ -10,7 +10,7 @@ matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
 src/                 The matrix CLI: sync, status, discover, audit, health, teardown, deploy-secrets, sweep
 skills/              matrix's own skills, such as merged-commits
-scripts/reports/     Executable reports, such as mergedCommits.ts
+scripts/reports/     Executable reports: mergedCommits.ts and updateContributions.ts
 scripts/secrets/     Backup entrypoint for ../matrix-secrets
 scripts/sentry/      Sentry MCP launcher for every harness
 scripts/testing/     The steps bun run check runs
@@ -44,6 +44,7 @@ bun run status
 | `bun run artifacts <status\|link\|capture> [repo...] [--apply]` | Share screenshots through `../matrix-artifacts`: link each clone's `.screenshots`, capture under a lock, and report each capture's commit |
 | `bun run perf <serve\|measure\|shot\|diff\|graph> [args...] [--from checkouts/<name>]` | Measure page load from a checkout: serve a build over HTTP/2, time cold loads to a ready signal, and diff screenshots for fidelity |
 | `bun run merged-commits [today\|yesterday\|YYYY-MM-DD] [--timezone IANA]` | Count original commits in merged PRs across the matrix, with separate workspace-inclusive totals |
+| `bun run contributions [--since YYYY-MM-DD] [--timezone IANA] [--profile DIR]` | Count each day's original commits across the matrix into the profile repository's history, backfilling missed days, and render its contributions grid |
 | `bun run state-machines [repo...] [--limit N] [--min-score N] [--json]` | Rank source files that look like implicit state machines (lifecycle booleans toggled together, status strings written from many places) in the workspace and each checkout, with `agent-tool state-machines`; read-only |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
@@ -91,6 +92,15 @@ plus comparisons with one squash commit or one additional merge commit per PR.
 Existing branch merge commits are already included; overlapping PR commits are
 deduplicated and reported separately. Historical dates use today's `matrix.json`,
 and the captured `asOf` cutoff makes today's report partial.
+
+`contributions` keeps a GitHub-style contributions grid on the a2f0 profile
+(the `a2f0/a2f0` checkout) with the same per-day counts across the matrix and
+this workspace. It counts every day its `contributions/commits.json` is
+missing or counted before the day ended, so a run after a gap backfills the
+days in between, and the first run counts 53 weeks; `--since` adds earlier
+days, and every counted day stays in the history. It then runs that checkout's
+`contributions:render` package script and leaves the changes there to ship. It pages
+each repository's merged PRs once for the whole range rather than once per day.
 
 ## Managed repositories
 
