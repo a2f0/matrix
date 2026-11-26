@@ -471,12 +471,12 @@ Gemini reads `GEMINI.md` by default, so set its
 once in `~/.gemini/settings.json`:
 
 ```json
-{ "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }
+{ "context": { "fileName": ["GEMINI.md", "AGENTS.md"] } }
 ```
 
 Managed repositories carry no `GEMINI.md` and no Gemini CLI files in
 `.gemini/`, such as settings, `.env`, commands, or skills, which the audit's
-`no-gemini-config` rule checks. The Gemini Code Assist review bot's
+`no-gemini-config` rule checks. The Gemini Code Assist review bot's root
 `.gemini/config.yaml` and `.gemini/styleguide.md` configure GitHub reviews,
 not the CLI, and stay allowed.
 

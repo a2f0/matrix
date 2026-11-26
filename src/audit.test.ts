@@ -136,6 +136,14 @@ describe("audit", () => {
     });
   });
 
+  test("allows Gemini Code Assist review config only in the root .gemini/", () => {
+    const codeAssist = { ".gemini/config.yaml": "code_review: {}\n", ".gemini/styleguide.md": "Review guide\n" };
+    expect(failures(checkout("code-assist", codeAssist), ["no-gemini-config"])).toEqual({});
+    expect(failures(checkout("nested", { "packages/web/.gemini/config.yaml": "code_review: {}\n" }), ["no-gemini-config"])).toEqual({
+      "no-gemini-config": "tracked packages/web/.gemini/config.yaml",
+    });
+  });
+
   test("counts characters, not bytes, in every AGENTS.md against the context limit", () => {
     const at = (chars: number) => GUIDANCE + "x".repeat(chars - GUIDANCE.length);
     // Multi-byte characters count once: 20,000 of them pass although they take 60,000 bytes.
