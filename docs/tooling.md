@@ -487,17 +487,21 @@ which it loads only in a
 Folder trust is on by default, and an untrusted workspace also skips project
 settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 `~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
-checkout below it, whatever branch or local edits it holds. The audit checks
-only a checkout's tracked (indexed) files, when someone runs it, so it
-does not stop a PR branch's or an untracked `.gemini/settings.json`, whose MCP
-servers, hooks, and tool discovery run arbitrary commands when Gemini starts,
-in whichever directory it starts. Check a branch you did not write out
-outside the trusted clone, where Gemini runs untrusted and its skills can be
-read from `.agents/skills/<name>/SKILL.md`. Otherwise, before starting Gemini
-on a branch, list every `.gemini/` file and `.env`, tracked, untracked, or
-ignored, with
-`git ls-files --cached --others -- ':(glob)**/.gemini/**' ':(glob)**/.env'`
-in the checkout.
+checkout below it, whatever branch or local edits it holds.
+
+The audit sees only tracked files, and only when someone runs it. A PR
+branch's `.gemini/settings.json`, or an untracked one, can still run MCP
+servers, hooks, or discovery commands when Gemini starts in its directory.
+Review a branch you did not write in a separate clone outside the trusted
+folders, where Gemini runs untrusted and you read skills from
+`.agents/skills/<name>/SKILL.md`. Before starting Gemini on any other branch,
+list its `.gemini/` and `.env` files, including untracked and ignored ones,
+with this command; it also searches ignored directories such as
+`node_modules`, so it takes a moment in a large checkout:
+
+```sh
+git ls-files --cached --others -- ':(glob)**/.gemini/**' ':(glob)**/.env'
+```
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
