@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { selectDay, selectRange } from "../skills/merged-commits/scripts/day";
 import {
@@ -326,6 +326,43 @@ describe("pull requests over GitHub's 250-commit list", () => {
   test("still refuse a comparison that disagrees with the PR's count", () => {
     const short: Compare = () => listed.slice(0, 299 - 50);
     expect(() => countRepository("example/repo", day, request, short)).toThrow("incomplete commit list (249 of 300)");
+  });
+
+  test("page GitHub's comparison until it has every commit or a page comes back empty", () => {
+    const bin = tempDir("compare");
+    const pages = (total: number) => {
+      for (const [index, [from, count]] of [
+        [0, 150],
+        [150, 150],
+        [300, 0],
+      ].entries()) {
+        writeFileSync(path.join(bin, `page-${index + 1}.json`), page(from!, count!, total));
+      }
+    };
+    const page = (from: number, count: number, total: number) =>
+      JSON.stringify({
+        total_commits: total,
+        commits: Array.from({ length: count }, (_, index) => ({ sha: `c${from + index}`, parents: from + index === 299 ? [{}, {}] : [{}] })),
+      });
+    pages(300);
+    writeFileSync(path.join(bin, "gh"), `#!/bin/sh\necho "$2" >> "${bin}/calls"\ncat "${bin}/page-\${2##*page=}.json"\n`);
+    chmodSync(path.join(bin, "gh"), 0o755);
+    const original = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${original}`;
+    try {
+      expect(countRepository("example/repo", day, request)).toMatchObject({ originalCommits: 300, existingMergeCommits: 1 });
+      expect(readFileSync(path.join(bin, "calls"), "utf8").trim().split("\n")).toEqual([
+        "repos/example/repo/compare/base7...head7?per_page=100&page=1",
+        "repos/example/repo/compare/base7...head7?per_page=100&page=2",
+      ]);
+      // A total GitHub overstates still ends at the first empty page.
+      pages(400);
+      writeFileSync(path.join(bin, "calls"), "");
+      expect(countRepository("example/repo", day, request).originalCommits).toBe(300);
+      expect(readFileSync(path.join(bin, "calls"), "utf8").trim().split("\n")).toHaveLength(3);
+    } finally {
+      process.env.PATH = original;
+    }
   });
 
   test("do not compare when a PR within the limit comes back short", () => {

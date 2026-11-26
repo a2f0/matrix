@@ -128,8 +128,7 @@ READMEs are written for people. The H1 is the plain project name, never a
 link. When a repository serves a public website, the first paragraph says
 `This repo is available on the web at <https://host>.` with its primary
 production host. A `Quick start` section goes from a fresh clone to a running
-project; a profile repository (`<owner>/<owner>`) keeps it in
-`docs/development.md`. Material for one sub-project lives in that folder's README, linked from
+project. Material for one sub-project lives in that folder's README, linked from
 the root. Instructions for coding agents, such as skills, output capture, and
 review or shipping policy, belong in `AGENTS.md`, never in a README.
 [docs/tooling.md](docs/tooling.md#readme-files) has the details.

@@ -24,7 +24,7 @@ function isCount(value: unknown): value is DayCount {
   return [commits, pullRequests].every(field => Number.isSafeInteger(field) && (field as number) >= 0);
 }
 
-function isDate(date: string): boolean {
+export function isDate(date: string): boolean {
   try {
     return addDays(date, 0) === date;
   } catch {
@@ -40,11 +40,21 @@ function invalidDay(days: object): string | undefined {
   return undefined;
 }
 
+function isTimeZone(timeZone: unknown): boolean {
+  if (typeof timeZone !== "string" || timeZone === "") return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function invalidHistory(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return "it must be a JSON object";
   const { schemaVersion, timeZone, asOf, days } = value as Record<string, unknown>;
   if (schemaVersion !== 1) return "schemaVersion must be 1";
-  if (typeof timeZone !== "string" || timeZone === "") return "timeZone must be an IANA time zone";
+  if (!isTimeZone(timeZone)) return "timeZone must be an IANA time zone";
   if (typeof asOf !== "string" || Number.isNaN(Date.parse(asOf))) return "asOf must be an ISO 8601 instant";
   if (typeof days !== "object" || days === null || Array.isArray(days)) return "days must be an object";
   return invalidDay(days);

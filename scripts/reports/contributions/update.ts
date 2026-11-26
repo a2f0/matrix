@@ -2,10 +2,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { addDays, localDate, selectRange } from "../../../skills/merged-commits/scripts/day";
+import { localDate, selectRange } from "../../../skills/merged-commits/scripts/day";
 import { countDays, type DayCount, includingWorkspace, matrixScope } from "../../../skills/merged-commits/scripts/github";
 import { checkoutPath } from "../../../src/manifest";
-import { datesToCount, HISTORY_FILE, type History, parseHistory, recordCounts, serializeHistory } from "./history";
+import { datesToCount, HISTORY_FILE, type History, isDate, parseHistory, recordCounts, serializeHistory } from "./history";
 
 const USAGE = `Usage: bun run contributions [--since YYYY-MM-DD] [--timezone IANA] [--profile DIR]
        scripts/reports/updateContributions.ts [same options]
@@ -22,13 +22,19 @@ Requires an authenticated gh CLI. Prints JSON; progress goes to stderr.
 
 const ROOT = path.resolve(import.meta.dir, "../../..");
 
-function profileCheckout(repos: string[], workspace: string): string {
+/** The checkout of the workspace owner's profile repository, `<owner>/<owner>`. */
+export function profileCheckout(root: string, repos: string[], workspace: string): string {
   const owner = workspace.split("/")[0]!;
   const repo = repos.find(candidate => candidate.toLowerCase() === `${owner}/${owner}`.toLowerCase());
   if (!repo) throw new Error(`matrix.json does not manage the profile repository ${owner}/${owner}; add it or pass --profile.`);
-  const dir = checkoutPath(ROOT, repo);
+  const dir = checkoutPath(root, repo);
   if (!existsSync(dir)) throw new Error(`${dir} is missing; run bun run sync ${repo} first.`);
   return dir;
+}
+
+function validSince(since: string | undefined, today: string): string | undefined {
+  if (since !== undefined && (!isDate(since) || since > today)) throw new Error(`--since must be a YYYY-MM-DD date no later than today (${today}).`);
+  return since;
 }
 
 function resolveTimeZone(timeZone: string): string {
@@ -76,15 +82,16 @@ function main(args: string[]) {
     console.log(USAGE);
     return;
   }
-  if (values.since) addDays(values.since, 0);
   const { repos, workspace } = matrixScope(ROOT);
-  const profile = values.profile ? path.resolve(values.profile) : profileCheckout(repos, workspace);
+  const profile = values.profile ? path.resolve(values.profile) : profileCheckout(ROOT, repos, workspace);
   const file = path.join(profile, HISTORY_FILE);
   const existing = existsSync(file) ? parseHistory(readFileSync(file, "utf8"), file) : null;
   const timeZone = historyTimeZone(existing, values.timezone);
   const now = new Date();
   const today = localDate(now, timeZone);
-  const dates = datesToCount(existing, today, values.since);
+  const dates = datesToCount(existing, today, validSince(values.since, today));
+  if (dates.length === 0)
+    throw new Error(`${HISTORY_FILE} was counted at ${existing?.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
   const window = selectRange(dates[0]!, today, timeZone, now);
   const scope = includingWorkspace(repos, workspace);
   const counts = new Map<string, DayCount>();

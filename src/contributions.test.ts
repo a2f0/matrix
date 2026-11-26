@@ -3,9 +3,10 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { datesToCount, type History, parseHistory, recordCounts, serializeHistory } from "../scripts/reports/contributions/history";
+import { profileCheckout } from "../scripts/reports/contributions/update";
 import { datesBetween } from "../skills/merged-commits/scripts/day";
 import { loadManifest } from "./manifest";
-import { tempDir } from "./testFixtures";
+import { SPAWNS, tempDir } from "./testFixtures";
 
 const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -27,6 +28,10 @@ test("a later run recounts the day it last ran on and backfills every day since"
   // A day missing from the middle is counted again too.
   const { "2026-06-01": _, ...gap } = stored.days;
   expect(datesToCount({ ...stored, days: gap }, "2026-11-25")).toEqual(["2026-06-01", "2026-11-25"]);
+});
+
+test("a history counted after today's date, from a skewed clock, leaves nothing to count", () => {
+  expect(datesToCount(history(datesBetween("2025-11-20", "2026-11-25"), "2026-11-27T12:00:00Z"), "2026-11-25")).toEqual([]);
 });
 
 test("--since adds earlier days without recounting final ones", () => {
@@ -81,6 +86,7 @@ test.each([
   ["{", "is not JSON"],
   ['{"schemaVersion":2}', "schemaVersion must be 1"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"soon","days":{}}', "asOf must be an ISO 8601 instant"],
+  ['{"schemaVersion":1,"timeZone":"Not/A_Zone","asOf":"2026-11-26T00:00:00Z","days":{}}', "timeZone must be an IANA time zone"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-02-30":{"commits":1,"pullRequests":0}}}', "invalid date '2026-02-30'"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"commits":-1,"pullRequests":0}}}', "non-negative integer"],
 ])("rejects an invalid history: %s", (text, message) => {
@@ -112,7 +118,15 @@ echo '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage
   return { profile, run };
 }
 
-test("the script backfills a new history, renders the profile, and then recounts only today", () => {
+test("finds the owner's profile checkout, in any case, or says how to get it", () => {
+  const root = tempDir("profile-root");
+  expect(() => profileCheckout(root, ["a2f0/app"], "a2f0/matrix")).toThrow("does not manage the profile repository a2f0/a2f0");
+  expect(() => profileCheckout(root, ["A2F0/a2f0"], "a2f0/matrix")).toThrow("run bun run sync A2F0/a2f0 first");
+  mkdirSync(path.join(root, "checkouts", "a2f0"), { recursive: true });
+  expect(profileCheckout(root, ["a2f0/app", "A2F0/a2f0"], "a2f0/matrix")).toBe(path.join(root, "checkouts", "a2f0"));
+});
+
+test("the script backfills a new history, renders the profile, and then recounts only from its last day", SPAWNS, () => {
   const { profile, run } = workspace();
   const first = run("--timezone", "UTC");
   expect(first.stderr).toContain("fixture/workspace: 0 merged PRs");
@@ -125,14 +139,24 @@ test("the script backfills a new history, renders the profile, and then recounts
 
   const second = run();
   expect(second.status).toBe(0);
-  expect(JSON.parse(second.stdout).counted).toMatchObject({ first: report.counted.last, days: 1 });
+  // One day, or two when the runs straddle midnight.
+  const { first: from, last, days } = JSON.parse(second.stdout).counted;
+  expect(from).toBe(report.counted.last);
+  expect(days).toBe(datesBetween(from, last).length);
+  expect(days).toBeLessThanOrEqual(2);
+
+  for (const since of ["2999-01-01", "2026-02-30", "soon"]) {
+    const rejected = run("--since", since);
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("--since must be a YYYY-MM-DD date no later than today");
+  }
 
   const mixed = run("--timezone", "America/New_York");
   expect(mixed.status).toBe(1);
   expect(mixed.stderr).toContain("records UTC days; it cannot mix in America/New_York");
 });
 
-test("a failing renderer fails the run after the history is saved", () => {
+test("a failing renderer fails the run after the history is saved", SPAWNS, () => {
   const { profile, run } = workspace();
   writeFileSync(path.join(profile, "package.json"), JSON.stringify({ scripts: { "contributions:render": "exit 3" } }));
   const result = run("--timezone", "UTC");

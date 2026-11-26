@@ -93,9 +93,9 @@ Existing branch merge commits are already included; overlapping PR commits are
 deduplicated and reported separately. Historical dates use today's `matrix.json`,
 and the captured `asOf` cutoff makes today's report partial.
 
-`contributions` keeps a GitHub-style contributions grid on the a2f0 profile
-(the `a2f0/a2f0` checkout) with the same per-day counts across the matrix and
-this workspace. It counts every day its `contributions/commits.json` is
+`contributions` keeps a GitHub-style contributions grid on the owner's GitHub
+profile, in the checkout of its `<owner>/<owner>` profile repository, with the
+same per-day counts across the matrix and this workspace. It counts every day its `contributions/commits.json` is
 missing or counted before the day ended, so a run after a gap backfills the
 days in between, and the first run counts 53 weeks; `--since` adds earlier
 days, and every counted day stays in the history. It then runs that checkout's
