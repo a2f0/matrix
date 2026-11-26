@@ -490,10 +490,14 @@ settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 checkout below it, whatever branch or local edits it holds. The audit checks
 only a checkout's tracked (indexed) files, when someone runs it, so it
 does not stop a PR branch's or an untracked `.gemini/settings.json`, whose MCP
-servers, hooks, and tool discovery run arbitrary commands when Gemini starts.
-Before starting it on a branch, run `bun run audit <name> --rule no-gemini-config`
-from the clone and `git status --ignored -- .gemini` in the checkout, or check
-the branch out outside the trusted clone.
+servers, hooks, and tool discovery run arbitrary commands when Gemini starts,
+in whichever directory it starts. Check a branch you did not write out
+outside the trusted clone, where Gemini runs untrusted and its skills can be
+read from `.agents/skills/<name>/SKILL.md`. Otherwise, before starting Gemini
+on a branch, list every `.gemini/` file and `.env`, tracked, untracked, or
+ignored, with
+`git ls-files --cached --others -- ':(glob)**/.gemini/**' ':(glob)**/.env'`
+in the checkout.
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
