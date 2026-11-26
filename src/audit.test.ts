@@ -335,6 +335,14 @@ describe("audit", () => {
     expect(readme("a2f0", files)).toEqual(detail ? { "readme-quick-start": detail } : {});
   });
 
+  test("a profile repository may have no README, leaving the profile at GitHub's default, but another repository may not", () => {
+    const guide = { "README.md": null, "docs/development.md": "# Development\n\n## Quick start\n" };
+    const profile = audit(root, [checkout("a2f0", guide)], selectRules(README_RULES, false), statusOf, context).checkouts[0]!;
+    expect(profile.failed).toEqual([]);
+    expect(profile.skipped.map(({ rule }) => rule).sort()).toEqual(["readme-agent-free", "readme-title"]);
+    expect(failures(checkout("other", guide), README_RULES)).toEqual({ "readme-title": "no README.md", "readme-quick-start": "no README.md" });
+  });
+
   test("accepts closed ATX headings and rejects agent instructions in a README", () => {
     expect(
       failures(

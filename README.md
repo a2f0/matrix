@@ -44,7 +44,7 @@ bun run status
 | `bun run artifacts <status\|link\|capture> [repo...] [--apply]` | Share screenshots through `../matrix-artifacts`: link each clone's `.screenshots`, capture under a lock, and report each capture's commit |
 | `bun run perf <serve\|measure\|shot\|diff\|graph> [args...] [--from checkouts/<name>]` | Measure page load from a checkout: serve a build over HTTP/2, time cold loads to a ready signal, and diff screenshots for fidelity |
 | `bun run merged-commits [today\|yesterday\|YYYY-MM-DD] [--timezone IANA]` | Count original commits in merged PRs across the matrix, with separate workspace-inclusive totals |
-| `bun run contributions [--since YYYY-MM-DD] [--timezone IANA] [--profile DIR]` | Count each day's original commits across the matrix into the profile repository's history, backfilling missed days, and render its contributions grid |
+| `bun run contributions [--since YYYY-MM-DD] [--timezone IANA] [--profile DIR]` | Count each day's original commits across the matrix into the profile repository's history, backfilling missed days, for its web page's contributions grid |
 | `bun run state-machines [repo...] [--limit N] [--min-score N] [--json]` | Rank source files that look like implicit state machines (lifecycle booleans toggled together, status strings written from many places) in the workspace and each checkout, with `agent-tool state-machines`; read-only |
 | `bun run secrets:backup [dir] [--password-file f \| --no-password]` | Archive `../matrix-secrets`, GPG-encrypted unless `--no-password` |
 | `bun run secrets:deploy [repo...] [--apply]` | Compare each repository's `ci/` secrets and variables with GitHub Actions; `--apply` sets them |
@@ -93,18 +93,17 @@ Existing branch merge commits are already included; overlapping PR commits are
 deduplicated and reported separately. Historical dates use today's `matrix.json`,
 and the captured `asOf` cutoff makes today's report partial.
 
-`contributions` keeps a GitHub-style contributions grid on the owner's GitHub
-profile, in the checkout of its `<owner>/<owner>` profile repository, with the
-same per-day counts across the matrix and this workspace. It counts every day
-its `contributions/commits.json` is missing or counted before the day ended, so
-a run after a gap backfills the days in between, and the first run counts 53
-weeks; `--since` adds earlier days, and every counted day stays in the history.
-It writes only into a profile checkout that `bun run status` reports ready,
-ignoring changes to the files a run writes, which include any local edit to
-that README. `--profile` writes into another directory as it is. The run then
-calls that checkout's `contributions:render` package script and leaves the
-changes there to ship as a pull request. It pages each
-repository's merged PRs once for the whole range rather than once per day. A day
+`contributions` keeps the per-day counts behind a GitHub-style contributions
+grid, which the owner's `<owner>/<owner>` profile repository serves as a web
+page, with the same counts across the matrix and this workspace. It counts
+every day its `contributions/commits.json` is missing or counted before the day
+ended, so a run after a gap backfills the days in between, and the first run
+counts 53 weeks; `--since` adds earlier days, and every counted day stays in
+the history. It writes only into a profile checkout that `bun run status`
+reports ready, ignoring changes to the history it writes. `--profile` writes
+into another directory as it is. The run leaves the history there to ship as a
+pull request, and merging it deploys the page. It pages each repository's
+merged PRs once for the whole range rather than once per day. A day
 counted after it ended is final, so a repository added to `matrix.json` later
 counts only from the day it was added; delete those days from the history to
 count them again.

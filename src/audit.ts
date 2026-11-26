@@ -61,13 +61,15 @@ function isProducer(checkout: Checkout): boolean {
   return checkout.packageJson?.name === AGENT_TOOL;
 }
 
-/** Where a profile repository, whose README is its owner's GitHub profile, keeps its Quick start. */
+/** Where a profile repository, whose README would be its owner's GitHub profile, keeps its Quick start. */
 const PROFILE_GUIDE = "docs/development.md";
 
 /**
  * GitHub shows the README of the repository named after a user on that user's
- * profile. Organizations keep theirs in `.github/profile/README.md`; this
- * treats every `<owner>/<owner>` as a user's, which fits matrix's user owner.
+ * profile, so such a repository may have none, leaving the profile at
+ * GitHub's default. Organizations keep theirs in `.github/profile/README.md`;
+ * this treats every `<owner>/<owner>` as a user's, which fits matrix's user
+ * owner.
  */
 function isProfile(checkout: Checkout): boolean {
   const [owner, name] = checkout.repo.toLowerCase().split("/");
@@ -492,11 +494,12 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "readme-title",
-    summary: "The README's H1 is the plain project name, with no link and no link line after it",
+    summary: "The README's H1 is the plain project name, with no link and no link line after it; a profile repository may have no README",
     source: "AGENTS.md#readme-files",
     check: checkout => {
       const readme = checkout.read("README.md");
-      if (readme === undefined) return fail("no README.md");
+      if (readme === undefined)
+        return isProfile(checkout) ? skip("a profile repository with no README leaves its profile at GitHub's default") : fail("no README.md");
       const [first, second] = nonBlankLines(readme);
       if (!first || !/^#\s+\S/.test(first)) return fail("README.md does not start with an H1");
       if (hasLink(first, readme)) return fail(`H1 '${first}' contains a link`);

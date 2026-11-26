@@ -1,6 +1,4 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { localDate, onDates, selectRange } from "../../../skills/merged-commits/scripts/day";
@@ -15,22 +13,21 @@ const USAGE = `Usage: bun run contributions [--since YYYY-MM-DD] [--timezone IAN
 
 Count the original (pre-squash) commits in PRs merged across matrix.json
 repositories and this workspace for every day the profile repository's
-${HISTORY_FILE} is missing or counted before the day ended, then render its
-README's contributions grid with that repository's bun run contributions:render.
-The first run counts the last 53 weeks; --since also counts every day from that
-date. --timezone sets the calendar of a new history (default: this machine's).
+${HISTORY_FILE} is missing or counted before the day ended, which that
+repository's web page renders. The first run counts the last 53 weeks; --since
+also counts every day from that date. --timezone sets the calendar of a new
+history (default: this machine's).
 It writes into the checkout of <owner>/<owner> from matrix.json only when that
-checkout is ready, as bun run status reports it, apart from changes to the
-files a run writes (README.md, contributions/commits.json, and the images under
-contributions/); --profile writes into another directory as it is.
+checkout is ready, as bun run status reports it, apart from changes to the file
+a run writes; --profile writes into another directory as it is.
 Requires an authenticated gh CLI. Prints JSON; progress goes to stderr.
 `;
 
 const ROOT = path.resolve(import.meta.dir, "../../..");
 
-/** Whether a run writes `file`: the README's grid section, the history, or a rendered image. */
+/** Whether a run writes `file`, which is only the history. */
 function isGenerated(file: string): boolean {
-  return file === "README.md" || file === "contributions/commits.json" || /^contributions\/[^/]+\.svg$/.test(file);
+  return file === HISTORY_FILE;
 }
 
 /** The space-separated field where each kind of version 2 porcelain entry starts its path. */
@@ -75,33 +72,6 @@ export function profileNotReady(root: string, repo: string, url = cloneUrl(repo,
     .split("\n")
     .filter(line => /^[a-zS] /.test(line)).length;
   return notReady({ ...status, changes: others + hidden });
-}
-
-/** The Bun version a .mise.toml pins in its [tools] table, which must be a plain `bun = "x"`. */
-export function miseBun(config: string): string | undefined {
-  let table = "";
-  for (const line of config.split("\n")) {
-    const header = /^\s*\[([^\]]+)\]/.exec(line);
-    if (header) table = header[1]!.trim();
-    if (table !== "tools" || !/^\s*"?bun"?\s*=/.test(line)) continue;
-    const pin = /^\s*bun\s*=\s*"([^"]+)"\s*(#.*)?$/.exec(line);
-    if (!pin) throw new Error(`.mise.toml pins Bun as '${line.trim()}'; write it as bun = "<version>".`);
-    return pin[1];
-  }
-  return undefined;
-}
-
-/**
- * The Bun the checkout pins in .mise.toml, from mise's installs, as workspace
- * guidance runs checkout commands; this Bun when the checkout pins none.
- */
-export function pinnedBun(dir: string, installs = path.join(homedir(), ".local", "share", "mise", "installs")): string {
-  const config = path.join(dir, ".mise.toml");
-  const version = existsSync(config) ? miseBun(readFileSync(config, "utf8")) : undefined;
-  if (!version) return process.execPath;
-  const bun = path.join(installs, "bun", version, "bin", "bun");
-  if (!existsSync(bun)) throw new Error(`${dir} pins Bun ${version}, which mise has not installed; run mise install there first.`);
-  return bun;
 }
 
 /**
@@ -156,13 +126,6 @@ function sum(days: Iterable<DayCount>): DayCount {
   return { commits, pullRequests };
 }
 
-function render(profile: string) {
-  // The profile repository owns its README; run its renderer with this Bun, its output on stderr.
-  const result = spawnSync(pinnedBun(profile), ["run", "contributions:render"], { cwd: profile, stdio: ["ignore", 2, 2] });
-  if (result.error) throw new Error(`Could not run bun in ${profile}: ${result.error.message}`);
-  if (result.status !== 0) throw new Error(`bun run contributions:render failed in ${profile} (exit ${result.status ?? result.signal}).`);
-}
-
 function main(args: string[]) {
   const { values } = parseArgs({
     args,
@@ -199,7 +162,6 @@ function main(args: string[]) {
   // Replace the file whole, so an interrupted run leaves the previous history.
   writeFileSync(`${file}.tmp`, serializeHistory(history));
   renameSync(`${file}.tmp`, file);
-  render(profile);
   const counted = sum(dates.map(date => history.days[date]!));
   console.log(
     JSON.stringify(
@@ -210,7 +172,7 @@ function main(args: string[]) {
   );
 }
 
-/** Update the profile's contributions history and grid for `args`, returning the exit status. */
+/** Update the profile's contributions history for `args`, returning the exit status. */
 export function run(args: string[]): number {
   try {
     main(args);
