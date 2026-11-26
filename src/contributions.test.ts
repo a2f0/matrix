@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { datesToCount, type History, parseHistory, recordCounts, serializeHistory } from "../scripts/reports/contributions/history";
-import { pinnedBun, profileCheckout, profileNotReady, statusChanges } from "../scripts/reports/contributions/update";
+import { miseBun, pinnedBun, profileCheckout, profileNotReady, statusChanges } from "../scripts/reports/contributions/update";
 import { datesBetween } from "../skills/merged-commits/scripts/day";
 import { syncRepo } from "./checkouts";
 import { loadManifest } from "./manifest";
@@ -173,6 +173,7 @@ test("a profile checkout is ready for new counts only on its updated default bra
   gitIn(seed, "commit", "-q", "-m", "seed");
   gitIn(temporary, "clone", "-q", "--bare", seed, remote);
   syncRepo(root, "a2f0/a2f0", remote);
+  expect(profileNotReady(root, "a2f0/other", remote)).toBe("checkout missing; run sync");
   const reason = () => profileNotReady(root, "a2f0/a2f0", remote);
   expect(reason()).toBeUndefined();
 
@@ -201,6 +202,14 @@ test("a profile checkout is ready for new counts only on its updated default bra
   gitIn(seed, "push", "-q", remote, "HEAD");
   gitIn(checkout, "fetch", "-q", "origin");
   expect(reason()).toBe("1 commit behind origin; run sync");
+});
+
+test("reads a plain [tools] Bun pin and refuses one it cannot read", () => {
+  expect(miseBun('[tools]\nbun = "1.4.4" # pinned\n')).toBe("1.4.4");
+  expect(miseBun('[tools]\nshellcheck = "0.11.0"\n')).toBeUndefined();
+  for (const pin of ['bun = { version = "1.4.4" }', '"bun" = "1.4.4"', "bun = 'latest'"]) {
+    expect(() => miseBun(`[tools]\n${pin}\n`)).toThrow('write it as bun = "<version>"');
+  }
 });
 
 test("runs the profile's render with the Bun its .mise.toml pins", () => {

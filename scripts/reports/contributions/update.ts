@@ -68,7 +68,7 @@ export function statusChanges(dir: string): string[][] {
  */
 export function profileNotReady(root: string, repo: string, url = cloneUrl(repo, loadManifest(root).protocol)): string | undefined {
   const status = checkoutStatus(root, repo, url);
-  if (status.ready || status.error) return status.error;
+  if (status.ready || status.error || !status.present) return notReady(status);
   const dir = checkoutPath(root, repo);
   const others = statusChanges(dir).filter(paths => !paths.every(isGenerated)).length;
   const hidden = gitOutput(dir, ["ls-files", "-v"])
@@ -77,14 +77,16 @@ export function profileNotReady(root: string, repo: string, url = cloneUrl(repo,
   return notReady({ ...status, changes: others + hidden });
 }
 
-/** The Bun version a .mise.toml pins in its [tools] table. */
-function miseBun(config: string): string | undefined {
+/** The Bun version a .mise.toml pins in its [tools] table, which must be a plain `bun = "x"`. */
+export function miseBun(config: string): string | undefined {
   let table = "";
   for (const line of config.split("\n")) {
     const header = /^\s*\[([^\]]+)\]/.exec(line);
     if (header) table = header[1]!.trim();
-    const pin = table === "tools" ? /^\s*bun\s*=\s*"([^"]+)"/.exec(line) : null;
-    if (pin) return pin[1];
+    if (table !== "tools" || !/^\s*"?bun"?\s*=/.test(line)) continue;
+    const pin = /^\s*bun\s*=\s*"([^"]+)"\s*(#.*)?$/.exec(line);
+    if (!pin) throw new Error(`.mise.toml pins Bun as '${line.trim()}'; write it as bun = "<version>".`);
+    return pin[1];
   }
   return undefined;
 }
