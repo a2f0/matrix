@@ -16,7 +16,10 @@ that fails. Suggestions come in this order: free disk space below 50 GiB on the
 volume holding the checkouts, repositories where `bun run teardown` fails,
 ways Git or gh can leave SSH for GitHub ([below](#github-over-ssh)),
 personal skills that override agent-tool's managed copies
-([shared skills](tooling.md#shared-skills)), checkouts that are not ready, red
+([shared skills](tooling.md#shared-skills)), untracked or ignored `.gemini/` and
+`.env` files Gemini CLI would load from the workspace or a checkout, and
+`.env` files above them ([Gemini CLI](tooling.md#gemini-cli)), checkouts that
+are not ready, red
 default branches
 ([base freshness](tooling.md#base-freshness)), stale installs,
 clones not linked to the [screenshot store](artifacts.md),

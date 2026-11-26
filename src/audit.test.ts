@@ -137,6 +137,21 @@ describe("audit", () => {
     });
   });
 
+  test("allows agent-tool's Gemini policy only where the permissions manifest records it", () => {
+    expect(failures(checkout("generated"), ["no-gemini-config"])).toEqual({});
+    // Without the record, or with one naming another file, it is a hand-written policy.
+    for (const manifest of [{ schemaVersion: 1 }, { schemaVersion: 1, gemini: { file: ".gemini/settings.json", sha256: "0".repeat(64) } }]) {
+      const repo = checkout(`unrecorded-${Object.keys(manifest).length}`, {
+        ".agent-tool-permissions.json": JSON.stringify(manifest),
+        ".gemini/settings.json": "{}\n",
+      });
+      expect(failures(repo, ["no-gemini-config"])["no-gemini-config"]).toBe("tracked .gemini/policies/agent-tool.toml, .gemini/settings.json");
+    }
+    expect(failures(checkout("nested-policy", { "packages/web/.gemini/policies/agent-tool.toml": "x\n" }), ["no-gemini-config"])).toEqual({
+      "no-gemini-config": "tracked packages/web/.gemini/policies/agent-tool.toml",
+    });
+  });
+
   test("allows Gemini Code Assist review config only in the root .gemini/", () => {
     const codeAssist = { ".gemini/config.yaml": "code_review: {}\n", ".gemini/styleguide.md": "Review guide\n" };
     expect(failures(checkout("code-assist", codeAssist), ["no-gemini-config"])).toEqual({});
@@ -193,6 +208,14 @@ describe("audit", () => {
     expect(failures(missing, ["harness-permissions"])["harness-permissions"]).toBe(
       "no .codex/rules/agent-tool.rules; run agent-tool permissions install --apply; neither the agents:check script nor a workflow runs agent-tool permissions check",
     );
+    // Rules from a release before Gemini's lack its policy, or its record in the manifest.
+    const gemini =
+      "no .gemini/policies/agent-tool.toml recorded in .agent-tool-permissions.json; run agent-tool permissions install --apply with agent-tool 0.1.78 or later";
+    for (const [name, files] of [
+      ["no-policy", { ".gemini/policies/agent-tool.toml": null }],
+      ["no-record", { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }) }],
+    ] as const)
+      expect(failures(checkout(name, files), ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
     const workflow = checkout("workflow", {
       "package.json": JSON.stringify({ devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }),
       ".github/workflows/ci.yml": "steps:\n  - run: bun run agent-tool permissions check\n",

@@ -88,6 +88,7 @@ function fakeServices(overrides: Partial<Services> = {}) {
     stateMachines: () => 0,
     screenshotLinks: () => ({ unlinked: [], blocked: [] }),
     personalSkills: () => [],
+    geminiFiles: () => [],
     ...overrides,
   };
   return { services, writes, warnings, calls };
@@ -185,6 +186,43 @@ test("health suggests removing personal skills that override managed ones, with 
   const unread = fakeServices({ personalSkills: () => undefined });
   expect(main(["health", "--markdown"], root, undefined, unread.services)).toBe(0);
   expect(unread.writes.join("")).not.toContain("Personal skills");
+});
+
+test("health suggests reviewing files Gemini CLI would load that no review sees, after personal skills", () => {
+  const gemini = [".gemini/settings.json", "checkouts/demo/.env", "~/.env"];
+  const scanned: string[][] = [];
+  const { services, writes } = fakeServices({
+    personalSkills: () => ["~/.agents/skills/space-cleanup"],
+    geminiFiles: (_root, checkouts) => {
+      scanned.push(checkouts);
+      return gemini;
+    },
+  });
+  expect(main(["health"], root, undefined, services)).toBe(0);
+  const report = JSON.parse(writes.join("")) as { geminiFiles: unknown; suggestions: string[] };
+  expect(report.geminiFiles).toEqual(gemini);
+  // Only checkouts on disk that status can read are scanned: a2f0/missing is not cloned.
+  expect(scanned).toEqual([[path.join(root, "checkouts", "good")]]);
+  expect(report.suggestions.slice(0, 2)).toEqual([
+    "Remove 1 personal skill that overrides agent-tool's managed copies (~/.agents/skills/space-cleanup); see docs/tooling.md#shared-skills.",
+    "Review 3 files Gemini CLI would load that no review sees (.gemini/settings.json, checkouts/demo/.env, ~/.env): keep secrets in `.secrets` and remove what nothing needs; see docs/tooling.md#gemini-cli.",
+  ]);
+  const markdown = fakeServices({ geminiFiles: () => gemini });
+  expect(main(["health", "--markdown"], root, undefined, markdown.services)).toBe(0);
+  expect(markdown.writes.join("")).toContain("- Gemini files: .gemini/settings.json, checkouts/demo/.env, ~/.env outside review.");
+  const one = fakeServices({ geminiFiles: () => ["~/.gemini/.env"] });
+  expect(main(["health"], root, undefined, one.services)).toBe(0);
+  expect((JSON.parse(one.writes.join("")) as { suggestions: string[] }).suggestions).toContain(
+    "Review 1 file Gemini CLI would load that no review sees (~/.gemini/.env): keep secrets in `.secrets` and remove what nothing needs; see docs/tooling.md#gemini-cli.",
+  );
+  const none = fakeServices();
+  expect(main(["health", "--markdown"], root, undefined, none.services)).toBe(0);
+  expect(none.writes.join("")).toContain("- Gemini files: none outside review.");
+  expect(none.writes.join("")).not.toContain("Review ");
+  // A scan that could not finish leaves the report without the field.
+  const unread = fakeServices({ geminiFiles: () => undefined });
+  expect(main(["health", "--markdown"], root, undefined, unread.services)).toBe(0);
+  expect(unread.writes.join("")).not.toContain("Gemini files");
 });
 
 test("sync reports each named checkout and exits 1 when one fails", () => {

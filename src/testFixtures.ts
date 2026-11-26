@@ -96,9 +96,11 @@ export function checkoutFixture(directory: string, agentTool: string, files: Rec
       scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", "agents:check": "agent-tool skills check && agent-tool permissions check" },
       devDependencies: { "@a2f0/agent-tool": agentTool },
     }),
-    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }),
+    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) } }),
     ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
     ".codex/rules/agent-tool.rules": 'prefix_rule(pattern=["agent-tool", "doctor"], decision="allow")\n',
+    ".gemini/policies/agent-tool.toml":
+      '[[rule]]\ntoolName = "run_shell_command"\ncommandRegex = \'agent-tool doctor(?: |")\'\ndecision = "allow"\npriority = 0\n',
     "agent-tool.json": JSON.stringify({ schemaVersion: 1 }),
     ".agent-tool-skills.json": JSON.stringify({
       schemaVersion: 1,

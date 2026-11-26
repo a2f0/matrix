@@ -4,6 +4,7 @@ import path from "node:path";
 import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
+import { geminiFiles } from "./geminiFiles";
 import { type Gh, runGh } from "./gh";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DefaultBranchHealth, type DiskSpace, markdownHealth, type ScreenshotLinks } from "./health";
@@ -82,6 +83,8 @@ export interface Services {
   screenshotLinks(root: string): ScreenshotLinks | undefined;
   /** Personal skills on this machine named like a skill the workspace's agent-tool manages; undefined when unreadable. */
   personalSkills(root: string): string[] | undefined;
+  /** Untracked or ignored files Gemini CLI would load from the workspace and these checkouts, and `.env` files above them; undefined when unreadable. */
+  geminiFiles(root: string, checkouts: string[]): string[] | undefined;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -271,6 +274,14 @@ const SERVICES: Services = {
     try {
       const managed = managedSkillNames(root);
       return managed && shadowingSkills(managed);
+    } catch {
+      return undefined;
+    }
+  },
+  geminiFiles: (root, checkouts) => {
+    // A scan Git cannot finish leaves the field out rather than claiming nothing is there.
+    try {
+      return geminiFiles(root, checkouts);
     } catch {
       return undefined;
     }
@@ -514,6 +525,11 @@ const COMMANDS = new Map<string, Handler>([
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
         screenshots: services.screenshotLinks(root),
         personalSkills: services.personalSkills(root),
+        // Checkouts that status could not read are reported as not ready, and skipped here.
+        geminiFiles: services.geminiFiles(
+          root,
+          manifest.repos.filter(repo => statusOf(repo).present && statusOf(repo).error === undefined).map(repo => checkoutPath(root, repo)),
+        ),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
           defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),

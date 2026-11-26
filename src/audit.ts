@@ -18,6 +18,15 @@ import { plural } from "./text";
  * guidance no longer carries fallbacks for older pins.
  */
 export const MINIMUM_AGENT_TOOL = "0.1.21";
+
+/** Where `agent-tool permissions install` writes Gemini CLI rules, from agent-tool 0.1.78 on. */
+const GEMINI_POLICY = ".gemini/policies/agent-tool.toml";
+
+/** The Gemini policy the checkout's permissions manifest records, so `permissions check` keeps it current; undefined without one. */
+function recordedGeminiPolicy(checkout: Checkout): string | undefined {
+  const recorded = object(parseObject(checkout.read(".agent-tool-permissions.json"))?.gemini)?.file;
+  return recorded === GEMINI_POLICY ? GEMINI_POLICY : undefined;
+}
 /**
  * How long a pin may trail a newer agent-tool release before the remote audit
  * fails. agent-tool can release several times a day, and each pin sweep runs
@@ -432,8 +441,12 @@ export const RULES: readonly Rule[] = [
     summary: "No GEMINI.md or Gemini CLI files in .gemini/; Gemini CLI reads AGENTS.md through its user settings",
     source: ONBOARDING,
     check: checkout => {
-      // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews.
-      const files = checkout.tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**").filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file));
+      // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews,
+      // and agent-tool's generated policy is allowed where its permissions manifest records it.
+      const generated = recordedGeminiPolicy(checkout);
+      const files = checkout
+        .tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**")
+        .filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file) && file !== generated);
       return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
     },
   },
@@ -603,6 +616,8 @@ export const RULES: readonly Rule[] = [
       for (const file of [".agent-tool-permissions.json", ".claude/settings.json", ".codex/rules/agent-tool.rules"]) {
         if (!checkout.exists(file)) found.push(`no ${file}; run agent-tool permissions install --apply`);
       }
+      if (!recordedGeminiPolicy(checkout) || !checkout.exists(GEMINI_POLICY))
+        found.push(`no ${GEMINI_POLICY} recorded in .agent-tool-permissions.json; run agent-tool permissions install --apply with agent-tool 0.1.78 or later`);
       const script = checkout.scripts["agents:check"];
       if (!(typeof script === "string" && script.includes("permissions check")) && !workflows(checkout).some(text => text.includes("permissions check"))) {
         found.push("neither the agents:check script nor a workflow runs agent-tool permissions check");

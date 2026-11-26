@@ -481,7 +481,9 @@ since older releases left it off:
 
 Managed repositories carry no `GEMINI.md` and no Gemini CLI files in
 `.gemini/`, such as settings, `.env`, commands, or skills, which the audit's
-`no-gemini-config` rule checks. The Gemini Code Assist review bot's root
+`no-gemini-config` rule checks. The one exception is agent-tool's generated
+`.gemini/policies/agent-tool.toml` ([harness permissions](#harness-permissions)),
+which the permissions manifest records. The Gemini Code Assist review bot's root
 `.gemini/config.yaml` and `.gemini/styleguide.md` configure GitHub reviews,
 not the CLI, and stay allowed.
 
@@ -500,20 +502,17 @@ servers, hooks, or discovery commands when Gemini starts in its directory.
 Review a branch you did not write in a separate clone outside the trusted
 folders, where Gemini runs untrusted and you read skills from
 `.agents/skills/<name>/SKILL.md`. In a trusted checkout, whenever a checkout,
-pull, or `sync` has changed what it holds since Gemini last started there,
-list its `.gemini/` and `.env` files, including untracked and ignored ones,
-with this command; it also searches ignored directories such as
-`node_modules`, so it takes a moment in a large checkout. It covers only the
-checkout, not the parent directories the `.env` search below also walks:
-
-```sh
-git ls-files --cached --others -- ':(glob)**/.gemini/**' ':(glob)**/.env'
-```
+pull, or `sync` has changed what it holds since Gemini last started there, run
+`bun run health`. It lists, by name only, the untracked and ignored `.gemini/`
+and `.env` files Gemini would load from the workspace and every checkout
+(outside `node_modules`), and the `.env` files above them, and suggests
+reviewing them; tracked ones are the audit's.
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
 environment every shell command it runs inherits, so a secret in any of them
-can be printed. Keep secret values in the `.secrets` link that
+can be printed. A trusted folder loads every variable, an untrusted one only
+Gemini's authentication variables. Keep secret values in the `.secrets` link that
 [secrets](secrets.md) describes, never in a `.env` Gemini can find.
 
 `gemini skills list` from a checkout confirms the managed skills, and
@@ -521,9 +520,12 @@ can be printed. Keep secret values in the `.secrets` link that
 `~/.gemini/GEMINI.md` apply to every repository, so keep project facts out of
 it.
 
-agent-tool generates no Gemini permission rules and has no Gemini reviewer
-adapter, so Gemini prompts before shell commands and cannot be `ship-pr`'s
-independent reviewer. These details follow Gemini CLI 0.71.1.
+agent-tool generates Gemini rules that allow its routine commands in the
+`default` approval mode ([harness permissions](#harness-permissions)); other
+shell commands still ask. Gemini asks once, when a session starts, to accept a
+new or changed policy file. agent-tool has no Gemini reviewer adapter, so
+Gemini cannot be `ship-pr`'s independent reviewer. These details follow Gemini
+CLI 0.71.1.
 
 ## State machines
 
@@ -575,12 +577,13 @@ lists leads. Reviews flag new implicit machines.
 
 Agents can work without blanket approval when routine commands run freely and
 consequential ones ask. agent-tool assigns each of its commands a permission
-class and generates Claude Code and Codex rules from them, as its
+class and generates Claude Code, Codex, and Gemini CLI rules from them, as its
 [permissions guide](https://github.com/a2f0/agent-tool/blob/b1b9d0419233082bb5f4946566c2e84605ae42f3/docs/permissions.md)
 describes. Every managed repository that pins agent-tool:
 
 - commits the generated `.claude/settings.json`, `.codex/rules/agent-tool.rules`,
-  and `.agent-tool-permissions.json`, written by
+  `.gemini/policies/agent-tool.toml`, and `.agent-tool-permissions.json`,
+  written by
   `agent-tool permissions install --apply`, which `agents:sync` runs after
   installing skills;
 - runs `agent-tool permissions check` wherever it checks managed skills,
@@ -593,7 +596,7 @@ describes. Every managed repository that pins agent-tool:
 Agents then run tests and classified executables through
 `agent-tool bun test|x`, and change dependencies through
 `agent-tool bun update|remove`. Adding a dependency, merges, and publishing
-prompt in Codex. For Claude Code the generated rules only allow, because an
+prompt in Codex. For Claude Code and Gemini the generated rules only allow, because an
 explicit `ask` rule prompts even in `bypassPermissions` mode; those classes are
 left to the user's mode, and the guide's auto-mode block makes the classifier
 hold them until the user asks. Package scripts are not classified, so
