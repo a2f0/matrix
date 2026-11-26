@@ -120,6 +120,7 @@ describe("audit", () => {
       "packages/web/CLAUDE.md": "notes\n",
       "GEMINI.md": "@AGENTS.md\n",
       "packages/api/.gemini/settings.json": "{}\n",
+      ".gemini/styleguide.md": "Gemini Code Assist review guide\n",
       ".gitignore": "/.DS_Store\n",
     });
     expect(failures(repo)).toMatchObject({

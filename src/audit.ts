@@ -429,10 +429,11 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "no-gemini-config",
-    summary: "No GEMINI.md or .gemini/; Gemini CLI reads AGENTS.md through its user settings",
+    summary: "No GEMINI.md or Gemini CLI settings; Gemini CLI reads AGENTS.md through its user settings",
     source: ONBOARDING,
     check: checkout => {
-      const files = checkout.tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**");
+      // Gemini Code Assist's .gemini/config.yaml and styleguide.md configure GitHub reviews, not the CLI.
+      const files = checkout.tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/settings.json", ":(glob)**/.gemini/.env");
       return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
     },
   },

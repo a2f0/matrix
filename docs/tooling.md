@@ -94,7 +94,8 @@ Git does not retain an obsolete hooks path.
 Update the existing focused document instead of adding a competing source of
 truth. Link to shared instructions and describe the repository's differences.
 Keep operational requirements in `AGENTS.md` and linked guides rather than
-maintaining parallel `CLAUDE.md` or `GEMINI.md` instructions. Remove obsolete commands and
+maintaining parallel `CLAUDE.md` or `GEMINI.md`
+instructions. Remove obsolete commands and
 resolved constraints; do not accumulate per-sweep journals in the checkout.
 
 ### README files
@@ -458,21 +459,25 @@ They are runtime checks, not a requirement to add `.omp` files to every checkout
 ## Gemini CLI
 
 Install Gemini CLI with Homebrew, `brew install gemini-cli`, which brings its
-own Node. Do not install it with `npm install -g` under mise: the global
-lands in one Node version's prefix, so its mise shim
-fails with "not provided by the active node" wherever another version is
-active, as in every checkout that pins a different one. Remove such a copy with
+own Node. Do not install it with `npm install -g` under mise: the global lands
+in one Node version's prefix, so its mise shim fails with "not provided by the
+active node" wherever another version is active, as in every checkout that
+pins a different one. Remove such a copy with
 `mise exec node@<version> -- npm uninstall -g @google/gemini-cli`, then
 `mise reshim`, so the stale shim stops shadowing Homebrew's binary.
 
 Gemini reads `GEMINI.md` by default, so set its
 [context file names](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/gemini-md.md)
-once in `~/.gemini/settings.json`; managed repositories carry no `GEMINI.md`
-or `.gemini/`, which the audit's `no-gemini-config` rule checks:
+once in `~/.gemini/settings.json`:
 
 ```json
 { "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }
 ```
+
+Managed repositories carry no `GEMINI.md`, `.gemini/settings.json`, or
+`.gemini/.env`, which the audit's `no-gemini-config` rule checks. The Gemini
+Code Assist review bot's `.gemini/config.yaml` and `.gemini/styleguide.md`
+configure GitHub reviews, not the CLI, and stay allowed.
 
 It discovers the managed `.agents/skills` as workspace
 [skills](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/skills.md),
@@ -481,12 +486,18 @@ which it loads only in a
 Folder trust is on by default, and an untrusted workspace also skips project
 settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 `~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
-checkout below it, on whatever branch it holds. A trusted checkout's tracked
-`.gemini/settings.json` could start MCP servers, which is why the audit rejects
-one. A trusted workspace's `.env` loads into Gemini's
-environment, which every shell command it runs inherits, so a secret there can
-be printed. Keep secret values in the `.secrets` link that
-[secrets](secrets.md) describes, never in a `.env` Gemini can load.
+checkout below it, whatever branch or local edits it holds. The audit checks
+only tracked files in a checkout's current commit, when someone runs it, so it
+does not stop a PR branch's or an untracked `.gemini/settings.json` from
+starting MCP servers: inspect a branch's `.gemini/` before running Gemini on
+it, or check the branch out outside the trusted clone.
+
+Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
+directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
+environment every shell command it runs inherits, so a secret in any of them
+can be printed. Keep secret values in the `.secrets` link that
+[secrets](secrets.md) describes, never in a `.env` Gemini can find.
+
 `gemini skills list` from a checkout confirms the managed skills, and
 `/memory show` in a session confirms `AGENTS.md` loaded. Global memories in
 `~/.gemini/GEMINI.md` apply to every repository, so keep project facts out of

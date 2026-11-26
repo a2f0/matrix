@@ -109,11 +109,11 @@ Before reporting work done, `bun run teardown` must pass.
    `merge.requireStrictBaseFreshness` recognizes only rulesets; leave it false
    where protection is classic.
 4. Keep guidance in `AGENTS.md` alone; managed repositories have no
-   `CLAUDE.md`, `GEMINI.md`, or `.gemini/`. Codex and OpenCode read it, and so
-   does Claude Code when no `CLAUDE.md` exists: its `instructionFiles` setting
-   defaults to `claude-md-or-agents-md` (verified with 2.1.292). Reviewers may
-   still ask to restore a `CLAUDE.md` import; cite that default and decline the
-   finding.
+   `CLAUDE.md`, `GEMINI.md`, or `.gemini/settings.json`. Codex and OpenCode
+   read it, and so does Claude Code when no `CLAUDE.md` exists: its
+   `instructionFiles` setting defaults to `claude-md-or-agents-md` (verified
+   with 2.1.292). Reviewers may still ask to restore a `CLAUDE.md` import; cite
+   that default and decline the finding.
    Run the checkout's own hooks and linters over the installed skills before
    committing; managed skills cannot be edited, so exclude their directories
    from a linter that rejects them.
