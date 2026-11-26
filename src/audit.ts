@@ -433,9 +433,7 @@ export const RULES: readonly Rule[] = [
     source: ONBOARDING,
     check: checkout => {
       // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews.
-      const files = checkout
-        .tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**")
-        .filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file));
+      const files = checkout.tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**").filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file));
       return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
     },
   },

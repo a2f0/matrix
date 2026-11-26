@@ -488,7 +488,7 @@ Folder trust is on by default, and an untrusted workspace also skips project
 settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 `~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
 checkout below it, whatever branch or local edits it holds. The audit checks
-only tracked files in a checkout's current commit, when someone runs it, so it
+only a checkout's tracked (indexed) files, when someone runs it, so it
 does not stop a PR branch's or an untracked `.gemini/settings.json`, whose MCP
 servers, hooks, and tool discovery can run arbitrary commands: inspect a
 branch's `.gemini/` before running Gemini on it, or check the branch out
