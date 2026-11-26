@@ -14,8 +14,9 @@ const USAGE = `Usage: bun run contributions [--since YYYY-MM-DD] [--timezone IAN
 Count the original (pre-squash) commits in PRs merged across matrix.json
 repositories and this workspace for every day the profile repository's
 ${HISTORY_FILE} is missing or counted before the day ended, which that
-repository's web page renders. The first run counts the last 53 weeks; --since also counts every day from that
-date. --timezone sets the calendar of a new history (default: this machine's).
+repository's web page renders. The first run counts the last 53 weeks; --since
+also counts every day from that date. --timezone sets the calendar of a new
+history (default: this machine's).
 It writes into the checkout of <owner>/<owner> from matrix.json only when that
 checkout is ready, as bun run status reports it, apart from changes to the file
 a run writes; --profile writes into another directory as it is.
