@@ -111,6 +111,9 @@ A root README introduces the project to someone landing on its GitHub page:
 3. A `Quick start` section takes a fresh clone to a running project in one code
    block, typically `mise install`, the dependency install, hook installation,
    and the development entrypoint with its local URL. Every command must exist.
+   A GitHub profile repository, named after its owner (`a2f0/a2f0`), is the
+   exception: GitHub shows its README as the owner's profile, so the Quick
+   start and other development material go in `docs/development.md`.
 4. A layout or sub-project table, common commands, and links to the detailed
    guides follow as the repository needs them.
 
