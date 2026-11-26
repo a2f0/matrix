@@ -20,29 +20,30 @@ README's contributions grid with that repository's bun run contributions:render.
 The first run counts the last 53 weeks; --since also counts every day from that
 date. --timezone sets the calendar of a new history (default: this machine's).
 It writes into the checkout of <owner>/<owner> from matrix.json only when that
-checkout is ready, as bun run status reports it, apart from files an earlier
-run changed; --profile writes into another directory as it is.
+checkout is ready, as bun run status reports it, apart from changes to the
+files a run writes (README.md, contributions/commits.json, and the images under
+contributions/); --profile writes into another directory as it is.
 Requires an authenticated gh CLI. Prints JSON; progress goes to stderr.
 `;
 
 const ROOT = path.resolve(import.meta.dir, "../../..");
 
-/** Whether a run writes `file`: the README's grid section, or anything under contributions/. */
+/** Whether a run writes `file`: the README's grid section, the history, or a rendered image. */
 function isGenerated(file: string): boolean {
-  return file === "README.md" || file.startsWith("contributions/");
+  return file === "README.md" || file === "contributions/commits.json" || /^contributions\/[^/]+\.svg$/.test(file);
 }
 
 /** The space-separated field where each kind of version 2 porcelain entry starts its path. */
 const PATH_FIELD: Record<string, number> = { "1": 8, "2": 9, u: 10, "?": 1, "!": 1 };
 
 /**
- * The checkout's changes, one entry per `bun run status` change, each listing
- * its path and, for a rename, its original path. Version 2 porcelain never
- * starts an entry with a space, which matters because matrix's Git helper
- * trims output, and with -z paths arrive unquoted.
+ * The checkout's changes, one entry per file, each listing its path and, for a
+ * rename, its original path. Version 2 porcelain never starts an entry with a
+ * space, which matters because matrix's Git helper trims output, and with -z
+ * paths arrive unquoted.
  */
 export function statusChanges(dir: string): string[][] {
-  const fields = gitOutput(dir, ["status", "--porcelain=v2", "-z", "--untracked-files=normal", "--ignore-submodules=none"])
+  const fields = gitOutput(dir, ["status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none"])
     .split("\0")
     .filter(field => field !== "");
   const changes: string[][] = [];
@@ -60,12 +61,32 @@ export function statusChanges(dir: string): string[][] {
   return changes;
 }
 
-/** Why a run must not write into a managed checkout, as `bun run status` would say, ignoring files a run writes. */
-function profileNotReady(root: string, repo: string, dir: string): string | undefined {
-  const status = checkoutStatus(root, repo, cloneUrl(repo, loadManifest(root).protocol));
+/**
+ * Why a run must not write into a managed checkout, as `bun run status` would
+ * say, ignoring changes to the files a run writes. Tracked files flagged
+ * assume-unchanged or skip-worktree still count, as they do there.
+ */
+export function profileNotReady(root: string, repo: string, url = cloneUrl(repo, loadManifest(root).protocol)): string | undefined {
+  const status = checkoutStatus(root, repo, url);
   if (status.ready || status.error) return status.error;
-  const generated = statusChanges(dir).filter(paths => paths.every(isGenerated)).length;
-  return notReady({ ...status, changes: (status.changes ?? 0) - generated });
+  const dir = checkoutPath(root, repo);
+  const others = statusChanges(dir).filter(paths => !paths.every(isGenerated)).length;
+  const hidden = gitOutput(dir, ["ls-files", "-v"])
+    .split("\n")
+    .filter(line => /^[a-zS] /.test(line)).length;
+  return notReady({ ...status, changes: others + hidden });
+}
+
+/** The Bun version a .mise.toml pins in its [tools] table. */
+function miseBun(config: string): string | undefined {
+  let table = "";
+  for (const line of config.split("\n")) {
+    const header = /^\s*\[([^\]]+)\]/.exec(line);
+    if (header) table = header[1]!.trim();
+    const pin = table === "tools" ? /^\s*bun\s*=\s*"([^"]+)"/.exec(line) : null;
+    if (pin) return pin[1];
+  }
+  return undefined;
 }
 
 /**
@@ -74,7 +95,7 @@ function profileNotReady(root: string, repo: string, dir: string): string | unde
  */
 export function pinnedBun(dir: string, installs = path.join(homedir(), ".local", "share", "mise", "installs")): string {
   const config = path.join(dir, ".mise.toml");
-  const version = existsSync(config) ? /^\s*bun\s*=\s*"([^"]+)"/m.exec(readFileSync(config, "utf8"))?.[1] : undefined;
+  const version = existsSync(config) ? miseBun(readFileSync(config, "utf8")) : undefined;
   if (!version) return process.execPath;
   const bun = path.join(installs, "bun", version, "bin", "bun");
   if (!existsSync(bun)) throw new Error(`${dir} pins Bun ${version}, which mise has not installed; run mise install there first.`);
@@ -92,7 +113,7 @@ export function profileCheckout(root: string, repos: string[], workspace: string
   if (!repo) throw new Error(`matrix.json does not manage the profile repository ${owner}/${owner}; add it or pass --profile.`);
   const dir = checkoutPath(root, repo);
   if (!existsSync(dir)) throw new Error(`${dir} is missing; run bun run sync ${repo} first.`);
-  const reason = notReadyReason(root, repo, dir);
+  const reason = notReadyReason(root, repo);
   if (reason)
     throw new Error(`${repo} is not ready for new counts (${reason}); return it to its updated default branch, or pass --profile to write into it as it is.`);
   return dir;

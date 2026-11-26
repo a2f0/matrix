@@ -43,6 +43,8 @@ const compare: Compare = (repo, base, head) => {
   const commits: Commit[] = [];
   // Unlike a pull request's own list, a comparison pages past 250 commits. Its
   // response also carries every file's diff, so keep only the commit fields.
+  // The caller checks the result against the PR's commit count, so a
+  // comparison that comes back short, even empty, fails rather than undercounts.
   for (let page = 1; ; page++) {
     const url = `repos/${repo}/compare/${base}...${head}?per_page=100&page=${page}`;
     const fields = "{total_commits, commits: [.commits[] | {sha, parents: (.parents | length)}]}";

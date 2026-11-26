@@ -100,8 +100,8 @@ its `contributions/commits.json` is missing or counted before the day ended, so
 a run after a gap backfills the days in between, and the first run counts 53
 weeks; `--since` adds earlier days, and every counted day stays in the history.
 It writes only into a profile checkout that `bun run status` reports ready,
-apart from files an earlier run changed (`--profile` writes into another
-directory as it is), then runs that checkout's `contributions:render` package
+apart from changes to the files a run writes, including any local edit to that
+README (`--profile` writes into another directory as it is), then runs that checkout's `contributions:render` package
 script and leaves the changes there to ship as a pull request. It pages each
 repository's merged PRs once for the whole range rather than once per day.
 
