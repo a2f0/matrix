@@ -428,6 +428,16 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "no-gemini-config",
+    summary: "No GEMINI.md or Gemini CLI files in .gemini/; Gemini CLI reads AGENTS.md through its user settings",
+    source: ONBOARDING,
+    check: checkout => {
+      // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews.
+      const files = checkout.tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**").filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file));
+      return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
+    },
+  },
+  {
     id: "ds-store-ignored",
     summary: "The root .gitignore lists .DS_Store as a plain pattern",
     source: ONBOARDING,

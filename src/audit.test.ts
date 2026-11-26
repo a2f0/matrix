@@ -118,13 +118,30 @@ describe("audit", () => {
       "AGENTS.md": null,
       "CLAUDE.md": "@AGENTS.md\n",
       "packages/web/CLAUDE.md": "notes\n",
+      "GEMINI.md": "@AGENTS.md\n",
+      ".gemini/settings.json": "{}\n",
+      ".gemini/.env": "KEY=value\n",
+      "packages/api/.gemini/commands/deploy.toml": "prompt = 'deploy'\n",
+      "packages/web/GEMINI.md": "notes\n",
+      ".gemini/config.yaml": "code_review: {}\n",
+      ".gemini/styleguide.md": "Gemini Code Assist review guide\n",
       ".gitignore": "/.DS_Store\n",
     });
     expect(failures(repo)).toMatchObject({
       "agents-md": "no tracked AGENTS.md at the root",
       "no-claude-md": "tracked CLAUDE.md, packages/web/CLAUDE.md",
+      // Gemini Code Assist's config.yaml and styleguide.md are not reported.
+      "no-gemini-config": "tracked .gemini/.env, .gemini/settings.json, GEMINI.md, packages/api/.gemini/commands/deploy.toml, packages/web/GEMINI.md",
       "ds-store-ignored": "root .gitignore does not list .DS_Store",
       "output-capture": "no AGENTS.md for the Output capture section",
+    });
+  });
+
+  test("allows Gemini Code Assist review config only in the root .gemini/", () => {
+    const codeAssist = { ".gemini/config.yaml": "code_review: {}\n", ".gemini/styleguide.md": "Review guide\n" };
+    expect(failures(checkout("code-assist", codeAssist), ["no-gemini-config"])).toEqual({});
+    expect(failures(checkout("nested", { "packages/web/.gemini/config.yaml": "code_review: {}\n" }), ["no-gemini-config"])).toEqual({
+      "no-gemini-config": "tracked packages/web/.gemini/config.yaml",
     });
   });
 
