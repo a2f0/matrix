@@ -75,8 +75,9 @@ retro into suggested next steps ([docs/health.md](docs/health.md)); start there
 when a session has no specific task. Acting on a suggestion still needs a
 request that authorizes it. agent-tool installs shared skills in every
 repository: [space-cleanup](.claude/skills/space-cleanup/SKILL.md) for disk
-space and [performance-pass](.claude/skills/performance-pass/SKILL.md) for page
-loads. Here,
+space, [performance-pass](.claude/skills/performance-pass/SKILL.md) for page
+loads, and [optimize-ci](.claude/skills/optimize-ci/SKILL.md) for CI wall-clock
+time. Here,
 [merged-commits](skills/merged-commits/SKILL.md) counts original PR commits.
 Before reporting work done, `bun run teardown` must pass.
 
