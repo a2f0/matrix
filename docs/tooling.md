@@ -468,10 +468,15 @@ pins a different one. Remove such a copy with
 
 Gemini reads `GEMINI.md` by default, so set its
 [context file names](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/gemini-md.md)
-once in `~/.gemini/settings.json`:
+once in `~/.gemini/settings.json`, keeping `GEMINI.md` first so global
+memories stay in `~/.gemini/GEMINI.md`, and turn folder trust on explicitly,
+since older releases left it off:
 
 ```json
-{ "context": { "fileName": ["GEMINI.md", "AGENTS.md"] } }
+{
+  "context": { "fileName": ["GEMINI.md", "AGENTS.md"] },
+  "security": { "folderTrust": { "enabled": true } }
+}
 ```
 
 Managed repositories carry no `GEMINI.md` and no Gemini CLI files in
@@ -484,8 +489,7 @@ It discovers the managed `.agents/skills` as workspace
 [skills](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/skills.md),
 which it loads only in a
 [trusted folder](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/trusted-folders.md).
-Folder trust is on by default, and an untrusted workspace also skips project
-settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
+An untrusted workspace also skips project settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 `~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
 checkout below it, whatever branch or local edits it holds.
 
