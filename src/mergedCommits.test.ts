@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { selectDay } from "../skills/merged-commits/scripts/day";
@@ -120,6 +120,10 @@ test.each([
 
 test("inaccessible repositories and API failures do not become zero counts", () => {
   expect(() => countRepository("example/private", day, () => ({ repository: null }))).toThrow("not accessible");
+  for (const missing of [{ repository: null }, { repository: { p1: null } }]) {
+    const request: Graphql = query => (query.includes("pullRequests(") ? prs([pr(1, "2026-11-05T12:00:00Z", 1)]) : missing);
+    expect(() => countRepository("example/repo", day, request)).toThrow("no commit list");
+  }
   expect(() =>
     countRepository("example/repo", day, () => {
       throw new Error("rate limit");
@@ -198,4 +202,13 @@ fi
     expect(report.workspace).toBe("fixture/workspace");
     expect(report.repositories.map((entry: { repo: string }) => entry.repo)).toEqual([...loadManifest(root).repos, "fixture/workspace"]);
   }
+});
+
+test("the executable script reports errors on stderr with a failing exit status", () => {
+  const script = path.resolve(import.meta.dir, "../scripts/reports/mergedCommits.ts");
+  const PATH = [path.dirname(process.execPath), process.env.PATH].join(path.delimiter);
+  const result = spawnSync(script, ["2026-02-30", "--timezone", "UTC"], { encoding: "utf8", env: { ...process.env, PATH } });
+  expect(result.status).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toContain("Invalid date '2026-02-30'");
 });

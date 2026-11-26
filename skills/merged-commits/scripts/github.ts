@@ -18,7 +18,7 @@ interface Connection<T> {
 }
 export type Commits = Connection<{ commit: Commit }> & { totalCount: number };
 export type Graphql = (query: string) => Record<string, unknown>;
-type CommitFields = Record<string, { commits: Commits }>;
+type CommitFields = Record<string, { commits: Commits } | null>;
 
 const graphql: Graphql = query => {
   const response = JSON.parse(runGh(["api", "graphql", "-f", `query=${query}`])) as { data?: Record<string, unknown>; errors?: unknown[] };
@@ -75,6 +75,13 @@ function commitField(number: number, cursor: string | null = null) {
   } }`;
 }
 
+/** The PR's commit connection from a commitField response, or a clear error when GitHub omits it. */
+function prCommits(data: Record<string, unknown>, pr: PullRequest) {
+  const commits = (data.repository as CommitFields | null)?.[`p${pr.number}`]?.commits;
+  if (!commits) throw new Error(`${pr.url}: GitHub returned no commit list; cannot compute a complete count.`);
+  return commits;
+}
+
 function originalCommits(repo: string, prs: PullRequest[], request: Graphql) {
   const unique = new Map<string, Commit>();
   let occurrences = 0;
@@ -82,9 +89,8 @@ function originalCommits(repo: string, prs: PullRequest[], request: Graphql) {
   for (let offset = 0; offset < prs.length; offset += 20) {
     const batch = prs.slice(offset, offset + 20);
     const data = request(repositoryQuery(repo, batch.map(pr => commitField(pr.number)).join("\n")));
-    const repository = data.repository as CommitFields;
     for (const pr of batch) {
-      const commits = readCommits(repo, pr, repository[`p${pr.number}`]!.commits, request);
+      const commits = readCommits(repo, pr, prCommits(data, pr), request);
       occurrences += commits.length;
       for (const commit of commits) unique.set(commit.oid, commit);
     }
@@ -99,9 +105,7 @@ function readCommits(repo: string, pr: PullRequest, connection: Commits, request
     for (const { commit } of connection.nodes) commits.set(commit.oid, commit);
     const cursor = nextCursor(connection);
     if (!cursor) break;
-    const data = request(repositoryQuery(repo, commitField(pr.number, cursor)));
-    const repository = data.repository as CommitFields;
-    connection = repository[`p${pr.number}`]!.commits;
+    connection = prCommits(request(repositoryQuery(repo, commitField(pr.number, cursor))), pr);
   }
   if (commits.size !== pr.commits.totalCount) {
     throw new Error(`${pr.url}: incomplete commit list (${commits.size} of ${pr.commits.totalCount}); cannot compute a complete count.`);
