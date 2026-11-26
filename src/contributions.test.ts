@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { datesToCount, type History, parseHistory, recordCounts, serializeHistory } from "../scripts/reports/contributions/history";
+import { datesToCount, type History, parseHistory, recordCounts, serializeHistory, upgradeHistory } from "../scripts/reports/contributions/history";
 import { profileCheckout, profileNotReady, statusChanges } from "../scripts/reports/contributions/update";
 import { datesBetween } from "../skills/merged-commits/scripts/day";
 import { syncRepo } from "./checkouts";
@@ -12,7 +12,7 @@ import { gitIn, gitInit, SPAWNS, tempDir } from "./testFixtures";
 const ROOT = path.resolve(import.meta.dir, "..");
 
 function history(days: string[], asOf: string, timeZone = "America/New_York"): History {
-  return { schemaVersion: 1, timeZone, asOf, days: Object.fromEntries(days.map(date => [date, { commits: 1, pullRequests: 1 }])) };
+  return { schemaVersion: 2, timeZone, asOf, days: Object.fromEntries(days.map(date => [date, { "a2f0/app": { commits: 1, pullRequests: 1 } }])) };
 }
 
 test("the first run counts 53 weeks through today", () => {
@@ -31,6 +31,22 @@ test("a later run recounts the day it last ran on and backfills every day since"
   expect(datesToCount({ ...stored, days: gap }, "2026-11-25")).toEqual(["2026-06-01", "2026-11-25"]);
 });
 
+test("a stored day without merges is final like any other", () => {
+  const stored = history(datesBetween("2025-11-20", "2026-11-25"), "2026-11-25T20:00:00Z");
+  stored.days["2026-06-01"] = {};
+  expect(datesToCount(stored, "2026-11-25")).toEqual(["2026-11-25"]);
+});
+
+test("a version 1 history is counted again from its oldest day, by repository", () => {
+  const totals = { schemaVersion: 1 as const, timeZone: "UTC", asOf: "2026-11-25T20:00:00Z", days: { "2024-03-01": { commits: 4, pullRequests: 1 } } };
+  expect(upgradeHistory(totals)).toEqual({ existing: null, since: "2024-03-01" });
+  expect(upgradeHistory(totals, "2023-01-01")).toEqual({ existing: null, since: "2023-01-01" });
+  expect(upgradeHistory({ ...totals, days: {} }, "2026-01-01")).toEqual({ existing: null, since: "2026-01-01" });
+  const current = history(["2026-11-24"], "2026-11-25T20:00:00Z");
+  expect(upgradeHistory(current, "2026-01-01")).toEqual({ existing: current, since: "2026-01-01" });
+  expect(upgradeHistory(null)).toEqual({ existing: null, since: undefined });
+});
+
 test("a history counted after today's date, from a skewed clock, leaves nothing to count", () => {
   expect(datesToCount(history(datesBetween("2025-11-20", "2026-11-25"), "2026-11-27T12:00:00Z"), "2026-11-25")).toEqual([]);
 });
@@ -42,39 +58,52 @@ test("--since adds earlier days without recounting final ones", () => {
   expect(dates).toHaveLength(datesBetween("2025-01-01", "2025-11-24").length + 1);
 });
 
-test("recording keeps other days, zeroes days without merges, and sorts by date", () => {
-  const stored = history(["2026-11-20"], "2026-11-21T12:00:00Z");
+test("recording keeps other days, empties days without merges, and sorts by date and repository", () => {
+  const stored = history(["2026-11-20", "2026-11-25"], "2026-11-21T12:00:00Z");
   const next = recordCounts(
     stored,
     "America/New_York",
     "2026-11-26T12:00:00.000Z",
     ["2026-11-26", "2026-11-25"],
-    new Map([["2026-11-25", { commits: 9, pullRequests: 2 }]]),
+    new Map([
+      [
+        "2026-11-25",
+        {
+          "a2f0/web": { commits: 9, pullRequests: 2 },
+          "a2f0/api": { commits: 3, pullRequests: 1 },
+        },
+      ],
+    ]),
   );
   expect(next).toEqual({
-    schemaVersion: 1,
+    schemaVersion: 2,
     timeZone: "America/New_York",
     asOf: "2026-11-26T12:00:00.000Z",
     days: {
-      "2026-11-20": { commits: 1, pullRequests: 1 },
-      "2026-11-25": { commits: 9, pullRequests: 2 },
-      "2026-11-26": { commits: 0, pullRequests: 0 },
+      "2026-11-20": { "a2f0/app": { commits: 1, pullRequests: 1 } },
+      // A recounted day replaces every repository's count, so one that stopped counting drops out.
+      "2026-11-25": { "a2f0/api": { commits: 3, pullRequests: 1 }, "a2f0/web": { commits: 9, pullRequests: 2 } },
+      "2026-11-26": {},
     },
   });
   expect(Object.keys(next.days)).toEqual(["2026-11-20", "2026-11-25", "2026-11-26"]);
+  expect(Object.keys(next.days["2026-11-25"]!)).toEqual(["a2f0/api", "a2f0/web"]);
 });
 
 test("serializes one line per day and parses back", () => {
-  const stored = history(["2026-11-25", "2026-11-26"], "2026-11-26T12:00:00.000Z");
+  const stored = history(["2026-11-24", "2026-11-25"], "2026-11-26T12:00:00.000Z");
+  stored.days["2026-11-25"]!["a2f0/web"] = { commits: 12, pullRequests: 3 };
+  stored.days["2026-11-26"] = {};
   const text = serializeHistory(stored);
   expect(text).toBe(
     `{
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "timeZone": "America/New_York",
   "asOf": "2026-11-26T12:00:00.000Z",
   "days": {
-    "2026-11-25": { "commits": 1, "pullRequests": 1 },
-    "2026-11-26": { "commits": 1, "pullRequests": 1 }
+    "2026-11-24": { "a2f0/app": { "commits": 1, "pullRequests": 1 } },
+    "2026-11-25": { "a2f0/app": { "commits": 1, "pullRequests": 1 }, "a2f0/web": { "commits": 12, "pullRequests": 3 } },
+    "2026-11-26": {}
   }
 }
 `,
@@ -85,23 +114,42 @@ test("serializes one line per day and parses back", () => {
 
 test.each([
   ["{", "is not JSON"],
-  ['{"schemaVersion":2}', "schemaVersion must be 1"],
-  ['{"schemaVersion":1,"timeZone":"UTC","asOf":"soon","days":{}}', "asOf must be an ISO 8601 instant"],
-  ['{"schemaVersion":1,"timeZone":"UTC","asOf":"Nov 26 2026","days":{}}', "asOf must be an ISO 8601 instant"],
-  ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-02-30T00:00:00Z","days":{}}', "asOf must be an ISO 8601 instant"],
+  ['{"schemaVersion":3}', "schemaVersion must be 2, or 1 to count again by repository"],
+  // A version 1 history kept only each day's totals, which must still be valid to count again.
   [
-    '{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-27":{"commits":1,"pullRequests":0}}}',
+    '{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"a2f0/app":{"commits":1,"pullRequests":1}}}}',
+    "days.2026-11-25 needs non-negative integer",
+  ],
+  ['{"schemaVersion":2,"timeZone":"UTC","asOf":"soon","days":{}}', "asOf must be an ISO 8601 instant"],
+  ['{"schemaVersion":2,"timeZone":"UTC","asOf":"Nov 26 2026","days":{}}', "asOf must be an ISO 8601 instant"],
+  ['{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-02-30T00:00:00Z","days":{}}', "asOf must be an ISO 8601 instant"],
+  [
+    '{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-27":{}}}',
     "days.2026-11-27 is after the local date of asOf (2026-11-26)",
   ],
-  ['{"schemaVersion":1,"timeZone":"Not/A_Zone","asOf":"2026-11-26T00:00:00Z","days":{}}', "timeZone must be an IANA time zone"],
-  ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-02-30":{"commits":1,"pullRequests":0}}}', "invalid date '2026-02-30'"],
-  ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"commits":-1,"pullRequests":0}}}', "non-negative integer"],
+  ['{"schemaVersion":2,"timeZone":"Not/A_Zone","asOf":"2026-11-26T00:00:00Z","days":{}}', "timeZone must be an IANA time zone"],
+  ['{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-02-30":{}}}', "invalid date '2026-02-30'"],
+  ['{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":[]}}', "days.2026-11-25 must be an object of repositories"],
+  [
+    '{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"commits":1,"pullRequests":0}}}',
+    "days.2026-11-25 has an invalid repository 'commits'",
+  ],
+  [
+    '{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"../..":{"commits":1,"pullRequests":1}}}}',
+    "days.2026-11-25 has an invalid repository '../..'",
+  ],
+  [
+    '{"schemaVersion":2,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"a2f0/app":{"commits":-1,"pullRequests":0}}}}',
+    'days.2026-11-25["a2f0/app"] needs non-negative integer',
+  ],
 ])("rejects an invalid history: %s", (text, message) => {
   expect(() => parseHistory(text, "commits.json")).toThrow(message);
 });
 
-/** An empty profile checkout, and a gh with no merged PRs. */
-function workspace() {
+const NO_MERGES = `echo '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}'`;
+
+/** An empty profile checkout, and a gh that answers GraphQL queries with `graphql`, by default no merged PRs. */
+function workspace(graphql = NO_MERGES) {
   const dir = tempDir("contributions");
   const bin = path.join(dir, "bin");
   const profile = path.join(dir, "profile");
@@ -111,7 +159,7 @@ function workspace() {
     path.join(bin, "gh"),
     `#!/bin/sh
 if [ "$1" = repo ]; then echo fixture/workspace; exit 0; fi
-echo '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}'
+${graphql}
 `,
   );
   chmodSync(path.join(bin, "gh"), 0o755);
@@ -214,6 +262,8 @@ test("the script backfills a new history, and then recounts only from its last d
   expect(report).toMatchObject({ profile, timeZone: "UTC", repositories: loadManifest(ROOT).repos.length + 1, counted: { days: 371, commits: 0 } });
   const stored = parseHistory(readFileSync(path.join(profile, "contributions/commits.json"), "utf8"), "commits.json");
   expect(Object.keys(stored.days)).toHaveLength(371);
+  // Days without merges hold no repositories.
+  expect(Object.values(stored.days).every(repositories => Object.keys(repositories).length === 0)).toBe(true);
   // The history is the only file a run writes.
   expect(readdirSync(profile, { recursive: true }).sort()).toEqual(["contributions", path.join("contributions", "commits.json")]);
 
@@ -248,4 +298,62 @@ test("the script backfills a new history, and then recounts only from its last d
   expect(behind.status).toBe(1);
   expect(behind.stderr).toContain("after today");
   expect(readFileSync(file, "utf8")).toBe(skewed);
+});
+
+test("the script records each repository's counts beside the others' on the days they merged", SPAWNS, () => {
+  // Every repository merged one PR of two commits at noon on June 1st, 2024.
+  const pullRequests = JSON.stringify({
+    data: {
+      repository: {
+        pullRequests: {
+          nodes: [
+            {
+              number: 1,
+              url: "https://github.com/fixture/pull/1",
+              mergedAt: "2024-06-01T12:00:00Z",
+              updatedAt: "2024-06-01T12:00:00Z",
+              baseRefOid: "base",
+              headRefOid: "head",
+              commits: { totalCount: 2 },
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
+  });
+  const nodes = ["a", "b"].map(oid => ({ commit: { oid, parents: { totalCount: 1 } } }));
+  const commits = JSON.stringify({
+    data: { repository: { p1: { commits: { totalCount: 2, pageInfo: { hasNextPage: false, endCursor: null }, nodes } } } },
+  });
+  const { profile, run } = workspace(`case "$*" in
+  *"pullRequest(number"*) echo '${commits}' ;;
+  *) echo '${pullRequests}' ;;
+esac`);
+  const result = run("--timezone", "UTC", "--since", "2024-05-31");
+  expect(result.status).toBe(0);
+  const scope = [...loadManifest(ROOT).repos, "fixture/workspace"];
+  const stored = parseHistory(readFileSync(path.join(profile, "contributions/commits.json"), "utf8"), "commits.json");
+  expect(stored.days["2024-06-01"]).toEqual(Object.fromEntries(scope.map(repo => [repo, { commits: 2, pullRequests: 1 }])));
+  expect(Object.keys(stored.days["2024-06-01"]!)).toEqual(scope.sort());
+  expect(stored.days["2024-05-31"]).toEqual({});
+  expect(JSON.parse(result.stdout).counted).toMatchObject({ first: "2024-05-31", commits: 2 * scope.length, pullRequests: scope.length });
+});
+
+test("the script counts a version 1 history again in full, keeping every day it held", SPAWNS, () => {
+  const { profile, run } = workspace();
+  const file = path.join(profile, "contributions/commits.json");
+  mkdirSync(path.dirname(file));
+  const days = { "2024-01-01": { commits: 3, pullRequests: 1 }, "2024-06-01": { commits: 0, pullRequests: 0 } };
+  writeFileSync(file, JSON.stringify({ schemaVersion: 1, timeZone: "UTC", asOf: "2024-06-02T00:00:00.000Z", days }));
+  const result = run();
+  expect(result.status).toBe(0);
+  const { counted } = JSON.parse(result.stdout);
+  expect(counted.first).toBe("2024-01-01");
+  const stored = parseHistory(readFileSync(file, "utf8"), "commits.json");
+  expect(stored.schemaVersion).toBe(2);
+  expect(stored.timeZone).toBe("UTC");
+  expect(Object.keys(stored.days)).toEqual(datesBetween("2024-01-01", counted.last));
+  // The fake gh reports no merges, so the old totals give way to empty days.
+  expect(stored.days["2024-01-01"]).toEqual({});
 });

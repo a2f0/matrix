@@ -6,13 +6,24 @@ import { countDays, type DayCount, includingWorkspace, matrixScope } from "../..
 import { checkoutStatus, notReady } from "../../../src/checkouts";
 import { gitOutput } from "../../../src/git";
 import { checkoutPath, cloneUrl, loadManifest } from "../../../src/manifest";
-import { datesToCount, HISTORY_FILE, type History, isDate, parseHistory, recordCounts, serializeHistory } from "./history";
+import {
+  datesToCount,
+  HISTORY_FILE,
+  type History,
+  isDate,
+  parseHistory,
+  type RepositoryCounts,
+  recordCounts,
+  serializeHistory,
+  type TotalsHistory,
+  upgradeHistory,
+} from "./history";
 
 const USAGE = `Usage: bun run contributions [--since YYYY-MM-DD] [--timezone IANA] [--profile DIR]
        scripts/reports/updateContributions.ts [same options]
 
-Count the original (pre-squash) commits in PRs merged across matrix.json
-repositories and this workspace for every day the profile repository's
+Count the original (pre-squash) commits in PRs merged in each matrix.json
+repository and this workspace for every day the profile repository's
 ${HISTORY_FILE} is missing or counted before the day ended, which that
 repository's web page renders. The first run counts the last 53 weeks; --since
 also counts every day from that date. --timezone sets the calendar of a new
@@ -100,7 +111,7 @@ function resolveTimeZone(timeZone: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone }).resolvedOptions().timeZone;
 }
 
-function historyTimeZone(history: History | null, requested: string | undefined): string {
+function historyTimeZone(history: History | TotalsHistory | null, requested: string | undefined): string {
   if (!history) return resolveTimeZone(requested ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
   // Compare resolved names, so a hand-written utc matches UTC.
   if (requested && resolveTimeZone(requested) !== resolveTimeZone(history.timeZone)) {
@@ -109,11 +120,9 @@ function historyTimeZone(history: History | null, requested: string | undefined)
   return history.timeZone;
 }
 
-function addCounts(total: Map<string, DayCount>, days: Map<string, DayCount>) {
-  for (const [date, day] of days) {
-    const sum = total.get(date) ?? { commits: 0, pullRequests: 0 };
-    total.set(date, { commits: sum.commits + day.commits, pullRequests: sum.pullRequests + day.pullRequests });
-  }
+/** Record one repository's counts beside the others' on each day it merged anything. */
+function addCounts(counts: Map<string, RepositoryCounts>, repo: string, days: Map<string, DayCount>) {
+  for (const [date, day] of days) counts.set(date, { ...counts.get(date), [repo]: day });
 }
 
 function sum(days: Iterable<DayCount>): DayCount {
@@ -138,31 +147,32 @@ function main(args: string[]) {
   const { repos, workspace } = matrixScope(ROOT);
   const profile = values.profile ? path.resolve(values.profile) : profileCheckout(ROOT, repos, workspace);
   const file = path.join(profile, HISTORY_FILE);
-  const existing = existsSync(file) ? parseHistory(readFileSync(file, "utf8"), file) : null;
-  const timeZone = historyTimeZone(existing, values.timezone);
+  const stored = existsSync(file) ? parseHistory(readFileSync(file, "utf8"), file) : null;
+  const timeZone = historyTimeZone(stored, values.timezone);
   const now = new Date();
   const today = localDate(now, timeZone);
   // A history counted on a later date than today came from a clock that has
   // since moved back; recording an earlier asOf would strand its later days.
-  if (existing && localDate(new Date(existing.asOf), timeZone) > today)
-    throw new Error(`${HISTORY_FILE} was counted at ${existing.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
-  const dates = datesToCount(existing, today, validSince(values.since, today));
+  if (stored && localDate(new Date(stored.asOf), timeZone) > today)
+    throw new Error(`${HISTORY_FILE} was counted at ${stored.asOf}, after today (${today} in ${timeZone}); check this machine's clock.`);
+  const { existing, since } = upgradeHistory(stored, validSince(values.since, today));
+  const dates = datesToCount(existing, today, since);
   // Dates before today that are already final are skipped, not recounted.
   const window = onDates(selectRange(dates[0]!, today, timeZone, now), dates);
   const scope = includingWorkspace(repos, workspace);
-  const counts = new Map<string, DayCount>();
+  const counts = new Map<string, RepositoryCounts>();
   for (const repo of scope) {
     const days = countDays(repo, window);
     const total = sum(days.values());
     console.error(`${repo}: ${total.pullRequests} merged PRs, ${total.commits} original commits from ${dates[0]} through ${today}`);
-    addCounts(counts, days);
+    addCounts(counts, repo, days);
   }
   const history = recordCounts(existing, timeZone, window.asOf, dates, counts);
   mkdirSync(path.dirname(file), { recursive: true });
   // Replace the file whole, so an interrupted run leaves the previous history.
   writeFileSync(`${file}.tmp`, serializeHistory(history));
   renameSync(`${file}.tmp`, file);
-  const counted = sum(dates.map(date => history.days[date]!));
+  const counted = sum(dates.flatMap(date => Object.values(history.days[date]!)));
   console.log(
     JSON.stringify(
       { profile, timeZone, asOf: window.asOf, repositories: scope.length, counted: { first: dates[0], last: today, days: dates.length, ...counted } },
