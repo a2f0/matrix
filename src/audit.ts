@@ -428,11 +428,11 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
-    id: "no-gemini-md",
-    summary: "No GEMINI.md; Gemini CLI reads AGENTS.md through its user settings",
+    id: "no-gemini-config",
+    summary: "No GEMINI.md or .gemini/; Gemini CLI reads AGENTS.md through its user settings",
     source: ONBOARDING,
     check: checkout => {
-      const files = checkout.tracked(":(glob)**/GEMINI.md");
+      const files = checkout.tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**");
       return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
     },
   },

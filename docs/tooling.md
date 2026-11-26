@@ -94,7 +94,7 @@ Git does not retain an obsolete hooks path.
 Update the existing focused document instead of adding a competing source of
 truth. Link to shared instructions and describe the repository's differences.
 Keep operational requirements in `AGENTS.md` and linked guides rather than
-maintaining parallel `CLAUDE.md` instructions. Remove obsolete commands and
+maintaining parallel `CLAUDE.md` or `GEMINI.md` instructions. Remove obsolete commands and
 resolved constraints; do not accumulate per-sweep journals in the checkout.
 
 ### README files
@@ -461,14 +461,14 @@ Install Gemini CLI with Homebrew, `brew install gemini-cli`, which brings its
 own Node. Do not install it with `npm install -g` under mise: the global
 lands in one Node version's prefix, so its mise shim
 fails with "not provided by the active node" wherever another version is
-active, which is every checkout that pins its own. Remove such a copy with
+active, as in every checkout that pins a different one. Remove such a copy with
 `mise exec node@<version> -- npm uninstall -g @google/gemini-cli`, then
 `mise reshim`, so the stale shim stops shadowing Homebrew's binary.
 
 Gemini reads `GEMINI.md` by default, so set its
 [context file names](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/gemini-md.md)
-once in `~/.gemini/settings.json`; managed repositories carry no `GEMINI.md`,
-which the audit's `no-gemini-md` rule checks:
+once in `~/.gemini/settings.json`; managed repositories carry no `GEMINI.md`
+or `.gemini/`, which the audit's `no-gemini-config` rule checks:
 
 ```json
 { "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }
@@ -481,7 +481,9 @@ which it loads only in a
 Folder trust is on by default, and an untrusted workspace also skips project
 settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 `~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
-checkout below it. A trusted workspace's `.env` loads into Gemini's
+checkout below it, on whatever branch it holds. A trusted checkout's tracked
+`.gemini/settings.json` could start MCP servers, which is why the audit rejects
+one. A trusted workspace's `.env` loads into Gemini's
 environment, which every shell command it runs inherits, so a secret there can
 be printed. Keep secret values in the `.secrets` link that
 [secrets](secrets.md) describes, never in a `.env` Gemini can load.
