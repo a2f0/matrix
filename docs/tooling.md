@@ -526,9 +526,10 @@ repositories that lack the files or the check.
 A skill every repository uses ships in agent-tool's managed bundle, so each
 repository pins, installs, and checks it like the rest: space-cleanup,
 performance-pass, and take-screenshots, which matrix owned, and
-seo-optimization, app-store-readiness, and audit-trails, which balebase owned.
-Their scripts are agent-tool commands (`space`, `perf`, `screenshots`, and
-`seo probe`), run with each checkout's pin. A skill only one repository uses
+seo-optimization, app-store-readiness, and audit-trails, which balebase owned,
+and optimize-ci, which agent-tool added. Their scripts are agent-tool commands
+(`space`, `perf`, `screenshots`, `seo probe`, and `ci timings`), run with each
+checkout's pin. A skill only one repository uses
 stays in that repository's skill folders.
 
 Install them only through a repository's pin, never by linking a clone's copy
