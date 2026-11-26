@@ -31,7 +31,7 @@ first and check `branch` for checkouts that are not on their default branch.
 | `agent-tool-latest` | With `--remote`: the pin has trailed newer releases for under 7 days | [Dependency maintenance](dependency-upgrades.md) |
 | `output-capture` | `agent:run` and `agent:logs` package scripts, and an `Output capture` section in `AGENTS.md` that names both, or a paragraph when it has no sections | [Output capture](tooling.md#output-capture) |
 | `state-machines` | An `AGENTS.md` `State machines` section naming the `explicit-state-machines` skill, and that skill installed from agent-tool 0.1.51 (agent-tool itself ships it from `skills/`) | [State machines](tooling.md#state-machines) |
-| `readme-title` | The README's first line is an H1 with no link, and no standalone link line follows it | [README files](tooling.md#readme-files) |
+| `readme-title` | The README's first line is an H1 with no link, and no standalone link line follows it; a profile repository (`<owner>/<owner>`) may have no README | [README files](tooling.md#readme-files) |
 | `readme-quick-start` | A `Quick start` section outside code blocks; a user's profile repository (`<owner>/<owner>`) has it in `docs/development.md` | [README files](tooling.md#readme-files) |
 | `readme-agent-free` | No output capture or skill paths in the README; agent-tool, whose product is agent tooling, is exempt | [README files](tooling.md#readme-files) |
 | `brand-images` | With `assets/brand/`: `logo.svg`, an `images` section in `agent-tool.json`, and no committed raster there | [Brand images](../AGENTS.md#brand-images) |

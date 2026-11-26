@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { datesToCount, type History, parseHistory, recordCounts, serializeHistory } from "../scripts/reports/contributions/history";
-import { miseBun, pinnedBun, profileCheckout, profileNotReady, statusChanges } from "../scripts/reports/contributions/update";
+import { profileCheckout, profileNotReady, statusChanges } from "../scripts/reports/contributions/update";
 import { datesBetween } from "../skills/merged-commits/scripts/day";
 import { syncRepo } from "./checkouts";
 import { loadManifest } from "./manifest";
@@ -100,7 +100,7 @@ test.each([
   expect(() => parseHistory(text, "commits.json")).toThrow(message);
 });
 
-/** A profile checkout whose renderer records that it ran, and a gh with no merged PRs. */
+/** An empty profile checkout, and a gh with no merged PRs. */
 function workspace() {
   const dir = tempDir("contributions");
   const bin = path.join(dir, "bin");
@@ -115,7 +115,6 @@ echo '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage
 `,
   );
   chmodSync(path.join(bin, "gh"), 0o755);
-  writeFileSync(path.join(profile, "package.json"), JSON.stringify({ scripts: { "contributions:render": "echo rendered > rendered.txt" } }));
   const run = (...args: string[]) =>
     spawnSync(path.join(ROOT, "scripts/reports/updateContributions.ts"), ["--profile", profile, ...args], {
       cwd: dir,
@@ -159,7 +158,7 @@ test("lists a checkout's changes by path, first entry included, with renames and
   expect(statusChanges(dir)).toEqual([["README.md"], ['new "name".md', "old name.md"], ["package.json"], ["contributions/commits.json"]]);
 });
 
-test("a profile checkout is ready for new counts only on its updated default branch, apart from files a run writes", SPAWNS, () => {
+test("a profile checkout is ready for new counts only on its updated default branch, apart from the history a run writes", SPAWNS, () => {
   const temporary = tempDir("profile-ready");
   const root = path.join(temporary, "matrix");
   const seed = path.join(temporary, "seed");
@@ -178,15 +177,17 @@ test("a profile checkout is ready for new counts only on its updated default bra
   expect(reason()).toBeUndefined();
 
   // An earlier run's output, not yet shipped.
-  writeFileSync(path.join(checkout, "README.md"), "grid\n");
   mkdirSync(path.join(checkout, "contributions"));
   writeFileSync(path.join(checkout, "contributions", "commits.json"), "{}\n");
-  writeFileSync(path.join(checkout, "contributions", "level-0.svg"), "<svg/>\n");
   expect(reason()).toBeUndefined();
 
+  // Other files there, the README included, are someone's work.
   writeFileSync(path.join(checkout, "contributions", "notes.txt"), "mine\n");
   expect(reason()).toBe("1 local change");
   rmSync(path.join(checkout, "contributions", "notes.txt"));
+  writeFileSync(path.join(checkout, "README.md"), "mine\n");
+  expect(reason()).toBe("1 local change");
+  gitIn(checkout, "checkout", "-q", "README.md");
   writeFileSync(path.join(checkout, "package.json"), "{}\n");
   expect(reason()).toBe("1 local change");
   gitIn(checkout, "checkout", "-q", "package.json");
@@ -204,29 +205,7 @@ test("a profile checkout is ready for new counts only on its updated default bra
   expect(reason()).toBe("1 commit behind origin; run sync");
 });
 
-test("reads a plain [tools] Bun pin and refuses one it cannot read", () => {
-  expect(miseBun('[tools]\nbun = "1.4.4" # pinned\n')).toBe("1.4.4");
-  expect(miseBun('[tools]\nshellcheck = "0.11.0"\n')).toBeUndefined();
-  for (const pin of ['bun = { version = "1.4.4" }', '"bun" = "1.4.4"', "bun = 'latest'"]) {
-    expect(() => miseBun(`[tools]\n${pin}\n`)).toThrow('write it as bun = "<version>"');
-  }
-});
-
-test("runs the profile's render with the Bun its .mise.toml pins", () => {
-  const dir = tempDir("profile-bun");
-  const installs = tempDir("mise-installs");
-  expect(pinnedBun(dir, installs)).toBe(process.execPath);
-  // Only the [tools] table pins a tool.
-  writeFileSync(path.join(dir, ".mise.toml"), '[env]\nbun = "0.0.1"\n');
-  expect(pinnedBun(dir, installs)).toBe(process.execPath);
-  writeFileSync(path.join(dir, ".mise.toml"), '[env]\nbun = "0.0.1"\n\n[tools]\nbun = "9.9.9"\nshellcheck = "0.11.0"\n');
-  expect(() => pinnedBun(dir, installs)).toThrow("pins Bun 9.9.9, which mise has not installed; run mise install there first.");
-  mkdirSync(path.join(installs, "bun", "9.9.9", "bin"), { recursive: true });
-  writeFileSync(path.join(installs, "bun", "9.9.9", "bin", "bun"), "");
-  expect(pinnedBun(dir, installs)).toBe(path.join(installs, "bun", "9.9.9", "bin", "bun"));
-});
-
-test("the script backfills a new history, renders the profile, and then recounts only from its last day", SPAWNS, () => {
+test("the script backfills a new history, and then recounts only from its last day", SPAWNS, () => {
   const { profile, run } = workspace();
   const first = run("--timezone", "UTC");
   expect(first.stderr).toContain("fixture/workspace: 0 merged PRs");
@@ -235,7 +214,8 @@ test("the script backfills a new history, renders the profile, and then recounts
   expect(report).toMatchObject({ profile, timeZone: "UTC", repositories: loadManifest(ROOT).repos.length + 1, counted: { days: 371, commits: 0 } });
   const stored = parseHistory(readFileSync(path.join(profile, "contributions/commits.json"), "utf8"), "commits.json");
   expect(Object.keys(stored.days)).toHaveLength(371);
-  expect(existsSync(path.join(profile, "rendered.txt"))).toBe(true);
+  // The history is the only file a run writes.
+  expect(readdirSync(profile, { recursive: true }).sort()).toEqual(["contributions", path.join("contributions", "commits.json")]);
 
   const second = run();
   expect(second.status).toBe(0);
@@ -268,13 +248,4 @@ test("the script backfills a new history, renders the profile, and then recounts
   expect(behind.status).toBe(1);
   expect(behind.stderr).toContain("after today");
   expect(readFileSync(file, "utf8")).toBe(skewed);
-});
-
-test("a failing renderer fails the run after the history is saved", SPAWNS, () => {
-  const { profile, run } = workspace();
-  writeFileSync(path.join(profile, "package.json"), JSON.stringify({ scripts: { "contributions:render": "exit 3" } }));
-  const result = run("--timezone", "UTC");
-  expect(result.status).toBe(1);
-  expect(result.stderr).toContain("bun run contributions:render failed");
-  expect(existsSync(path.join(profile, "contributions/commits.json"))).toBe(true);
 });
