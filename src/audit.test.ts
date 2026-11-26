@@ -119,14 +119,18 @@ describe("audit", () => {
       "CLAUDE.md": "@AGENTS.md\n",
       "packages/web/CLAUDE.md": "notes\n",
       "GEMINI.md": "@AGENTS.md\n",
-      "packages/api/.gemini/settings.json": "{}\n",
+      ".gemini/settings.json": "{}\n",
+      ".gemini/.env": "KEY=value\n",
+      "packages/api/.gemini/commands/deploy.toml": "prompt = 'deploy'\n",
+      ".gemini/config.yaml": "code_review: {}\n",
       ".gemini/styleguide.md": "Gemini Code Assist review guide\n",
       ".gitignore": "/.DS_Store\n",
     });
     expect(failures(repo)).toMatchObject({
       "agents-md": "no tracked AGENTS.md at the root",
       "no-claude-md": "tracked CLAUDE.md, packages/web/CLAUDE.md",
-      "no-gemini-config": "tracked GEMINI.md, packages/api/.gemini/settings.json",
+      // Gemini Code Assist's config.yaml and styleguide.md are not reported.
+      "no-gemini-config": "tracked .gemini/.env, .gemini/settings.json, GEMINI.md, packages/api/.gemini/commands/deploy.toml",
       "ds-store-ignored": "root .gitignore does not list .DS_Store",
       "output-capture": "no AGENTS.md for the Output capture section",
     });

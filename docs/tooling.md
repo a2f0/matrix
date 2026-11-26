@@ -94,9 +94,9 @@ Git does not retain an obsolete hooks path.
 Update the existing focused document instead of adding a competing source of
 truth. Link to shared instructions and describe the repository's differences.
 Keep operational requirements in `AGENTS.md` and linked guides rather than
-maintaining parallel `CLAUDE.md` or `GEMINI.md`
-instructions. Remove obsolete commands and
-resolved constraints; do not accumulate per-sweep journals in the checkout.
+maintaining parallel `CLAUDE.md` or `GEMINI.md` instructions. Remove obsolete
+commands and resolved constraints; do not accumulate per-sweep journals in the
+checkout.
 
 ### README files
 
@@ -474,10 +474,11 @@ once in `~/.gemini/settings.json`:
 { "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }
 ```
 
-Managed repositories carry no `GEMINI.md`, `.gemini/settings.json`, or
-`.gemini/.env`, which the audit's `no-gemini-config` rule checks. The Gemini
-Code Assist review bot's `.gemini/config.yaml` and `.gemini/styleguide.md`
-configure GitHub reviews, not the CLI, and stay allowed.
+Managed repositories carry no `GEMINI.md` and no Gemini CLI files in
+`.gemini/`, such as settings, `.env`, commands, or skills, which the audit's
+`no-gemini-config` rule checks. The Gemini Code Assist review bot's
+`.gemini/config.yaml` and `.gemini/styleguide.md` configure GitHub reviews,
+not the CLI, and stay allowed.
 
 It discovers the managed `.agents/skills` as workspace
 [skills](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/skills.md),
@@ -488,9 +489,10 @@ settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 `~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
 checkout below it, whatever branch or local edits it holds. The audit checks
 only tracked files in a checkout's current commit, when someone runs it, so it
-does not stop a PR branch's or an untracked `.gemini/settings.json` from
-starting MCP servers: inspect a branch's `.gemini/` before running Gemini on
-it, or check the branch out outside the trusted clone.
+does not stop a PR branch's or an untracked `.gemini/settings.json`, whose MCP
+servers, hooks, and tool discovery can run arbitrary commands: inspect a
+branch's `.gemini/` before running Gemini on it, or check the branch out
+outside the trusted clone.
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
