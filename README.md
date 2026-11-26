@@ -95,12 +95,13 @@ and the captured `asOf` cutoff makes today's report partial.
 
 `contributions` keeps a GitHub-style contributions grid on the owner's GitHub
 profile, in the checkout of its `<owner>/<owner>` profile repository, with the
-same per-day counts across the matrix and this workspace. It counts every day its `contributions/commits.json` is
-missing or counted before the day ended, so a run after a gap backfills the
-days in between, and the first run counts 53 weeks; `--since` adds earlier
-days, and every counted day stays in the history. It then runs that checkout's
-`contributions:render` package script and leaves the changes there to ship. It pages
-each repository's merged PRs once for the whole range rather than once per day.
+same per-day counts across the matrix and this workspace. It counts every day
+its `contributions/commits.json` is missing or counted before the day ended, so
+a run after a gap backfills the days in between, and the first run counts 53
+weeks; `--since` adds earlier days, and every counted day stays in the history.
+It then runs that checkout's `contributions:render` package script and leaves
+the changes there to ship. It pages each repository's merged PRs once for the
+whole range rather than once per day.
 
 ## Managed repositories
 

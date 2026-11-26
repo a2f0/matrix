@@ -43,7 +43,8 @@ function resolveTimeZone(timeZone: string): string {
 
 function historyTimeZone(history: History | null, requested: string | undefined): string {
   if (!history) return resolveTimeZone(requested ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
-  if (requested && resolveTimeZone(requested) !== history.timeZone) {
+  // Compare resolved names, so a hand-written utc matches UTC.
+  if (requested && resolveTimeZone(requested) !== resolveTimeZone(history.timeZone)) {
     throw new Error(`${HISTORY_FILE} records ${history.timeZone} days; it cannot mix in ${requested}.`);
   }
   return history.timeZone;

@@ -81,5 +81,6 @@ Matrix owns this skill and its TypeScript helpers; regression tests live in
 `src/mergedCommits.test.ts`. `bun run contributions` counts the profile's
 contributions grid with the same helpers over a range of days (`countDays`),
 so a day's grid count equals this report's workspace-inclusive
-`originalCommits` for that day. omp discovers `skills/` through the project config.
+`originalCommits` for that day when both use the history's time zone. omp
+discovers `skills/` through the project config.
 Other harnesses can follow the link in `AGENTS.md`; no global install is needed.

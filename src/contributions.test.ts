@@ -154,6 +154,11 @@ test("the script backfills a new history, renders the profile, and then recounts
   const mixed = run("--timezone", "America/New_York");
   expect(mixed.status).toBe(1);
   expect(mixed.stderr).toContain("records UTC days; it cannot mix in America/New_York");
+
+  // A zone spelled differently by hand still resolves to the same one.
+  const file = path.join(profile, "contributions/commits.json");
+  writeFileSync(file, readFileSync(file, "utf8").replace('"timeZone": "UTC"', '"timeZone": "utc"'));
+  expect(run("--timezone", "UTC").status).toBe(0);
 });
 
 test("a failing renderer fails the run after the history is saved", SPAWNS, () => {

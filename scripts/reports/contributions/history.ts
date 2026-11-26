@@ -3,7 +3,9 @@ import type { DayCount } from "../../../skills/merged-commits/scripts/github";
 
 /**
  * The profile repository's record of daily counts, which its README's
- * contributions grid renders. The profile repository validates the same shape.
+ * contributions grid renders. The profile repository's `src/history.ts`
+ * validates the same shape, and its `contributions:check` fails on a file it
+ * cannot read, so a change here ships there too.
  */
 export const HISTORY_FILE = "contributions/commits.json";
 
