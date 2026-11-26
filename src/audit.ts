@@ -66,8 +66,8 @@ const PROFILE_GUIDE = "docs/development.md";
 
 /**
  * GitHub shows the README of the repository named after a user on that user's
- * profile. Organizations keep theirs in `.github/profile/README.md`, so their
- * `<org>/<org>` is an ordinary repository; matrix's owner is a user.
+ * profile. Organizations keep theirs in `.github/profile/README.md`; this
+ * treats every `<owner>/<owner>` as a user's, which fits matrix's user owner.
  */
 function isProfile(checkout: Checkout): boolean {
   const [owner, name] = checkout.repo.toLowerCase().split("/");

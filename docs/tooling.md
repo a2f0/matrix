@@ -114,8 +114,9 @@ A root README introduces the project to someone landing on its GitHub page:
    A user's GitHub profile repository, named after its owner
    (`<owner>/<owner>`), is the exception: GitHub shows its README as the
    user's profile, so the Quick start and other development material go in
-   `docs/development.md`. An organization's profile is `.github/profile/README.md`
-   in its `.github` repository, which the rule treats like any other.
+   `docs/development.md`. The rule treats every `<owner>/<owner>` repository
+   this way, which fits a user owner such as this workspace's; an
+   organization's profile lives in its `.github` repository instead.
 4. A layout or sub-project table, common commands, and links to the detailed
    guides follow as the repository needs them.
 

@@ -4,7 +4,9 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { localDate, onDates, selectRange } from "../../../skills/merged-commits/scripts/day";
 import { countDays, type DayCount, includingWorkspace, matrixScope } from "../../../skills/merged-commits/scripts/github";
-import { checkoutPath } from "../../../src/manifest";
+import { checkoutStatus, notReady } from "../../../src/checkouts";
+import { gitOutput } from "../../../src/git";
+import { checkoutPath, cloneUrl, loadManifest } from "../../../src/manifest";
 import { datesToCount, HISTORY_FILE, type History, isDate, parseHistory, recordCounts, serializeHistory } from "./history";
 
 const USAGE = `Usage: bun run contributions [--since YYYY-MM-DD] [--timezone IANA] [--profile DIR]
@@ -16,19 +18,48 @@ ${HISTORY_FILE} is missing or counted before the day ended, then render its
 README's contributions grid with that repository's bun run contributions:render.
 The first run counts the last 53 weeks; --since also counts every day from that
 date. --timezone sets the calendar of a new history (default: this machine's).
---profile overrides the checkout of <owner>/<owner> from matrix.json.
+It writes into the checkout of <owner>/<owner> from matrix.json only when that
+checkout is ready, as bun run status reports it, apart from files an earlier
+run changed; --profile writes into another directory as it is.
 Requires an authenticated gh CLI. Prints JSON; progress goes to stderr.
 `;
 
 const ROOT = path.resolve(import.meta.dir, "../../..");
 
-/** The checkout of the workspace owner's profile repository, `<owner>/<owner>`. */
-export function profileCheckout(root: string, repos: string[], workspace: string): string {
+/** The files a run writes, which a rerun before they ship may find already changed. */
+const GENERATED = ["README.md", "contributions/"];
+
+/** How many `git status --porcelain` entries are files a run writes. */
+export function generatedChanges(porcelain: string): number {
+  const files = porcelain
+    .split("\n")
+    .filter(line => line !== "")
+    .map(line => line.slice(3));
+  return files.filter(file => GENERATED.some(generated => (generated.endsWith("/") ? file.startsWith(generated) : file === generated))).length;
+}
+
+/** Why a run must not write into a managed checkout, as `bun run status` would say, ignoring files a run writes. */
+function profileNotReady(root: string, repo: string, dir: string): string | undefined {
+  const status = checkoutStatus(root, repo, cloneUrl(repo, loadManifest(root).protocol));
+  if (status.ready || status.error) return status.error;
+  const porcelain = gitOutput(dir, ["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"]);
+  return notReady({ ...status, changes: (status.changes ?? 0) - generatedChanges(porcelain) });
+}
+
+/**
+ * The checkout of the workspace owner's profile repository, `<owner>/<owner>`,
+ * which must be on its updated default branch so new counts never land in
+ * other work.
+ */
+export function profileCheckout(root: string, repos: string[], workspace: string, notReadyReason = profileNotReady): string {
   const owner = workspace.split("/")[0]!;
   const repo = repos.find(candidate => candidate.toLowerCase() === `${owner}/${owner}`.toLowerCase());
   if (!repo) throw new Error(`matrix.json does not manage the profile repository ${owner}/${owner}; add it or pass --profile.`);
   const dir = checkoutPath(root, repo);
   if (!existsSync(dir)) throw new Error(`${dir} is missing; run bun run sync ${repo} first.`);
+  const reason = notReadyReason(root, repo, dir);
+  if (reason)
+    throw new Error(`${repo} is not ready for new counts (${reason}); return it to its updated default branch, or pass --profile to write into it as it is.`);
   return dir;
 }
 

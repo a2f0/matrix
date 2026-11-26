@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { datesToCount, type History, parseHistory, recordCounts, serializeHistory } from "../scripts/reports/contributions/history";
-import { profileCheckout } from "../scripts/reports/contributions/update";
+import { generatedChanges, profileCheckout } from "../scripts/reports/contributions/update";
 import { datesBetween } from "../skills/merged-commits/scripts/day";
 import { loadManifest } from "./manifest";
 import { SPAWNS, tempDir } from "./testFixtures";
@@ -87,6 +87,10 @@ test.each([
   ['{"schemaVersion":2}', "schemaVersion must be 1"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"soon","days":{}}', "asOf must be an ISO 8601 instant"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"Nov 26 2026","days":{}}', "asOf must be an ISO 8601 instant"],
+  [
+    '{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-27":{"commits":1,"pullRequests":0}}}',
+    "days.2026-11-27 is after the local date of asOf (2026-11-26)",
+  ],
   ['{"schemaVersion":1,"timeZone":"Not/A_Zone","asOf":"2026-11-26T00:00:00Z","days":{}}', "timeZone must be an IANA time zone"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-02-30":{"commits":1,"pullRequests":0}}}', "invalid date '2026-02-30'"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-25":{"commits":-1,"pullRequests":0}}}', "non-negative integer"],
@@ -119,12 +123,27 @@ echo '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage
   return { profile, run };
 }
 
-test("finds the owner's profile checkout, in any case, or says how to get it", () => {
+test("finds the owner's profile checkout, in any case, only when it is ready for new counts", () => {
   const root = tempDir("profile-root");
-  expect(() => profileCheckout(root, ["a2f0/app"], "a2f0/matrix")).toThrow("does not manage the profile repository a2f0/a2f0");
-  expect(() => profileCheckout(root, ["A2F0/a2f0"], "a2f0/matrix")).toThrow("run bun run sync A2F0/a2f0 first");
+  const ready = () => undefined;
+  expect(() => profileCheckout(root, ["a2f0/app"], "a2f0/matrix", ready)).toThrow("does not manage the profile repository a2f0/a2f0");
+  expect(() => profileCheckout(root, ["A2F0/a2f0"], "a2f0/matrix", ready)).toThrow("run bun run sync A2F0/a2f0 first");
   mkdirSync(path.join(root, "checkouts", "a2f0"), { recursive: true });
-  expect(profileCheckout(root, ["a2f0/app", "A2F0/a2f0"], "a2f0/matrix")).toBe(path.join(root, "checkouts", "a2f0"));
+  expect(profileCheckout(root, ["a2f0/app", "A2F0/a2f0"], "a2f0/matrix", ready)).toBe(path.join(root, "checkouts", "a2f0"));
+  expect(() => profileCheckout(root, ["a2f0/a2f0"], "a2f0/matrix", () => "on branch feat/other")).toThrow(
+    "a2f0/a2f0 is not ready for new counts (on branch feat/other); return it to its updated default branch, or pass --profile",
+  );
+  // The real check finds a directory that is not a Git checkout not ready.
+  writeFileSync(
+    path.join(root, "matrix.json"),
+    JSON.stringify({ schemaVersion: 1, protocol: "ssh", discover: { owner: "a2f0", visibility: "public", exclude: [] }, repos: ["a2f0/a2f0"] }),
+  );
+  expect(() => profileCheckout(root, ["a2f0/a2f0"], "a2f0/matrix")).toThrow("a2f0/a2f0 is not ready for new counts");
+});
+
+test("only the README and contributions/ count as files a run wrote", () => {
+  expect(generatedChanges(" M README.md\n?? contributions/\n M contributions/commits.json\n M package.json\n?? docs/README.md\n")).toBe(3);
+  expect(generatedChanges("")).toBe(0);
 });
 
 test("the script backfills a new history, renders the profile, and then recounts only from its last day", SPAWNS, () => {

@@ -45,6 +45,13 @@ function invalidDay(days: object): string | undefined {
   return undefined;
 }
 
+/** A day after the local date of asOf, which no count could have reached. */
+function lateDay(days: object, asOf: string, timeZone: string): string | undefined {
+  const last = localDate(new Date(asOf), timeZone);
+  const late = Object.keys(days).find(date => date > last);
+  return late && `days.${late} is after the local date of asOf (${last})`;
+}
+
 function isTimeZone(timeZone: unknown): boolean {
   if (typeof timeZone !== "string" || timeZone === "") return false;
   try {
@@ -62,7 +69,7 @@ function invalidHistory(value: unknown): string | undefined {
   if (!isTimeZone(timeZone)) return "timeZone must be an IANA time zone";
   if (typeof asOf !== "string" || !ISO_INSTANT.test(asOf) || Number.isNaN(Date.parse(asOf))) return "asOf must be an ISO 8601 instant";
   if (typeof days !== "object" || days === null || Array.isArray(days)) return "days must be an object";
-  return invalidDay(days);
+  return invalidDay(days) ?? lateDay(days, asOf, timeZone as string);
 }
 
 export function parseHistory(text: string, file: string): History {
