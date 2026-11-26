@@ -458,29 +458,34 @@ They are runtime checks, not a requirement to add `.omp` files to every checkout
 ## Gemini CLI
 
 Install Gemini CLI with Homebrew, `brew install gemini-cli`, which brings its
-own Node. Do not install it, or any other agent CLI, with `npm install -g`
-under mise: the global lands in one Node version's prefix, so its mise shim
+own Node. Do not install it with `npm install -g` under mise: the global
+lands in one Node version's prefix, so its mise shim
 fails with "not provided by the active node" wherever another version is
 active, which is every checkout that pins its own. Remove such a copy with
 `mise exec node@<version> -- npm uninstall -g @google/gemini-cli`, then
 `mise reshim`, so the stale shim stops shadowing Homebrew's binary.
 
 Gemini reads `GEMINI.md` by default, so set its
-[context file names](https://geminicli.com/docs/cli/gemini-md/) once in
-`~/.gemini/settings.json`, instead of adding a `GEMINI.md` to any repository:
+[context file names](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/gemini-md.md)
+once in `~/.gemini/settings.json`; managed repositories carry no `GEMINI.md`,
+which the audit's `no-gemini-md` rule checks:
 
 ```json
 { "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }
 ```
 
 It discovers the managed `.agents/skills` as workspace
-[skills](https://geminicli.com/docs/cli/skills/), which it loads only in a
-[trusted folder](https://geminicli.com/docs/cli/trusted-folders/). Folder trust
-is on by default, and an untrusted workspace also skips project settings and
-MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
+[skills](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/skills.md),
+which it loads only in a
+[trusted folder](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/trusted-folders.md).
+Folder trust is on by default, and an untrusted workspace also skips project
+settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
 `~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
-checkout below it. Trust also loads a workspace's `.env`, so trust only clones
-you own. `gemini skills list` from a checkout confirms the managed skills, and
+checkout below it. A trusted workspace's `.env` loads into Gemini's
+environment, which every shell command it runs inherits, so a secret there can
+be printed. Keep secret values in the `.secrets` link that
+[secrets](secrets.md) describes, never in a `.env` Gemini can load.
+`gemini skills list` from a checkout confirms the managed skills, and
 `/memory show` in a session confirms `AGENTS.md` loaded. Global memories in
 `~/.gemini/GEMINI.md` apply to every repository, so keep project facts out of
 it.

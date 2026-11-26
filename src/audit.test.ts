@@ -118,11 +118,13 @@ describe("audit", () => {
       "AGENTS.md": null,
       "CLAUDE.md": "@AGENTS.md\n",
       "packages/web/CLAUDE.md": "notes\n",
+      "packages/api/GEMINI.md": "notes\n",
       ".gitignore": "/.DS_Store\n",
     });
     expect(failures(repo)).toMatchObject({
       "agents-md": "no tracked AGENTS.md at the root",
       "no-claude-md": "tracked CLAUDE.md, packages/web/CLAUDE.md",
+      "no-gemini-md": "tracked packages/api/GEMINI.md",
       "ds-store-ignored": "root .gitignore does not list .DS_Store",
       "output-capture": "no AGENTS.md for the Output capture section",
     });

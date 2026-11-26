@@ -26,6 +26,7 @@ first and check `branch` for checkouts that are not on their default branch.
 | `agents-md` | A tracked root `AGENTS.md` | [Onboarding](../AGENTS.md#onboarding-a-repository) step 4 |
 | `agents-md-size` | Every tracked `AGENTS.md`, at any depth, has at most 20,000 characters | [Agent guidance](tooling.md#agent-guidance) |
 | `no-claude-md` | No tracked `CLAUDE.md` at any depth | [Onboarding](../AGENTS.md#onboarding-a-repository) step 4 |
+| `no-gemini-md` | No tracked `GEMINI.md` at any depth | [Onboarding](../AGENTS.md#onboarding-a-repository) step 4 |
 | `ds-store-ignored` | The root `.gitignore` lists `.DS_Store` (or `**/.DS_Store`) | [Onboarding](../AGENTS.md#onboarding-a-repository) step 5 |
 | `agent-tool-pin` | An exact `@a2f0/agent-tool` pin no older than the supported minimum, `agent-tool.json`, and `.agent-tool-skills.json`; agent-tool itself is exempt | [Onboarding](../AGENTS.md#onboarding-a-repository) steps 2 and 3 |
 | `agent-tool-latest` | With `--remote`: the pin has trailed newer releases for under 7 days | [Dependency maintenance](dependency-upgrades.md) |

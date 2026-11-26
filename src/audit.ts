@@ -428,6 +428,15 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    id: "no-gemini-md",
+    summary: "No GEMINI.md; Gemini CLI reads AGENTS.md through its user settings",
+    source: ONBOARDING,
+    check: checkout => {
+      const files = checkout.tracked(":(glob)**/GEMINI.md");
+      return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
+    },
+  },
+  {
     id: "ds-store-ignored",
     summary: "The root .gitignore lists .DS_Store as a plain pattern",
     source: ONBOARDING,
