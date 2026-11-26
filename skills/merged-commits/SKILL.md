@@ -5,7 +5,7 @@ description: Count the original commits in pull requests merged across the matri
 
 # Merged commits
 
-Use the matrix workspace and its pinned Bun. The JavaScript helper reads
+Use the matrix workspace and its pinned Bun. The TypeScript helper reads
 `matrix.json`, resolves the workspace identity with `gh repo view`, and queries
 GitHub through the authenticated `gh` CLI. No clones, sync, checkout changes,
 or GitHub writes are needed. Do not print authentication tokens.
@@ -18,6 +18,7 @@ From the matrix root:
 bun run merged-commits today
 bun run merged-commits yesterday --timezone America/New_York
 bun run merged-commits 2026-11-05 --timezone America/New_York
+scripts/reports/mergedCommits.ts yesterday
 ```
 
 `today` is the default. Use the user's timezone when stated; otherwise keep
@@ -26,9 +27,11 @@ handles DST without assuming 24-hour days. Dates after the local current day,
 invalid dates, and unknown timezones fail. The report captures an `asOf`
 instant before querying and excludes later merges; today's count is partial.
 
-The helper is `scripts/count.js` beside this skill. Run it under Bun, not Node:
-it reuses matrix's TypeScript manifest and GitHub primitives. Keep its JSON
-visible, since these numbers are the requested result, not a noisy check.
+The report is `scripts/count.ts` beside this skill, with `day.ts` and
+`github.ts`. Its entrypoint is matrix's executable
+`scripts/reports/mergedCommits.ts`, which runs under Bun through its shebang
+from any directory. It reuses matrix's manifest and GitHub primitives. Keep its
+JSON visible, since these numbers are the requested result, not a noisy check.
 
 ## Interpret
 
@@ -72,6 +75,6 @@ of how the PRs actually merged.
 
 ## Ownership
 
-Matrix owns this skill and its JavaScript helpers; regression tests live in
+Matrix owns this skill and its TypeScript helpers; regression tests live in
 `src/mergedCommits.test.ts`. omp discovers `skills/` through the project config.
 Other harnesses can follow the link in `AGENTS.md`; no global install is needed.

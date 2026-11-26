@@ -10,6 +10,7 @@ matrix.json          Managed repositories and discovery settings
 checkouts/<name>/    One clone per repository (gitignored)
 src/                 The matrix CLI: sync, status, discover, audit, health, teardown, deploy-secrets, sweep
 skills/              matrix's own skills, such as merged-commits
+scripts/reports/     Executable reports, such as mergedCommits.ts
 scripts/secrets/     Backup entrypoint for ../matrix-secrets
 scripts/sentry/      Sentry MCP launcher for every harness
 scripts/testing/     The steps bun run check runs
@@ -80,9 +81,11 @@ and recurring sweep friction into one report of suggested next steps, meant to
 run on a schedule; see [health report](docs/health.md).
 
 `merged-commits` uses authenticated `gh` to read every selected PR's commits,
-without syncing or changing checkouts. It defaults to today in the machine's
-local timezone; for example, `bun run merged-commits yesterday --timezone
-America/New_York` selects the previous Eastern calendar day, including DST.
+without syncing or changing checkouts. `scripts/reports/mergedCommits.ts` is
+the same command as an executable, so it also runs without `bun run`. It
+defaults to today in the machine's local timezone; for example,
+`bun run merged-commits yesterday --timezone America/New_York` selects the
+previous Eastern calendar day, including DST.
 JSON includes per-PR evidence and distinct original commit counts per repository,
 plus comparisons with one squash commit or one additional merge commit per PR.
 Existing branch merge commits are already included; overlapping PR commits are

@@ -4,8 +4,6 @@
     "module": "Preserve",
     "moduleResolution": "Bundler",
     "types": ["bun"],
-    "allowJs": true,
-    "checkJs": true,
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -13,5 +11,5 @@
     "skipLibCheck": true,
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts", "skills/**/*.ts", "skills/**/*.js"]
+  "include": ["src/**/*.ts", "skills/**/*.ts", "scripts/**/*.ts"]
 }
