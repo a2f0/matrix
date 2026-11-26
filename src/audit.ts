@@ -61,6 +61,19 @@ function isProducer(checkout: Checkout): boolean {
   return checkout.packageJson?.name === AGENT_TOOL;
 }
 
+/** Where a profile repository, whose README is its owner's GitHub profile, keeps its Quick start. */
+const PROFILE_GUIDE = "docs/development.md";
+
+/**
+ * GitHub shows the README of the repository named after a user on that user's
+ * profile. Organizations keep theirs in `.github/profile/README.md`; this
+ * treats every `<owner>/<owner>` as a user's, which fits matrix's user owner.
+ */
+function isProfile(checkout: Checkout): boolean {
+  const [owner, name] = checkout.repo.toLowerCase().split("/");
+  return owner === name;
+}
+
 function compareVersions(left: string, right: string): number {
   const a = left.split(".").map(Number);
   const b = right.split(".").map(Number);
@@ -495,12 +508,13 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "readme-quick-start",
-    summary: "The README has a Quick start section",
+    summary: `The README has a Quick start section; a profile repository's ${PROFILE_GUIDE} has it instead`,
     source: "AGENTS.md#readme-files",
     check: checkout => {
-      const readme = checkout.read("README.md");
-      if (readme === undefined) return fail("no README.md");
-      return hasSection(readme, "Quick start") ? pass : fail("README.md has no Quick start section");
+      const file = isProfile(checkout) ? PROFILE_GUIDE : "README.md";
+      const guide = checkout.read(file);
+      if (guide === undefined) return fail(`no ${file}`);
+      return hasSection(guide, "Quick start") ? pass : fail(`${file} has no Quick start section`);
     },
   },
   {

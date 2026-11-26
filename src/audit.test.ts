@@ -326,6 +326,15 @@ describe("audit", () => {
     expect(readme("rule", { "README.md": "# demo\n\nOne\nparagraph\nQuick start\n---\n" })["readme-quick-start"]).toBe("README.md has no Quick start section");
   });
 
+  // a2f0/a2f0's README is the a2f0 GitHub profile.
+  test.each<[Record<string, string>, string | undefined]>([
+    [{ "README.md": "# a2f0\n\nHello\n", "docs/development.md": "# Development\n\n## Quick start\n" }, undefined],
+    [{ "README.md": "# a2f0\n\n## Quick start\n" }, "no docs/development.md"],
+    [{ "README.md": "# a2f0\n", "docs/development.md": "# Development\n" }, "docs/development.md has no Quick start section"],
+  ])("a profile repository's Quick start is checked in docs/development.md, not the profile README (%#)", (files, detail) => {
+    expect(readme("a2f0", files)).toEqual(detail ? { "readme-quick-start": detail } : {});
+  });
+
   test("accepts closed ATX headings and rejects agent instructions in a README", () => {
     expect(
       failures(
