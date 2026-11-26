@@ -489,19 +489,22 @@ It discovers the managed `.agents/skills` as workspace
 [skills](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/skills.md),
 which it loads only in a
 [trusted folder](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/trusted-folders.md).
-An untrusted workspace also skips project settings and MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
-`~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
-checkout below it, whatever branch or local edits it holds.
+An untrusted workspace also skips project settings and MCP servers.
+Trust each matrix clone with `TRUST_FOLDER` in `~/.gemini/trustedFolders.json`
+or the first-run dialog; the rule covers every checkout below it, whatever
+branch or local edits it holds.
 
 The audit sees only tracked files, and only when someone runs it. A PR
 branch's `.gemini/settings.json`, or an untracked one, can still run MCP
 servers, hooks, or discovery commands when Gemini starts in its directory.
 Review a branch you did not write in a separate clone outside the trusted
 folders, where Gemini runs untrusted and you read skills from
-`.agents/skills/<name>/SKILL.md`. Before starting Gemini on any other branch,
+`.agents/skills/<name>/SKILL.md`. In a trusted checkout, whenever a checkout,
+pull, or `sync` has changed what it holds since Gemini last started there,
 list its `.gemini/` and `.env` files, including untracked and ignored ones,
 with this command; it also searches ignored directories such as
-`node_modules`, so it takes a moment in a large checkout:
+`node_modules`, so it takes a moment in a large checkout. It covers only the
+checkout, not the parent directories the `.env` search below also walks:
 
 ```sh
 git ls-files --cached --others -- ':(glob)**/.gemini/**' ':(glob)**/.env'
