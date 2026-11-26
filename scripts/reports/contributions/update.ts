@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { localDate, onDates, selectRange } from "../../../skills/merged-commits/scripts/day";
@@ -26,24 +27,58 @@ Requires an authenticated gh CLI. Prints JSON; progress goes to stderr.
 
 const ROOT = path.resolve(import.meta.dir, "../../..");
 
-/** The files a run writes, which a rerun before they ship may find already changed. */
-const GENERATED = ["README.md", "contributions/"];
+/** Whether a run writes `file`: the README's grid section, or anything under contributions/. */
+function isGenerated(file: string): boolean {
+  return file === "README.md" || file.startsWith("contributions/");
+}
 
-/** How many `git status --porcelain` entries are files a run writes. */
-export function generatedChanges(porcelain: string): number {
-  const files = porcelain
-    .split("\n")
-    .filter(line => line !== "")
-    .map(line => line.slice(3));
-  return files.filter(file => GENERATED.some(generated => (generated.endsWith("/") ? file.startsWith(generated) : file === generated))).length;
+/** The space-separated field where each kind of version 2 porcelain entry starts its path. */
+const PATH_FIELD: Record<string, number> = { "1": 8, "2": 9, u: 10, "?": 1, "!": 1 };
+
+/**
+ * The checkout's changes, one entry per `bun run status` change, each listing
+ * its path and, for a rename, its original path. Version 2 porcelain never
+ * starts an entry with a space, which matters because matrix's Git helper
+ * trims output, and with -z paths arrive unquoted.
+ */
+export function statusChanges(dir: string): string[][] {
+  const fields = gitOutput(dir, ["status", "--porcelain=v2", "-z", "--untracked-files=normal", "--ignore-submodules=none"])
+    .split("\0")
+    .filter(field => field !== "");
+  const changes: string[][] = [];
+  for (let field = fields.shift(); field !== undefined; field = fields.shift()) {
+    const paths = [
+      field
+        .split(" ")
+        .slice(PATH_FIELD[field[0]!] ?? 1)
+        .join(" "),
+    ];
+    // A rename or copy is followed by its original path.
+    if (field.startsWith("2 ")) paths.push(fields.shift() ?? "");
+    changes.push(paths);
+  }
+  return changes;
 }
 
 /** Why a run must not write into a managed checkout, as `bun run status` would say, ignoring files a run writes. */
 function profileNotReady(root: string, repo: string, dir: string): string | undefined {
   const status = checkoutStatus(root, repo, cloneUrl(repo, loadManifest(root).protocol));
   if (status.ready || status.error) return status.error;
-  const porcelain = gitOutput(dir, ["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"]);
-  return notReady({ ...status, changes: (status.changes ?? 0) - generatedChanges(porcelain) });
+  const generated = statusChanges(dir).filter(paths => paths.every(isGenerated)).length;
+  return notReady({ ...status, changes: (status.changes ?? 0) - generated });
+}
+
+/**
+ * The Bun the checkout pins in .mise.toml, from mise's installs, as workspace
+ * guidance runs checkout commands; this Bun when the checkout pins none.
+ */
+export function pinnedBun(dir: string, installs = path.join(homedir(), ".local", "share", "mise", "installs")): string {
+  const config = path.join(dir, ".mise.toml");
+  const version = existsSync(config) ? /^\s*bun\s*=\s*"([^"]+)"/m.exec(readFileSync(config, "utf8"))?.[1] : undefined;
+  if (!version) return process.execPath;
+  const bun = path.join(installs, "bun", version, "bin", "bun");
+  if (!existsSync(bun)) throw new Error(`${dir} pins Bun ${version}, which mise has not installed; run mise install there first.`);
+  return bun;
 }
 
 /**
@@ -100,7 +135,7 @@ function sum(days: Iterable<DayCount>): DayCount {
 
 function render(profile: string) {
   // The profile repository owns its README; run its renderer with this Bun, its output on stderr.
-  const result = spawnSync(process.execPath, ["run", "contributions:render"], { cwd: profile, stdio: ["ignore", 2, 2] });
+  const result = spawnSync(pinnedBun(profile), ["run", "contributions:render"], { cwd: profile, stdio: ["ignore", 2, 2] });
   if (result.error) throw new Error(`Could not run bun in ${profile}: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`bun run contributions:render failed in ${profile} (exit ${result.status ?? result.signal}).`);
 }

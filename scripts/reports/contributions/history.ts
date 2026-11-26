@@ -67,7 +67,8 @@ function invalidHistory(value: unknown): string | undefined {
   const { schemaVersion, timeZone, asOf, days } = value as Record<string, unknown>;
   if (schemaVersion !== 1) return "schemaVersion must be 1";
   if (!isTimeZone(timeZone)) return "timeZone must be an IANA time zone";
-  if (typeof asOf !== "string" || !ISO_INSTANT.test(asOf) || Number.isNaN(Date.parse(asOf))) return "asOf must be an ISO 8601 instant";
+  if (typeof asOf !== "string" || !ISO_INSTANT.test(asOf) || !isDate(asOf.slice(0, 10)) || Number.isNaN(Date.parse(asOf)))
+    return "asOf must be an ISO 8601 instant";
   if (typeof days !== "object" || days === null || Array.isArray(days)) return "days must be an object";
   return invalidDay(days) ?? lateDay(days, asOf, timeZone as string);
 }

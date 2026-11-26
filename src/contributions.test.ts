@@ -3,10 +3,10 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { datesToCount, type History, parseHistory, recordCounts, serializeHistory } from "../scripts/reports/contributions/history";
-import { generatedChanges, profileCheckout } from "../scripts/reports/contributions/update";
+import { pinnedBun, profileCheckout, statusChanges } from "../scripts/reports/contributions/update";
 import { datesBetween } from "../skills/merged-commits/scripts/day";
 import { loadManifest } from "./manifest";
-import { SPAWNS, tempDir } from "./testFixtures";
+import { gitIn, gitInit, SPAWNS, tempDir } from "./testFixtures";
 
 const ROOT = path.resolve(import.meta.dir, "..");
 
@@ -87,6 +87,7 @@ test.each([
   ['{"schemaVersion":2}', "schemaVersion must be 1"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"soon","days":{}}', "asOf must be an ISO 8601 instant"],
   ['{"schemaVersion":1,"timeZone":"UTC","asOf":"Nov 26 2026","days":{}}', "asOf must be an ISO 8601 instant"],
+  ['{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-02-30T00:00:00Z","days":{}}', "asOf must be an ISO 8601 instant"],
   [
     '{"schemaVersion":1,"timeZone":"UTC","asOf":"2026-11-26T00:00:00Z","days":{"2026-11-27":{"commits":1,"pullRequests":0}}}',
     "days.2026-11-27 is after the local date of asOf (2026-11-26)",
@@ -141,9 +142,31 @@ test("finds the owner's profile checkout, in any case, only when it is ready for
   expect(() => profileCheckout(root, ["a2f0/a2f0"], "a2f0/matrix")).toThrow("a2f0/a2f0 is not ready for new counts");
 });
 
-test("only the README and contributions/ count as files a run wrote", () => {
-  expect(generatedChanges(" M README.md\n?? contributions/\n M contributions/commits.json\n M package.json\n?? docs/README.md\n")).toBe(3);
-  expect(generatedChanges("")).toBe(0);
+test("lists a checkout's changes by path, first entry included, with renames and unusual names", SPAWNS, () => {
+  const dir = tempDir("profile-status");
+  gitInit(dir);
+  for (const file of ["README.md", "package.json", "old name.md"]) writeFileSync(path.join(dir, file), `${file}\n`);
+  gitIn(dir, "add", ".");
+  gitIn(dir, "commit", "-q", "-m", "seed");
+  expect(statusChanges(dir)).toEqual([]);
+  // README.md sorts first, where a trimmed version 1 listing would lose its leading space.
+  writeFileSync(path.join(dir, "README.md"), "changed\n");
+  writeFileSync(path.join(dir, "package.json"), "{}\n");
+  mkdirSync(path.join(dir, "contributions"));
+  writeFileSync(path.join(dir, "contributions", "commits.json"), "{}\n");
+  gitIn(dir, "mv", "old name.md", 'new "name".md');
+  expect(statusChanges(dir)).toEqual([["README.md"], ['new "name".md', "old name.md"], ["package.json"], ["contributions/"]]);
+});
+
+test("runs the profile's render with the Bun its .mise.toml pins", () => {
+  const dir = tempDir("profile-bun");
+  const installs = tempDir("mise-installs");
+  expect(pinnedBun(dir, installs)).toBe(process.execPath);
+  writeFileSync(path.join(dir, ".mise.toml"), '[tools]\nbun = "9.9.9"\nshellcheck = "0.11.0"\n');
+  expect(() => pinnedBun(dir, installs)).toThrow("pins Bun 9.9.9, which mise has not installed; run mise install there first.");
+  mkdirSync(path.join(installs, "bun", "9.9.9", "bin"), { recursive: true });
+  writeFileSync(path.join(installs, "bun", "9.9.9", "bin", "bun"), "");
+  expect(pinnedBun(dir, installs)).toBe(path.join(installs, "bun", "9.9.9", "bin", "bun"));
 });
 
 test("the script backfills a new history, renders the profile, and then recounts only from its last day", SPAWNS, () => {
