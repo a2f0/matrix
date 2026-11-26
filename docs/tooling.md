@@ -455,6 +455,40 @@ These discovery and LSP details follow omp 18.17.0's
 [LSP](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/lsp-config.md) contracts.
 They are runtime checks, not a requirement to add `.omp` files to every checkout.
 
+## Gemini CLI
+
+Install Gemini CLI with Homebrew, `brew install gemini-cli`, which brings its
+own Node. Do not install it, or any other agent CLI, with `npm install -g`
+under mise: the global lands in one Node version's prefix, so its mise shim
+fails with "not provided by the active node" wherever another version is
+active, which is every checkout that pins its own. Remove such a copy with
+`mise exec node@<version> -- npm uninstall -g @google/gemini-cli`, then
+`mise reshim`, so the stale shim stops shadowing Homebrew's binary.
+
+Gemini reads `GEMINI.md` by default, so set its
+[context file names](https://geminicli.com/docs/cli/gemini-md/) once in
+`~/.gemini/settings.json`, instead of adding a `GEMINI.md` to any repository:
+
+```json
+{ "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }
+```
+
+It discovers the managed `.agents/skills` as workspace
+[skills](https://geminicli.com/docs/cli/skills/), which it loads only in a
+[trusted folder](https://geminicli.com/docs/cli/trusted-folders/). Folder trust
+is on by default, and an untrusted workspace also skips project settings and
+MCP servers. Trust each matrix clone with `TRUST_FOLDER` in
+`~/.gemini/trustedFolders.json` or the first-run dialog; the rule covers every
+checkout below it. Trust also loads a workspace's `.env`, so trust only clones
+you own. `gemini skills list` from a checkout confirms the managed skills, and
+`/memory show` in a session confirms `AGENTS.md` loaded. Global memories in
+`~/.gemini/GEMINI.md` apply to every repository, so keep project facts out of
+it.
+
+agent-tool generates no Gemini permission rules and has no Gemini reviewer
+adapter, so Gemini prompts before shell commands and cannot be `ship-pr`'s
+independent reviewer. These details follow Gemini CLI 0.71.1.
+
 ## State machines
 
 Implicit state machines are code that moves through modes without naming

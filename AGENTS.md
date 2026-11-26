@@ -11,10 +11,12 @@ branches, use conventional commits, and preserve unrelated edits. Do not
 force-push or add attribution footers. Do not create GitHub issues without an
 explicit request.
 
-Claude Code, Codex, OpenCode, Hermes, and omp read this file. Claude Code
-loads `.claude/skills`; Codex, OpenCode, and Hermes load `.agents/skills`;
-omp discovers both. Hermes requires `hermes skills trust`; otherwise read
-`.agents/skills/<name>/SKILL.md`. See [omp setup and LSP](docs/tooling.md#omp).
+Claude Code, Codex, OpenCode, Hermes, and omp read this file, and Gemini CLI
+does once [configured](docs/tooling.md#gemini-cli). Claude Code loads
+`.claude/skills`; Codex, OpenCode, Hermes, and Gemini load `.agents/skills`;
+omp discovers both. Hermes requires `hermes skills trust` and Gemini a trusted
+folder; otherwise read `.agents/skills/<name>/SKILL.md`. See
+[omp setup and LSP](docs/tooling.md#omp).
 Subagents lack this conversation; omp task subagents also omit `AGENTS.md`.
 Give them paths, explicit guidance-reading instructions, rules, and commands.
 
