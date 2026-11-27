@@ -22,9 +22,6 @@ export const MINIMUM_AGENT_TOOL = "0.1.21";
 /** Where `agent-tool permissions install` writes Gemini CLI rules, from agent-tool 0.1.78 on. */
 const GEMINI_POLICY = ".gemini/policies/agent-tool.toml";
 
-/** The harnesses a permissions manifest's scope can name, as agent-tool 0.1.78 records them. */
-const PERMISSION_HARNESSES = ["claude", "codex", "gemini"];
-
 /**
  * The Gemini policy the checkout's permissions manifest records, so `permissions check` keeps it
  * current; undefined without one, or below the release that generates it, where nothing checks it.
@@ -43,13 +40,14 @@ function generatesGeminiPolicy(checkout: Checkout): boolean {
 
 /**
  * How a permissions manifest's scope treats Gemini: no scope, as before agent-tool 0.1.78, whose
- * sync installs `all`, `all`, and a non-empty list of harnesses naming it cover it; a list without
- * it is a repository's recorded choice; any other value, which no release writes, is invalid.
+ * sync installs `all`, `all`, and a non-empty list of harness names naming it cover it; a list
+ * without it is a repository's recorded choice, whatever other harnesses a later release names;
+ * any other value, which no release writes, is invalid.
  */
 function geminiScope(scope: unknown): "covers" | "excludes" | "invalid" {
   if (scope === undefined || scope === "all") return "covers";
   const list: unknown[] | undefined = Array.isArray(scope) ? scope : undefined;
-  if (!list || list.length === 0 || !list.every(harness => typeof harness === "string" && PERMISSION_HARNESSES.includes(harness))) return "invalid";
+  if (!list || list.length === 0 || !list.every(harness => typeof harness === "string")) return "invalid";
   return list.includes("gemini") ? "covers" : "excludes";
 }
 
@@ -67,7 +65,7 @@ function geminiPolicyProblem(checkout: Checkout): string | undefined {
   if (!generatesGeminiPolicy(checkout)) return undefined;
   const scope = geminiScope(manifest.scope);
   if (scope === "invalid")
-    return `${file} records scope ${JSON.stringify(manifest.scope)}, which names no known harnesses; run agent-tool permissions install --apply`;
+    return `${file} records scope ${JSON.stringify(manifest.scope)}, which is neither all nor a list of harnesses; run agent-tool permissions install --apply`;
   if (scope === "covers" && (!recordedGeminiPolicy(checkout) || checkout.tracked(GEMINI_POLICY).length === 0))
     return `no committed ${GEMINI_POLICY} recorded in ${file}; run agent-tool permissions install --apply`;
   return undefined;

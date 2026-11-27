@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { envFilesAbove, geminiFiles, untrackedGeminiFiles } from "./geminiFiles";
 import { gitIn, gitInit, SPAWNS, tempDir } from "./testFixtures";
@@ -37,16 +37,27 @@ test(
     gitIn(repo, "commit", "-q", "-m", "init");
     // `.env` and `packages/web/.env` are ignored, the rest untracked; the committed policy is tracked.
     // A build tree's ignored files are skipped, but one Git does not ignore can hold source.
-    expect(untrackedGeminiFiles(repo)).toEqual([
-      ".env",
-      ".gemini/settings.json",
-      "GEMINI.md",
-      "packages/web/.env",
-      "packages/web/.gemini/commands/deploy.toml",
-      "scripts/build/GEMINI.md",
-    ]);
+    const listed = [".env", ".gemini/settings.json", "GEMINI.md", "packages/web/.env", "packages/web/.gemini/commands/deploy.toml", "scripts/build/GEMINI.md"];
+    expect(untrackedGeminiFiles(repo)).toEqual(listed);
     expect(untrackedGeminiFiles(repo, ["/packages/"])).toEqual([".env", ".gemini/settings.json", "GEMINI.md", "scripts/build/GEMINI.md"]);
     expect(() => untrackedGeminiFiles(tempDir("matrix-not-git"))).toThrow(/git ls-files failed/);
+    // A scanned folder's fsmonitor never runs, and an inherited GIT_DIR does not redirect the listing.
+    const marker = path.join(tempDir("matrix-fsmonitor"), "ran");
+    const monitor = path.join(path.dirname(marker), "fsmonitor.sh");
+    writeFileSync(monitor, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`, { mode: 0o755 });
+    gitIn(repo, "config", "core.fsmonitor", monitor);
+    const other = tempDir("matrix-other");
+    gitInit(other);
+    const inherited = process.env.GIT_DIR;
+    process.env.GIT_DIR = path.join(other, ".git");
+    try {
+      // Another repository's empty index would list the committed policy as untracked.
+      expect(untrackedGeminiFiles(repo)).toEqual(listed);
+    } finally {
+      if (inherited === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = inherited;
+    }
+    expect(existsSync(marker)).toBe(false);
   },
   SPAWNS,
 );
@@ -97,6 +108,15 @@ test(
       path.join(base, ".env"),
     ]);
     expect(unscanned).toEqual(["checkouts/broken"]);
+    // A workspace Git cannot list is named as `.`, and its checkouts are still scanned.
+    const loose = path.join(base, "loose"),
+      inside = path.join(loose, "checkouts", "demo");
+    mkdirSync(inside, { recursive: true });
+    gitInit(inside);
+    write(loose, ["checkouts/demo/GEMINI.md"]);
+    const partial = geminiFiles(loose, [inside], path.join(base, "home"));
+    expect(partial.files.filter(file => !file.startsWith("/") && !file.startsWith("~"))).toEqual(["checkouts/demo/GEMINI.md"]);
+    expect(partial.unscanned).toEqual(["."]);
   },
   SPAWNS,
 );

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, statfsSync, statSync, writeSync } from "node:fs";
+import { existsSync, lstatSync, statfsSync, writeSync } from "node:fs";
 import path from "node:path";
 import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
@@ -530,7 +530,8 @@ const COMMANDS = new Map<string, Handler>([
         // names one Git cannot list, as for a checkout whose status reports an error.
         geminiFiles: services.geminiFiles(root, [
           ...manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
-          ...unmanaged.map(entry => path.join(root, entry)).filter(entry => statSync(entry, { throwIfNoEntry: false })?.isDirectory()),
+          // A link is not followed, so health never walks a tree outside the workspace.
+          ...unmanaged.map(entry => path.join(root, entry)).filter(entry => lstatSync(entry, { throwIfNoEntry: false })?.isDirectory()),
         ]),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),

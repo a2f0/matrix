@@ -241,20 +241,22 @@ describe("audit", () => {
     expect(failures(untracked, ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
     // An older pin has no Gemini policy to generate yet: agent-tool-latest moves it, after its grace period.
     expect(failures(checkout("older"), ["harness-permissions"])).toEqual({});
-    // A list of harnesses without Gemini is the repository's choice.
-    expect(
-      failures(current("chosen", { ...manifest({ scope: ["claude", "codex"] }), ".gemini/policies/agent-tool.toml": null }), ["harness-permissions"]),
-    ).toEqual({});
+    // A list of harnesses without Gemini is the repository's choice, whatever harness a later release adds.
+    for (const [name, scope] of [
+      ["chosen", ["claude", "codex"]],
+      ["later", ["claude", "opencode"]],
+    ] as const)
+      expect(failures(current(name, { ...manifest({ scope }), ".gemini/policies/agent-tool.toml": null }), ["harness-permissions"])).toEqual({});
     // Any other scope, which no release writes, and an unreadable manifest at any pin, are named.
     for (const [name, scope] of [
       ["typo", "al"],
       ["single", "gemini"],
       ["empty", []],
-      ["unknown", ["claude", "opencode"]],
+      ["numbers", [1]],
       ["object", {}],
     ] as const)
       expect(failures(current(name, manifest({ ...recorded, scope })), ["harness-permissions"])).toEqual({
-        "harness-permissions": `.agent-tool-permissions.json records scope ${JSON.stringify(scope)}, which names no known harnesses; run agent-tool permissions install --apply`,
+        "harness-permissions": `.agent-tool-permissions.json records scope ${JSON.stringify(scope)}, which is neither all nor a list of harnesses; run agent-tool permissions install --apply`,
       });
     for (const repo of [current("broken", { ".agent-tool-permissions.json": "{" }), checkout("broken-older", { ".agent-tool-permissions.json": "[]" })])
       expect(failures(repo, ["harness-permissions"])).toEqual({

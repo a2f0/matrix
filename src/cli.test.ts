@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { MINIMUM_AGENT_TOOL, RULES } from "./audit";
 import { main, parseBaseHealthReport, parsePushGateReport, parseScreenshotLinks, type Services } from "./cli";
@@ -203,11 +203,12 @@ test("health suggests reviewing files Gemini CLI would load that no review sees,
   expect(report.geminiFiles).toEqual({ files: gemini, unscanned: [] });
   // Only checkouts on disk are scanned: a2f0/missing is not cloned.
   expect(scanned).toEqual([[path.join(root, "checkouts", "good")]]);
-  // One whose status reports an error is scanned, so the scan can name it, and so is an unmanaged folder, but not a file.
+  // One whose status reports an error is scanned, so the scan can name it, and so is an unmanaged folder, but not a file or a link.
   mkdirSync(path.join(root, "checkouts", "missing"), { recursive: true });
   writeFileSync(path.join(root, "checkouts", "missing", ".git"), "gitdir: /nonexistent\n");
   mkdirSync(path.join(root, "checkouts", "extra"), { recursive: true });
   writeFileSync(path.join(root, "checkouts", "notes.txt"), "x\n");
+  symlinkSync(tempDir("matrix-elsewhere"), path.join(root, "checkouts", "linked"));
   scanned.length = 0;
   expect(main(["health"], root, undefined, services)).toBe(0);
   expect(scanned).toEqual([["good", "missing", "extra"].map(name => path.join(root, "checkouts", name))]);

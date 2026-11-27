@@ -6,10 +6,10 @@
 // only tracked files, so health lists the untracked and ignored ones in the workspace and each
 // checkout, and the `.env` files above them, by name only. Removing one stays a person's decision.
 
-import { spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { gitUntrimmed } from "./git";
 
 /**
  * Installed and build trees, whose ignored files are skipped, since no session starts there and
@@ -64,14 +64,9 @@ function excluding(patterns: string[]): string[] {
   return patterns.flatMap(pattern => ["-x", pattern]);
 }
 
+/** One listing, through the hardened Git, so a scanned folder's fsmonitor and hooks never run. */
 function listFiles(directory: string, options: string[]): string[] {
-  const result = spawnSync("git", ["ls-files", "-z", ...options, "--", ...GEMINI_PATHSPECS], {
-    cwd: directory,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: LIST_TIMEOUT_MS,
-  });
-  if (result.error) throw new Error(`git ls-files could not run in ${directory}: ${result.error.message}`);
+  const result = gitUntrimmed(directory, ["ls-files", "-z", ...options, "--", ...GEMINI_PATHSPECS], LIST_TIMEOUT_MS);
   if (result.status !== 0) throw new Error(`git ls-files failed in ${directory}: ${result.stderr.trim()}`);
   return result.stdout.split("\0").filter(Boolean);
 }
@@ -107,16 +102,17 @@ export interface GeminiScan {
 /**
  * Every file Gemini CLI would load that no review sees: untracked and ignored ones in the
  * workspace (outside `checkouts/`) and in each checkout, relative to the workspace, then the
- * `.env` files above them. A checkout Git cannot list is reported, not allowed to hide the rest.
+ * `.env` files above them. A folder Git cannot list, the workspace as `.`, is reported, not
+ * allowed to hide the rest.
  */
 export function geminiFiles(root: string, checkouts: string[], home = homedir()): GeminiScan {
-  const files = untrackedGeminiFiles(root, ["/checkouts/"]);
+  const files: string[] = [];
   const unscanned: string[] = [];
-  for (const directory of checkouts) {
+  for (const [directory, skip] of [[root, ["/checkouts/"]] as const, ...checkouts.map(directory => [directory, []] as const)]) {
     try {
-      files.push(...untrackedGeminiFiles(directory).map(file => path.relative(root, path.join(directory, file))));
+      files.push(...untrackedGeminiFiles(directory, [...skip]).map(file => path.relative(root, path.join(directory, file))));
     } catch {
-      unscanned.push(path.relative(root, directory));
+      unscanned.push(path.relative(root, directory) || ".");
     }
   }
   return { files: [...files, ...envFilesAbove(root, home)], unscanned };
