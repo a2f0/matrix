@@ -117,6 +117,16 @@ test(
     const partial = geminiFiles(loose, [inside], path.join(base, "home"));
     expect(partial.files.filter(file => !file.startsWith("/") && !file.startsWith("~"))).toEqual(["checkouts/demo/GEMINI.md"]);
     expect(partial.unscanned).toEqual(["."]);
+    // A listing that outlasts its limit is named too, as a large ignored folder outside the build trees would.
+    const bin = tempDir("matrix-slow-git");
+    writeFileSync(path.join(bin, "git"), "#!/bin/sh\nexec sleep 5\n", { mode: 0o755 });
+    const inherited = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${inherited}`;
+    try {
+      expect(geminiFiles(root, [checkout], path.join(base, "home"), 200).unscanned).toEqual([".", "checkouts/demo"]);
+    } finally {
+      process.env.PATH = inherited;
+    }
   },
   SPAWNS,
 );

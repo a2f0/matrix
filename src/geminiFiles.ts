@@ -13,13 +13,16 @@ import { gitUntrimmed } from "./git";
 
 /**
  * Installed and build trees, whose ignored files are skipped, since no session starts there and
- * their search would take a while in a large checkout: packages, a Python `.venv`, Ruby's `vendor`, CocoaPods, Xcode's DerivedData,
- * Gradle, Cargo's `target`, Expo, Dart, Terraform, Wrangler, Python caches, and build,
- * test-coverage, cache, and framework output.
+ * their search would take a while in a large checkout: packages, Python environments, Ruby's
+ * `vendor`, CocoaPods, Xcode's DerivedData, Gradle, Cargo's `target`, Expo, Dart, Terraform,
+ * Wrangler, Python caches, and build, test, cache, and framework output.
  */
 const BUILD_TREES = [
   "node_modules",
   ".venv",
+  "venv",
+  "env",
+  ".direnv",
   "vendor",
   "Pods",
   "DerivedData",
@@ -31,13 +34,22 @@ const BUILD_TREES = [
   ".wrangler",
   "__pycache__",
   ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".tox",
   "build",
   "dist",
   "out",
   "coverage",
+  "playwright-report",
+  "test-results",
   ".cache",
+  ".parcel-cache",
+  ".nx",
   ".next",
   ".astro",
+  ".nuxt",
+  ".output",
   ".svelte-kit",
   ".turbo",
 ];
@@ -54,9 +66,9 @@ const LIST_TIMEOUT_MS = 60_000;
  * outside BUILD_TREES. Both use `-x` patterns, which Git does not descend into, unlike exclude
  * pathspecs; without `--exclude-standard`, the second pass reads no `.gitignore`.
  */
-export function untrackedGeminiFiles(directory: string, skip: string[] = []): string[] {
-  const unignored = listFiles(directory, ["--others", "--exclude-standard", ...excluding(skip)]);
-  const outsideTrees = listFiles(directory, ["--others", ...excluding([...BUILD_TREES.map(tree => `${tree}/`), ...skip])]);
+export function untrackedGeminiFiles(directory: string, skip: string[] = [], timeout = LIST_TIMEOUT_MS): string[] {
+  const unignored = listFiles(directory, ["--others", "--exclude-standard", ...excluding(skip)], timeout);
+  const outsideTrees = listFiles(directory, ["--others", ...excluding([...BUILD_TREES.map(tree => `${tree}/`), ...skip])], timeout);
   return [...new Set([...unignored, ...outsideTrees])].sort();
 }
 
@@ -65,8 +77,8 @@ function excluding(patterns: string[]): string[] {
 }
 
 /** One listing, through the hardened Git, so a scanned folder's fsmonitor and hooks never run. */
-function listFiles(directory: string, options: string[]): string[] {
-  const result = gitUntrimmed(directory, ["ls-files", "-z", ...options, "--", ...GEMINI_PATHSPECS], LIST_TIMEOUT_MS);
+function listFiles(directory: string, options: string[], timeout: number): string[] {
+  const result = gitUntrimmed(directory, ["ls-files", "-z", ...options, "--", ...GEMINI_PATHSPECS], timeout);
   if (result.status !== 0) throw new Error(`git ls-files failed in ${directory}: ${result.stderr.trim()}`);
   return result.stdout.split("\0").filter(Boolean);
 }
@@ -105,12 +117,12 @@ export interface GeminiScan {
  * `.env` files above them. A folder Git cannot list, the workspace as `.`, is reported, not
  * allowed to hide the rest.
  */
-export function geminiFiles(root: string, checkouts: string[], home = homedir()): GeminiScan {
+export function geminiFiles(root: string, checkouts: string[], home = homedir(), timeout = LIST_TIMEOUT_MS): GeminiScan {
   const files: string[] = [];
   const unscanned: string[] = [];
   for (const [directory, skip] of [[root, ["/checkouts/"]] as const, ...checkouts.map(directory => [directory, []] as const)]) {
     try {
-      files.push(...untrackedGeminiFiles(directory, [...skip]).map(file => path.relative(root, path.join(directory, file))));
+      files.push(...untrackedGeminiFiles(directory, [...skip], timeout).map(file => path.relative(root, path.join(directory, file))));
     } catch {
       unscanned.push(path.relative(root, directory) || ".");
     }

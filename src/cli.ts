@@ -530,7 +530,7 @@ const COMMANDS = new Map<string, Handler>([
         // names one Git cannot list, as for a checkout whose status reports an error.
         geminiFiles: services.geminiFiles(root, [
           ...manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
-          // A link is not followed, so health never walks a tree outside the workspace.
+          // An unmanaged link is not followed, so health walks only folders sync cloned or someone put here.
           ...unmanaged.map(entry => path.join(root, entry)).filter(entry => lstatSync(entry, { throwIfNoEntry: false })?.isDirectory()),
         ]),
         ...(remote && {
