@@ -1,6 +1,5 @@
 import type { Audit } from "./audit";
 import { type CheckoutStatus, notReady, staleInstalls } from "./checkouts";
-import type { GeminiScan } from "./geminiFiles";
 import type { GitTransport } from "./gitTransport";
 import type { Recurrence, Retro } from "./sweepRetro";
 import { leftoverRepos, type Teardown } from "./teardown";
@@ -57,13 +56,6 @@ export interface HealthInputs {
   readonly screenshots?: ScreenshotLinks;
   /** Personal skills named like a skill agent-tool manages here, which override that managed copy; `~/...` under the home directory. */
   readonly personalSkills?: string[];
-  /**
-   * Untracked or ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini CLI can load from the
-   * workspace and its checkouts, and tracked ones in an unmanaged checkout, relative to the
-   * workspace, then `.env` files above them, and the folders the scan could not list; absent when
-   * the scan itself fails.
-   */
-  readonly geminiFiles?: GeminiScan;
 }
 
 export interface Health {
@@ -98,7 +90,6 @@ export interface Health {
   };
   readonly screenshots?: ScreenshotLinks;
   readonly personalSkills?: string[];
-  readonly geminiFiles?: GeminiScan;
   readonly sweeps: {
     readonly read: string[];
     readonly recurring: Array<Pick<Recurrence, "kind" | "cause" | "repos" | "sweeps">>;
@@ -119,8 +110,8 @@ function gib(bytes: number): string {
 }
 
 /**
- * Suggestions about this machine: disk space, leftover processes, Git transport, personal skills
- * that override managed ones, and files Gemini CLI can load that no review sees.
+ * Suggestions about this machine: disk space, leftover processes, Git transport, and personal
+ * skills that override managed ones.
  */
 function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string[]): string[] {
   const suggestions: string[] = [];
@@ -138,29 +129,7 @@ function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string
     suggestions.push(
       `Remove ${plural(personal.length, "personal skill")} that ${personal.length === 1 ? "overrides" : "override"} agent-tool's managed copies (${list(personal)}); see docs/tooling.md#shared-skills.`,
     );
-  return [...suggestions, ...geminiSuggestions(inputs.geminiFiles)];
-}
-
-/** The folders a Gemini scan could not list, with the workspace's `.` by name. */
-function unscannedNames(unscanned: readonly string[]): string[] {
-  return unscanned.map(folder => (folder === "." ? "the workspace" : folder));
-}
-
-/** Files Gemini CLI can load that no review sees, from a session started at or below them, then folders the scan could not list. */
-function geminiSuggestions(scan: GeminiScan | undefined): string[] {
-  const { files = [], unscanned = [] } = scan ?? {};
-  return [
-    ...(files.length > 0
-      ? [
-          `Review ${plural(files.length, "file")} Gemini CLI can load that no review sees (${list(files)}): keep secrets in \`.secrets\` and remove what nothing needs; see docs/tooling.md#gemini-cli.`,
-        ]
-      : []),
-    ...(unscanned.length > 0
-      ? [
-          `Find out why Git could not list files in ${list(unscannedNames(unscanned))}, such as a broken repository, a link health does not follow, or a large ignored folder that outlasted health's one-minute limit, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.`,
-        ]
-      : []),
-  ];
+  return suggestions;
 }
 
 /** A red default branch blocks shipping there, so its repair comes with the checkout's state. */
@@ -256,7 +225,6 @@ export function assessHealth(inputs: HealthInputs): Health {
     ...(inputs.defaultBranches && { defaultBranches: groupDefaultBranches(inputs.defaultBranches) }),
     ...(inputs.screenshots && { screenshots: inputs.screenshots }),
     ...(inputs.personalSkills && { personalSkills: inputs.personalSkills }),
-    ...(inputs.geminiFiles && { geminiFiles: inputs.geminiFiles }),
     sweeps: {
       read: inputs.retro.sweeps,
       recurring: inputs.retro.recurring.map(({ kind, cause, repos, sweeps }) => ({ kind, cause, repos, sweeps })),
@@ -330,18 +298,13 @@ function personalSkillsLine(paths: string[]): string {
   return `- Personal skills: ${list(paths)} ${paths.length === 1 ? "overrides a managed skill" : "override managed skills"}.`;
 }
 
-function geminiFilesLine({ files, unscanned }: GeminiScan): string {
-  const found = files.length === 0 ? "none outside review" : `${list(files)} outside review`;
-  return `- Gemini files: ${found}${unscanned.length === 0 ? "" : `; could not scan ${list(unscannedNames(unscanned))}`}.`;
-}
-
 function sweepsLine(sweeps: Health["sweeps"]): string {
   return `- Sweeps: ${plural(sweeps.read.length, "ledger")} read; ${sweeps.recurring.length === 0 ? "no unresolved recurring friction" : sweeps.recurring.map(group => `${group.kind} \`${group.cause}\` in ${group.repos.length}`).join(", ")}${sweeps.resolved.length > 0 ? ` (${sweeps.resolved.length} resolved)` : ""}; ${sweeps.unfinished.length === 0 ? "nothing unfinished" : `${sweeps.unfinished.length} unfinished`}.`;
 }
 
 /** The report as Markdown, for a person, a scheduled run's message, or an issue. */
 export function markdownHealth(health: Health, at = new Date()): string {
-  const { checkouts, audit, discovery, disk, running, git, defaultBranches, screenshots, personalSkills, geminiFiles, sweeps } = health;
+  const { checkouts, audit, discovery, disk, running, git, defaultBranches, screenshots, personalSkills, sweeps } = health;
   const lines = [
     "# Matrix health",
     "",
@@ -356,7 +319,6 @@ export function markdownHealth(health: Health, at = new Date()): string {
     defaultBranchesLine(defaultBranches),
     ...(screenshots ? [screenshotsLine(screenshots)] : []),
     ...(personalSkills ? [personalSkillsLine(personalSkills)] : []),
-    ...(geminiFiles ? [geminiFilesLine(geminiFiles)] : []),
     sweepsLine(sweeps),
     "",
     "## Next steps",

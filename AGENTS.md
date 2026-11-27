@@ -11,11 +11,12 @@ branches, use conventional commits, and preserve unrelated edits. Do not
 force-push or add attribution footers. Do not create GitHub issues without an
 explicit request.
 
-Claude Code, Codex, OpenCode, Hermes, and omp read this file, and Gemini CLI
-does once [configured](docs/tooling.md#gemini-cli). Claude Code loads
-`.claude/skills`; Codex, OpenCode, Hermes, and Gemini load `.agents/skills`;
-omp discovers both. Hermes requires `hermes skills trust` and Gemini a trusted
-folder; otherwise read `.agents/skills/<name>/SKILL.md`. See
+Antigravity CLI (`agy`), Claude Code, Codex, OpenCode, Hermes, and omp read
+this file natively. Claude Code loads `.claude/skills`; `agy`, Codex, OpenCode,
+and Hermes load `.agents/skills`; omp discovers both (and `.agents/skills.json`
+exposes `skills/` to `agy`). Hermes requires `hermes skills trust`; otherwise
+read `.agents/skills/<name>/SKILL.md`. See
+[Antigravity CLI](docs/tooling.md#antigravity-cli-agy) and
 [omp setup and LSP](docs/tooling.md#omp).
 Subagents lack this conversation; omp task subagents also omit `AGENTS.md`.
 Give them paths, explicit guidance-reading instructions, rules, and commands.
@@ -109,9 +110,9 @@ Before reporting work done, `bun run teardown` must pass.
    `merge.requireStrictBaseFreshness` recognizes only rulesets; leave it false
    where protection is classic.
 4. Keep guidance in `AGENTS.md` alone; managed repositories have no
-   `CLAUDE.md`, `GEMINI.md`, or Gemini CLI files in `.gemini/` beyond
-   agent-tool's generated policy. Codex and OpenCode read it, and so does
-   Claude Code when no `CLAUDE.md` exists: its
+   `CLAUDE.md`, `GEMINI.md`, or `.gemini/` files beyond Gemini Code Assist's
+   root `config.yaml` and `styleguide.md`. `agy`, Codex, and OpenCode read
+   `AGENTS.md`, and so does Claude Code when no `CLAUDE.md` exists: its
    `instructionFiles` setting defaults to `claude-md-or-agents-md` (verified
    with 2.1.292). Reviewers may still ask to restore a `CLAUDE.md` import; cite
    that default and decline the finding.

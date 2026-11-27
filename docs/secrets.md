@@ -101,6 +101,7 @@ Register it once per harness by absolute path from the primary clone, so no
 harness configuration holds the value:
 
 ```sh
+agy mcp add sentry -- ~/github/matrix/scripts/sentry/mcp.sh
 claude mcp add --scope user sentry -- ~/github/matrix/scripts/sentry/mcp.sh
 codex mcp add sentry -- ~/github/matrix/scripts/sentry/mcp.sh
 hermes mcp add sentry --command ~/github/matrix/scripts/sentry/mcp.sh

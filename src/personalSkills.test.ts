@@ -46,11 +46,15 @@ test("reports personal skills named like a managed skill, whatever holds the nam
   mkdirSync(path.join(dir, ".agents", "skills"), { recursive: true });
   // A link into a clone whose copy was deleted still overrides the managed skill's name.
   symlinkSync(path.join(dir, "gone", "space-cleanup"), path.join(dir, ".agents", "skills", "space-cleanup"));
+  mkdirSync(path.join(dir, ".gemini", "antigravity-cli", "skills", "ship-pr"), { recursive: true });
+  mkdirSync(path.join(dir, ".gemini", "skills", "reset"), { recursive: true });
   mkdirSync(path.join(dir, ".claude", "skills", "seo-optimization"));
   symlinkSync(path.join(dir, "elsewhere"), path.join(dir, ".claude2", "skills", "take-screenshots"));
   mkdirSync(path.join(dir, ".claude2", "skills", "my-own"));
-  expect(shadowingSkills(["seo-optimization", "space-cleanup", "take-screenshots"], dir, {})).toEqual([
+  expect(shadowingSkills(["reset", "seo-optimization", "ship-pr", "space-cleanup", "take-screenshots"], dir, {})).toEqual([
     "~/.agents/skills/space-cleanup",
+    "~/.gemini/antigravity-cli/skills/ship-pr",
+    "~/.gemini/skills/reset",
     "~/.claude/skills/seo-optimization",
     "~/.claude2/skills/take-screenshots",
   ]);
