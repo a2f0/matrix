@@ -503,14 +503,17 @@ Review a branch you did not write in a separate clone outside the trusted
 folders, where Gemini runs untrusted and you read skills from
 `.agents/skills/<name>/SKILL.md`. In a trusted checkout, whenever a checkout,
 pull, or `sync` has changed what it holds since Gemini last started there, run
-`bun run health`. It lists, by name only, the untracked and ignored
-`GEMINI.md`, `.gemini/`, and `.env` files Gemini would load from the workspace
-and every checkout folder, managed or not (outside `node_modules` and other
-installed or build trees), the `.env` files above them, and any checkout Git
-could not list, and suggests reviewing them. Tracked files reach a checkout
-only through a reviewed pull request: the audit flags a tracked `GEMINI.md` or
-`.gemini/` file, and that review covers a tracked `.env`, which Gemini loads
-into every shell command it runs.
+`bun run health`. It lists, by name only and in any case, the untracked and
+ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini would load from the
+workspace and every checkout folder, managed or not (outside ignored
+`node_modules` and other installed or build trees), the tracked ones in an
+unmanaged folder, the `.env` files above them (absolute outside the home
+directory), and any folder it could not list, did not follow because it is a
+link, or did not reach within its one-minute limit, and suggests reviewing
+them. In a managed checkout, tracked files arrive only through a reviewed pull
+request: the audit flags a tracked `GEMINI.md` or `.gemini/` file, and that
+review covers a tracked `.env`, which Gemini loads into every shell command it
+runs.
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the

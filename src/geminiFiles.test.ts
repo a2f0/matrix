@@ -29,6 +29,7 @@ test(
       "notes.env",
       "GEMINI.md",
       "packages/web/build/.env",
+      "packages/api/.ENV",
       "scripts/build/GEMINI.md",
       "dist/GEMINI.md",
     ]);
@@ -37,7 +38,16 @@ test(
     gitIn(repo, "commit", "-q", "-m", "init");
     // `.env` and `packages/web/.env` are ignored, the rest untracked; the committed policy is tracked.
     // A build tree's ignored files are skipped, but one Git does not ignore can hold source.
-    const listed = [".env", ".gemini/settings.json", "GEMINI.md", "packages/web/.env", "packages/web/.gemini/commands/deploy.toml", "scripts/build/GEMINI.md"];
+    // Names match in any case, as macOS's default file system does.
+    const listed = [
+      ".env",
+      ".gemini/settings.json",
+      "GEMINI.md",
+      "packages/api/.ENV",
+      "packages/web/.env",
+      "packages/web/.gemini/commands/deploy.toml",
+      "scripts/build/GEMINI.md",
+    ];
     expect(untrackedGeminiFiles(repo)).toEqual(listed);
     expect(untrackedGeminiFiles(repo, ["/packages/"])).toEqual([".env", ".gemini/settings.json", "GEMINI.md", "scripts/build/GEMINI.md"]);
     expect(() => untrackedGeminiFiles(tempDir("matrix-not-git"))).toThrow(/git ls-files failed/);
@@ -100,7 +110,7 @@ test(
     const broken = path.join(root, "checkouts", "broken");
     mkdirSync(broken, { recursive: true });
     writeFileSync(path.join(broken, ".git"), "gitdir: /nonexistent\n");
-    const { files, unscanned } = geminiFiles(root, [broken, checkout], path.join(base, "home"));
+    const { files, unscanned } = geminiFiles(root, { managed: [broken, checkout], unmanaged: [] }, path.join(base, "home"));
     expect(files.filter(file => !file.startsWith("/") || file.startsWith(base))).toEqual([
       ".gemini/settings.json",
       "checkouts/demo/.env",
@@ -114,17 +124,31 @@ test(
     mkdirSync(inside, { recursive: true });
     gitInit(inside);
     write(loose, ["checkouts/demo/GEMINI.md"]);
-    const partial = geminiFiles(loose, [inside], path.join(base, "home"));
+    const partial = geminiFiles(loose, { managed: [inside], unmanaged: [] }, path.join(base, "home"));
     expect(partial.files.filter(file => !file.startsWith("/") && !file.startsWith("~"))).toEqual(["checkouts/demo/GEMINI.md"]);
     expect(partial.unscanned).toEqual(["."]);
+    // An unmanaged clone's committed files load too, and no audit covers them, so they are listed as well.
+    const clone = path.join(root, "checkouts", "clone");
+    mkdirSync(clone, { recursive: true });
+    gitInit(clone);
+    write(clone, [".gemini/settings.json", "GEMINI.md"]);
+    gitIn(clone, "add", ".");
+    gitIn(clone, "commit", "-q", "-m", "init");
+    const unmanagedScan = geminiFiles(root, { managed: [], unmanaged: [clone] }, path.join(base, "home"));
+    expect(unmanagedScan.files.filter(file => file.startsWith("checkouts/"))).toEqual(["checkouts/clone/.gemini/settings.json", "checkouts/clone/GEMINI.md"]);
+    expect(geminiFiles(root, { managed: [clone], unmanaged: [] }, path.join(base, "home")).files.filter(file => file.startsWith("checkouts/"))).toEqual([]);
     // A linked checkout, and every checkout inside a linked checkouts/, is named without being followed.
     const linked = path.join(base, "linked");
     mkdirSync(linked, { recursive: true });
     symlinkSync(checkout, path.join(root, "checkouts", "link"));
     symlinkSync(path.join(root, "checkouts"), path.join(linked, "checkouts"));
     gitInit(linked);
-    expect(geminiFiles(root, [path.join(root, "checkouts", "link")], path.join(base, "home")).unscanned).toEqual(["checkouts/link"]);
-    expect(geminiFiles(linked, [path.join(linked, "checkouts", "demo")], path.join(base, "home")).unscanned).toEqual(["checkouts/demo"]);
+    expect(geminiFiles(root, { managed: [], unmanaged: [path.join(root, "checkouts", "link")] }, path.join(base, "home")).unscanned).toEqual([
+      "checkouts/link",
+    ]);
+    expect(geminiFiles(linked, { managed: [path.join(linked, "checkouts", "demo")], unmanaged: [] }, path.join(base, "home")).unscanned).toEqual([
+      "checkouts/demo",
+    ]);
     // A listing that outlasts the scan's limit is named too, as a large ignored folder outside the build trees
     // would be, and so is every folder left after it, without another listing.
     const bin = tempDir("matrix-slow-git");
@@ -132,7 +156,7 @@ test(
     const inherited = process.env.PATH;
     process.env.PATH = `${bin}${path.delimiter}${inherited}`;
     try {
-      expect(geminiFiles(root, [checkout], path.join(base, "home"), 200).unscanned).toEqual([".", "checkouts/demo"]);
+      expect(geminiFiles(root, { managed: [checkout], unmanaged: [] }, path.join(base, "home"), 200).unscanned).toEqual([".", "checkouts/demo"]);
     } finally {
       process.env.PATH = inherited;
     }

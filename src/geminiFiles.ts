@@ -58,8 +58,12 @@ const BUILD_TREES = [
   ".svelte-kit",
   ".turbo",
 ];
-/** `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents, and `.env` files at any depth. */
-const GEMINI_PATHSPECS = [":(glob)**/GEMINI.md", ":(glob)**/.gemini/**", ":(glob)**/.env"];
+/**
+ * `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents,
+ * and `.env` files at any depth, in any case, since Gemini opens them by name and macOS's default
+ * file system matches `.ENV` or `gemini.md` too.
+ */
+const GEMINI_PATHSPECS = [":(glob,icase)**/GEMINI.md", ":(glob,icase)**/.gemini/**", ":(glob,icase)**/.env"];
 
 /** How long one listing, and the whole scan, may take before what they did not list is reported as unscanned. */
 const LIST_TIMEOUT_MS = 30_000;
@@ -80,6 +84,11 @@ export function untrackedGeminiFiles(directory: string, skip: string[] = [], dea
 
 function excluding(patterns: string[]): string[] {
   return patterns.flatMap(pattern => ["-x", pattern]);
+}
+
+/** Tracked files under `directory` that Gemini CLI would load, which only review sees, relative to it. */
+function trackedGeminiFiles(directory: string, deadline = Date.now() + LIST_TIMEOUT_MS): string[] {
+  return listFiles(directory, ["--cached"], deadline);
 }
 
 /** One listing, through the hardened Git, so a scanned folder's fsmonitor and hooks never run, within its limit and `deadline`. */
@@ -113,6 +122,15 @@ export function envFilesAbove(root: string, homeDirectory = homedir()): string[]
   return files.filter(file => existsSync(file)).map(name);
 }
 
+/**
+ * The checkout folders a scan covers: managed ones, whose tracked files the audit checks, and the
+ * rest, such as another clone under `checkouts/`, whose tracked files nothing else reports.
+ */
+export interface CheckoutFolders {
+  readonly managed: readonly string[];
+  readonly unmanaged: readonly string[];
+}
+
 /** What a scan found, and the checkouts, relative to the workspace, that Git could not list. */
 export interface GeminiScan {
   readonly files: string[];
@@ -121,22 +139,28 @@ export interface GeminiScan {
 
 /**
  * Every file Gemini CLI would load that no review sees: untracked and ignored ones in the
- * workspace (outside `checkouts/`) and in each checkout, relative to the workspace, then the
- * `.env` files above them. A folder Git cannot list, the workspace as `.`, is reported, not
+ * workspace (outside `checkouts/`) and in each checkout, and tracked ones in an unmanaged
+ * checkout, which no audit covers, relative to the workspace, then the `.env` files above them. A folder Git cannot list, the workspace as `.`, is reported, not
  * allowed to hide the rest, and so is every folder the scan's `budget` in milliseconds leaves and
  * every checkout that is a link or sits in a linked folder, which the scan does not follow.
  */
-export function geminiFiles(root: string, checkouts: string[], home = homedir(), budget = SCAN_BUDGET_MS): GeminiScan {
+export function geminiFiles(root: string, folders: CheckoutFolders, home = homedir(), budget = SCAN_BUDGET_MS): GeminiScan {
   const deadline = Date.now() + budget;
   const files: string[] = [];
   const unscanned: string[] = [];
-  for (const [directory, skip] of [[root, ["/checkouts/"]] as const, ...checkouts.map(directory => [directory, []] as const)]) {
+  const scans = [
+    { directory: root, skip: ["/checkouts/"], tracked: false },
+    ...folders.managed.map(directory => ({ directory, skip: [], tracked: false })),
+    ...folders.unmanaged.map(directory => ({ directory, skip: [], tracked: true })),
+  ];
+  for (const { directory, skip, tracked } of scans) {
     if (directory !== root && !ownFolder(directory)) {
       unscanned.push(path.relative(root, directory));
       continue;
     }
     try {
-      files.push(...untrackedGeminiFiles(directory, [...skip], deadline).map(file => path.relative(root, path.join(directory, file))));
+      const found = [...untrackedGeminiFiles(directory, skip, deadline), ...(tracked ? trackedGeminiFiles(directory, deadline) : [])];
+      files.push(...[...new Set(found)].sort().map(file => path.relative(root, path.join(directory, file))));
     } catch {
       unscanned.push(path.relative(root, directory) || ".");
     }

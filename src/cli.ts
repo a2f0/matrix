@@ -4,7 +4,7 @@ import path from "node:path";
 import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
-import { type GeminiScan, geminiFiles } from "./geminiFiles";
+import { type CheckoutFolders, type GeminiScan, geminiFiles } from "./geminiFiles";
 import { type Gh, runGh } from "./gh";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DefaultBranchHealth, type DiskSpace, markdownHealth, type ScreenshotLinks } from "./health";
@@ -84,7 +84,7 @@ export interface Services {
   /** Personal skills on this machine named like a skill the workspace's agent-tool manages; undefined when unreadable. */
   personalSkills(root: string): string[] | undefined;
   /** Untracked or ignored files Gemini CLI would load from the workspace and these checkouts, `.env` files above them, and the checkouts Git could not list; undefined when the workspace is unreadable. */
-  geminiFiles(root: string, checkouts: string[]): GeminiScan | undefined;
+  geminiFiles(root: string, folders: CheckoutFolders): GeminiScan | undefined;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -278,10 +278,10 @@ const SERVICES: Services = {
       return undefined;
     }
   },
-  geminiFiles: (root, checkouts) => {
+  geminiFiles: (root, folders) => {
     // A scan Git cannot finish leaves the field out rather than claiming nothing is there.
     try {
-      return geminiFiles(root, checkouts);
+      return geminiFiles(root, folders);
     } catch {
       return undefined;
     }
@@ -529,13 +529,10 @@ const COMMANDS = new Map<string, Handler>([
         // Every checkout folder on disk, managed or not, since folder trust covers them all; the scan
         // names one Git cannot list, as for a checkout whose status reports an error, or a link it
         // does not follow. A file under checkouts/ is no folder a session starts in.
-        geminiFiles: services.geminiFiles(
-          root,
-          [
-            ...manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
-            ...unmanaged.map(entry => path.join(root, entry)),
-          ].filter(entry => !lstatSync(entry, { throwIfNoEntry: false })?.isFile()),
-        ),
+        geminiFiles: services.geminiFiles(root, {
+          managed: manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
+          unmanaged: unmanaged.map(entry => path.join(root, entry)).filter(entry => !lstatSync(entry, { throwIfNoEntry: false })?.isFile()),
+        }),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
           defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),

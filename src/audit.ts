@@ -79,6 +79,7 @@ function geminiPolicyProblem(checkout: Checkout): string | undefined {
   if (scope === "excludes") return undefined;
   if (object(manifest.gemini)?.file !== GEMINI_POLICY || checkout.tracked(GEMINI_POLICY).length === 0)
     return `no committed ${GEMINI_POLICY} recorded in ${file}; run agent-tool permissions install --apply`;
+  if (!checkout.exists(GEMINI_POLICY)) return `${GEMINI_POLICY} is committed but missing from the checkout; restore it with git restore`;
   if (!recordedGeminiPolicy(checkout, manifest))
     return `${GEMINI_POLICY} differs from the sha256 ${file} records; move the edit aside and run agent-tool permissions install --apply`;
   return undefined;
@@ -497,7 +498,7 @@ export const RULES: readonly Rule[] = [
       // and agent-tool permissions check, which it requires CI to run, keeps the content current.
       const generated = recordedGeminiPolicy(checkout, permissionsManifest(checkout));
       const files = checkout
-        .tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**")
+        .tracked(":(glob,icase)**/GEMINI.md", ":(glob,icase)**/.gemini/**")
         .filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file) && file !== generated);
       return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
     },

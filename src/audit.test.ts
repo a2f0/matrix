@@ -177,6 +177,10 @@ describe("audit", () => {
     expect(failures(current("nested-policy", { "packages/web/.gemini/policies/agent-tool.toml": "x\n" }), ["no-gemini-config"])).toEqual({
       "no-gemini-config": "tracked packages/web/.gemini/policies/agent-tool.toml",
     });
+    // Gemini opens these by name, so on macOS's default file system a name in another case loads too.
+    expect(failures(current("other-case", { "docs/gemini.md": "x\n", "packages/api/.Gemini/settings.json": "{}\n" }), ["no-gemini-config"])).toEqual({
+      "no-gemini-config": "tracked docs/gemini.md, packages/api/.Gemini/settings.json",
+    });
   });
 
   test("allows Gemini Code Assist review config only in the root .gemini/", () => {
@@ -253,6 +257,12 @@ describe("audit", () => {
     mkdirSync(policies, { recursive: true });
     writeFileSync(path.join(policies, "agent-tool.toml"), "x\n");
     expect(failures(untracked, ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
+    // A committed policy deleted from the checkout is named as missing, not edited.
+    const deleted = current("deleted-policy");
+    rmSync(path.join(root, "checkouts", "deleted-policy", ".gemini", "policies", "agent-tool.toml"));
+    expect(failures(deleted, ["harness-permissions"])).toEqual({
+      "harness-permissions": ".gemini/policies/agent-tool.toml is committed but missing from the checkout; restore it with git restore",
+    });
     // A policy edited after agent-tool wrote it no longer matches its recorded sha256.
     const edited = current("edited-policy", { ".gemini/policies/agent-tool.toml": '[[rule]]\ndecision = "allow"\n' });
     expect(failures(edited, ["no-gemini-config", "harness-permissions"])).toEqual({
