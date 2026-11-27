@@ -208,9 +208,14 @@ describe("audit", () => {
     expect(failures(missing, ["harness-permissions"])["harness-permissions"]).toBe(
       "no .codex/rules/agent-tool.rules; run agent-tool permissions install --apply; neither the agents:check script nor a workflow runs agent-tool permissions check",
     );
-    // Rules from a release before Gemini's lack its policy, or its record in the manifest.
-    const gemini =
-      "no .gemini/policies/agent-tool.toml recorded in .agent-tool-permissions.json; run agent-tool permissions install --apply with agent-tool 0.1.78 or later";
+    // From agent-tool 0.1.78, which generates it, a scope covering Gemini needs its committed, recorded policy.
+    const gemini = "no committed .gemini/policies/agent-tool.toml recorded in .agent-tool-permissions.json; run agent-tool permissions install --apply";
+    const current = {
+      "package.json": JSON.stringify({
+        scripts: { "agents:check": "agent-tool skills check && agent-tool permissions check" },
+        devDependencies: { "@a2f0/agent-tool": "0.1.78" },
+      }),
+    };
     for (const [name, files] of [
       ["no-policy", { ".gemini/policies/agent-tool.toml": null }],
       ["no-record", { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }) }],
@@ -220,13 +225,17 @@ describe("audit", () => {
       ],
       ["listed", { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: ["claude", "gemini"] }) }],
     ] as const)
-      expect(failures(checkout(name, files), ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
-    // A scope that leaves Gemini out is the repository's recorded choice, and a missing manifest is named once.
-    const chosen = checkout("chosen", {
-      ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: ["claude", "codex"] }),
-      ".gemini/policies/agent-tool.toml": null,
-    });
-    expect(failures(chosen, ["harness-permissions"])).toEqual({});
+      expect(failures(checkout(name, { ...current, ...files }), ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
+    // An older pin has no Gemini policy to generate yet: agent-tool-latest moves it, after its grace period.
+    expect(failures(checkout("older", { ".gemini/policies/agent-tool.toml": null }), ["harness-permissions"])).toEqual({});
+    // A scope that leaves Gemini out, or names no Gemini scope, is the repository's choice, and a missing manifest is named once.
+    for (const [name, scope] of [
+      ["chosen", ["claude", "codex"]],
+      ["single", "claude"],
+    ] as const) {
+      const files = { ...current, ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope }), ".gemini/policies/agent-tool.toml": null };
+      expect(failures(checkout(name, files), ["harness-permissions"])).toEqual({});
+    }
     expect(failures(checkout("no-manifest", { ".agent-tool-permissions.json": null }), ["harness-permissions"])).toEqual({
       "harness-permissions": "no .agent-tool-permissions.json; run agent-tool permissions install --apply",
     });

@@ -33,17 +33,18 @@ const BUILD_TREES = [
   ".svelte-kit",
   ".turbo",
 ];
-/** `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents, and `.env` files at any depth, outside BUILD_TREES. */
-const GEMINI_PATHSPECS = [
-  ":(glob)**/GEMINI.md",
-  ":(glob)**/.gemini/**",
-  ":(glob)**/.env",
-  ...BUILD_TREES.map(directory => `:(exclude,glob)**/${directory}/**`),
-];
+/** `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents, and `.env` files at any depth. */
+const GEMINI_PATHSPECS = [":(glob)**/GEMINI.md", ":(glob)**/.gemini/**", ":(glob)**/.env"];
 
-/** Untracked and ignored files under `directory` that Gemini CLI would load, relative to it; `exclude` names more pathspecs to skip. */
-export function untrackedGeminiFiles(directory: string, exclude: string[] = []): string[] {
-  const result = spawnSync("git", ["ls-files", "--others", "-z", "--", ...GEMINI_PATHSPECS, ...exclude.map(pattern => `:(exclude)${pattern}`)], {
+/**
+ * Untracked and ignored files under `directory` that Gemini CLI would load, relative to it, outside
+ * BUILD_TREES and the directories `skip` names as gitignore patterns, such as `/checkouts/`. These
+ * are `-x` patterns, which Git does not descend into, unlike exclude pathspecs; without
+ * `--exclude-standard` Git reads no `.gitignore`, so ignored files are still listed.
+ */
+export function untrackedGeminiFiles(directory: string, skip: string[] = []): string[] {
+  const patterns = [...BUILD_TREES.map(tree => `${tree}/`), ...skip].flatMap(pattern => ["-x", pattern]);
+  const result = spawnSync("git", ["ls-files", "--others", "-z", ...patterns, "--", ...GEMINI_PATHSPECS], {
     cwd: directory,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
@@ -85,7 +86,7 @@ export interface GeminiScan {
  * `.env` files above them. A checkout Git cannot list is reported, not allowed to hide the rest.
  */
 export function geminiFiles(root: string, checkouts: string[], home = homedir()): GeminiScan {
-  const files = untrackedGeminiFiles(root, ["checkouts/**"]);
+  const files = untrackedGeminiFiles(root, ["/checkouts/"]);
   const unscanned: string[] = [];
   for (const directory of checkouts) {
     try {

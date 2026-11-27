@@ -607,9 +607,9 @@ user's own rules. Those classes are left to the user's mode, and the guide's
 auto-mode block makes the classifier hold them until the user asks. Package
 scripts are not classified, so `bun run` and `agent:run` keep the harness
 default. `bun run audit --rule harness-permissions` reports repositories that
-lack the files or the check, and a manifest whose scope covers Gemini without
-its recorded policy; a scope that lists harnesses without Gemini is a
-repository's choice.
+lack the files or the check, and, from a pin of agent-tool 0.1.78, a manifest
+whose scope covers Gemini without its committed, recorded policy; a scope that
+lists harnesses without Gemini is a repository's choice.
 
 ## Shared skills
 

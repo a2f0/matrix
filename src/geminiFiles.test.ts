@@ -41,7 +41,7 @@ test(
       "packages/web/.env",
       "packages/web/.gemini/commands/deploy.toml",
     ]);
-    expect(untrackedGeminiFiles(repo, ["packages/**"])).toEqual([".env", ".gemini/settings.json", "GEMINI.md"]);
+    expect(untrackedGeminiFiles(repo, ["/packages/"])).toEqual([".env", ".gemini/settings.json", "GEMINI.md"]);
     expect(() => untrackedGeminiFiles(tempDir("matrix-not-git"))).toThrow(/git ls-files failed/);
   },
   SPAWNS,
