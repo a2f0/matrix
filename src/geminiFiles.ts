@@ -11,14 +11,18 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 /**
- * `.gemini/` contents and `.env` files at any depth, outside installed and generated trees such as
- * `node_modules`, a Python `.venv`, CocoaPods, Xcode's DerivedData, and Next.js output, where no
- * session starts and whose search would take a while in a large checkout.
+ * `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents,
+ * and `.env` files at any depth, outside installed and build trees such as `node_modules`, a
+ * Python `.venv`, CocoaPods, Xcode's DerivedData, Gradle, Cargo's `target`, and `build`, `dist`,
+ * `.next`, and `.turbo` output, where no session starts and whose search would take a while in
+ * a large checkout.
  */
+const BUILD_TREES = ["node_modules", ".venv", "Pods", "DerivedData", ".gradle", "target", "build", "dist", ".next", ".turbo"];
 const GEMINI_PATHSPECS = [
+  ":(glob)**/GEMINI.md",
   ":(glob)**/.gemini/**",
   ":(glob)**/.env",
-  ...["node_modules", ".venv", "Pods", "DerivedData", ".next"].map(directory => `:(exclude,glob)**/${directory}/**`),
+  ...BUILD_TREES.map(directory => `:(exclude,glob)**/${directory}/**`),
 ];
 
 /** Untracked and ignored files under `directory` that Gemini CLI would load, relative to it; `exclude` names more pathspecs to skip. */

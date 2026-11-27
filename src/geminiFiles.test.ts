@@ -27,20 +27,28 @@ test(
       "packages/web/node_modules/pkg/.env",
       "src/.envrc",
       "notes.env",
+      "GEMINI.md",
+      "packages/web/build/.env",
     ]);
     writeFileSync(path.join(repo, ".gitignore"), ".env\nnode_modules/\n");
     gitIn(repo, "add", ".gitignore", ".gemini/policies/agent-tool.toml");
     gitIn(repo, "commit", "-q", "-m", "init");
     // `.env` and `packages/web/.env` are ignored, the rest untracked; the committed policy is tracked.
-    expect(untrackedGeminiFiles(repo)).toEqual([".env", ".gemini/settings.json", "packages/web/.env", "packages/web/.gemini/commands/deploy.toml"]);
-    expect(untrackedGeminiFiles(repo, ["packages/**"])).toEqual([".env", ".gemini/settings.json"]);
+    expect(untrackedGeminiFiles(repo)).toEqual([
+      ".env",
+      ".gemini/settings.json",
+      "GEMINI.md",
+      "packages/web/.env",
+      "packages/web/.gemini/commands/deploy.toml",
+    ]);
+    expect(untrackedGeminiFiles(repo, ["packages/**"])).toEqual([".env", ".gemini/settings.json", "GEMINI.md"]);
     expect(() => untrackedGeminiFiles(tempDir("matrix-not-git"))).toThrow(/git ls-files failed/);
   },
   SPAWNS,
 );
 
 test("finds the .env files Gemini's upward search reaches above the workspace, nearest first, by home-relative name", () => {
-  // A linked home resolves too, so files under it show once, as \`~/...\`.
+  // A linked home resolves too, so files under it show once, as ~/...
   // A link to the workspace resolves first, as Gemini starts from its real working directory.
   const base = realpathSync(tempDir("matrix-above"));
   const root = path.join(base, "github", "matrix"),

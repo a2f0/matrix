@@ -503,12 +503,12 @@ Review a branch you did not write in a separate clone outside the trusted
 folders, where Gemini runs untrusted and you read skills from
 `.agents/skills/<name>/SKILL.md`. In a trusted checkout, whenever a checkout,
 pull, or `sync` has changed what it holds since Gemini last started there, run
-`bun run health`. It lists, by name only, the untracked and ignored `.gemini/`
-and `.env` files Gemini would load from the workspace and every checkout
-(outside `node_modules` and other installed trees), the `.env` files above
-them, and any checkout Git could not list, and suggests reviewing them. The
-audit covers tracked `.gemini/` files, and pull request review a tracked
-`.env`.
+`bun run health`. It lists, by name only, the untracked and ignored
+`GEMINI.md`, `.gemini/`, and `.env` files Gemini would load from the workspace
+and every managed checkout (outside `node_modules` and other installed or
+build trees), the `.env` files above them, and any checkout Git could not
+list, and suggests reviewing them. The audit covers tracked `GEMINI.md` and
+`.gemini/` files, and pull request review a tracked `.env`.
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
@@ -527,8 +527,9 @@ agent-tool generates Gemini rules that allow its routine commands in the
 ([harness permissions](#harness-permissions)); other shell commands, and
 routine ones with variables, substitution, parentheses, or braces, still ask,
 so a scoped title such as `pr open "fix(api): x"` prompts. Gemini asks once,
-when a session starts, to accept a new or changed policy file. agent-tool has no Gemini reviewer adapter, so
-Gemini cannot be `ship-pr`'s independent reviewer. These details follow Gemini
+when a session starts, to accept a new or changed policy file. agent-tool has
+no Gemini reviewer adapter, so Gemini cannot be `ship-pr`'s independent
+reviewer. These details follow Gemini
 CLI 0.71.1.
 
 ## State machines
