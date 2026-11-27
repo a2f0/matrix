@@ -6,7 +6,7 @@
 // only tracked files, so health lists the untracked and ignored ones in the workspace and each
 // checkout, and the `.env` files above them, by name only. Removing one stays a person's decision.
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { gitUntrimmed } from "./git";
@@ -62,8 +62,8 @@ const BUILD_TREES = [
 const GEMINI_PATHSPECS = [":(glob)**/GEMINI.md", ":(glob)**/.gemini/**", ":(glob)**/.env"];
 
 /** How long one listing, and the whole scan, may take before what they did not list is reported as unscanned. */
-const LIST_TIMEOUT_MS = 60_000;
-const SCAN_BUDGET_MS = 180_000;
+const LIST_TIMEOUT_MS = 30_000;
+const SCAN_BUDGET_MS = 60_000;
 
 /**
  * Untracked and ignored files under `directory` that Gemini CLI would load, relative to it, outside
@@ -82,7 +82,7 @@ function excluding(patterns: string[]): string[] {
   return patterns.flatMap(pattern => ["-x", pattern]);
 }
 
-/** One listing, through the hardened Git, so a scanned folder's fsmonitor and hooks never run, within a minute and `deadline`. */
+/** One listing, through the hardened Git, so a scanned folder's fsmonitor and hooks never run, within its limit and `deadline`. */
 function listFiles(directory: string, options: string[], deadline: number): string[] {
   const remaining = deadline - Date.now();
   if (remaining <= 0) throw new Error(`no time left to list ${directory}`);
@@ -123,13 +123,18 @@ export interface GeminiScan {
  * Every file Gemini CLI would load that no review sees: untracked and ignored ones in the
  * workspace (outside `checkouts/`) and in each checkout, relative to the workspace, then the
  * `.env` files above them. A folder Git cannot list, the workspace as `.`, is reported, not
- * allowed to hide the rest, and so is every folder the scan's `budget` in milliseconds leaves.
+ * allowed to hide the rest, and so is every folder the scan's `budget` in milliseconds leaves and
+ * every checkout that is a link or sits in a linked folder, which the scan does not follow.
  */
 export function geminiFiles(root: string, checkouts: string[], home = homedir(), budget = SCAN_BUDGET_MS): GeminiScan {
   const deadline = Date.now() + budget;
   const files: string[] = [];
   const unscanned: string[] = [];
   for (const [directory, skip] of [[root, ["/checkouts/"]] as const, ...checkouts.map(directory => [directory, []] as const)]) {
+    if (directory !== root && !ownFolder(directory)) {
+      unscanned.push(path.relative(root, directory));
+      continue;
+    }
     try {
       files.push(...untrackedGeminiFiles(directory, [...skip], deadline).map(file => path.relative(root, path.join(directory, file))));
     } catch {
@@ -137,4 +142,10 @@ export function geminiFiles(root: string, checkouts: string[], home = homedir(),
     }
   }
   return { files: [...files, ...envFilesAbove(root, home)], unscanned };
+}
+
+/** A real folder in a real parent, neither a link nor inside a linked folder such as a linked `checkouts/`. */
+function ownFolder(directory: string): boolean {
+  const real = (entry: string) => lstatSync(entry, { throwIfNoEntry: false })?.isDirectory() === true;
+  return real(path.dirname(directory)) && real(directory);
 }

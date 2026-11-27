@@ -19,8 +19,9 @@ personal skills that override agent-tool's managed copies
 ([shared skills](tooling.md#shared-skills)), untracked or ignored `GEMINI.md`,
 `.gemini/`, and `.env` files Gemini CLI would load from the workspace or any
 checkout folder, managed or not, `.env` files above them (absolute outside the
-home directory), and folders Git could not list for them
-([Gemini CLI](tooling.md#gemini-cli)), checkouts that are not ready, red
+home directory), and folders Git could not list for them, links it does not
+follow, or what its one-minute limit left ([Gemini CLI](tooling.md#gemini-cli)),
+checkouts that are not ready, red
 default branches ([base freshness](tooling.md#base-freshness)), stale installs,
 clones not linked to the [screenshot store](artifacts.md),
 repositories to onboard or that discovery lost, failing audit rules, recurring

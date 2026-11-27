@@ -117,6 +117,14 @@ test(
     const partial = geminiFiles(loose, [inside], path.join(base, "home"));
     expect(partial.files.filter(file => !file.startsWith("/") && !file.startsWith("~"))).toEqual(["checkouts/demo/GEMINI.md"]);
     expect(partial.unscanned).toEqual(["."]);
+    // A linked checkout, and every checkout inside a linked checkouts/, is named without being followed.
+    const linked = path.join(base, "linked");
+    mkdirSync(linked, { recursive: true });
+    symlinkSync(checkout, path.join(root, "checkouts", "link"));
+    symlinkSync(path.join(root, "checkouts"), path.join(linked, "checkouts"));
+    gitInit(linked);
+    expect(geminiFiles(root, [path.join(root, "checkouts", "link")], path.join(base, "home")).unscanned).toEqual(["checkouts/link"]);
+    expect(geminiFiles(linked, [path.join(linked, "checkouts", "demo")], path.join(base, "home")).unscanned).toEqual(["checkouts/demo"]);
     // A listing that outlasts the scan's limit is named too, as a large ignored folder outside the build trees
     // would be, and so is every folder left after it, without another listing.
     const bin = tempDir("matrix-slow-git");

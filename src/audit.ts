@@ -493,8 +493,8 @@ export const RULES: readonly Rule[] = [
     check: checkout => {
       // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews,
       // and agent-tool's generated policy is allowed where its permissions manifest records it under a scope
-      // covering Gemini. Its content is agent-tool permissions check's to verify, which harness-permissions
-      // requires CI to run.
+      // covering Gemini and its bytes still match the recorded sha256; harness-permissions names an edited one,
+      // and agent-tool permissions check, which it requires CI to run, keeps the content current.
       const generated = recordedGeminiPolicy(checkout, permissionsManifest(checkout));
       const files = checkout
         .tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**")

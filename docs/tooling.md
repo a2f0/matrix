@@ -609,10 +609,18 @@ user's own rules. Those classes are left to the user's mode, and the guide's
 auto-mode block makes the classifier hold them until the user asks. Package
 scripts are not classified, so `bun run` and `agent:run` keep the harness
 default. `bun run audit --rule harness-permissions` reports repositories that
-lack the files or the check, and, from a pin of agent-tool 0.1.78, a manifest
-whose scope covers Gemini without its committed, recorded policy; a scope that
-lists harnesses without Gemini is a repository's choice, and any other scope is
-reported, as is a manifest that is not a JSON object at any pin.
+lack the files or the check. It also reports a manifest that is not a JSON
+object, at any pin, and, from a pin of agent-tool 0.1.78, which generates the
+Gemini policy:
+
+- a scope that is neither `all` nor a list of harness names;
+- a scope covering Gemini (`all`, a list naming it, or none) without a
+  committed `.gemini/policies/agent-tool.toml` the manifest records;
+- that policy edited after agent-tool wrote it, so its bytes no longer match
+  the recorded sha256.
+
+A scope that lists harnesses without Gemini is a repository's choice.
+`no-gemini-config` allows the policy only where none of these applies.
 
 ## Shared skills
 

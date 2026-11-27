@@ -82,15 +82,15 @@ export function gitInit(directory: string): void {
   cpSync(template, path.join(directory, ".git"), { recursive: true });
 }
 
+/** The Gemini policy a fixture pinned at agent-tool 0.1.78 or later commits, and the manifest entry recording it. */
+const GEMINI_FIXTURE_POLICY = '[[rule]]\ntoolName = "run_shell_command"\ncommandRegex = \'agent-tool doctor( |")\'\ndecision = "allow"\npriority = 0\n';
+export const GEMINI_FIXTURE_RECORD = { file: ".gemini/policies/agent-tool.toml", sha256: createHash("sha256").update(GEMINI_FIXTURE_POLICY).digest("hex") };
+
 /**
  * A checkout meeting every audit standard, pinned to `agentTool`, at
  * `directory` with an SSH origin named after it. `files` override or, with
  * null, delete the defaults. Everything is staged, not committed.
  */
-/** The Gemini policy a fixture pinned at agent-tool 0.1.78 or later commits, and the manifest entry recording it. */
-const GEMINI_FIXTURE_POLICY = '[[rule]]\ntoolName = "run_shell_command"\ncommandRegex = \'agent-tool doctor( |")\'\ndecision = "allow"\npriority = 0\n';
-export const GEMINI_FIXTURE_RECORD = { file: ".gemini/policies/agent-tool.toml", sha256: createHash("sha256").update(GEMINI_FIXTURE_POLICY).digest("hex") };
-
 export function checkoutFixture(directory: string, agentTool: string, files: Record<string, string | null> = {}): void {
   const name = path.basename(directory);
   if (!/^\d+\.\d+\.\d+$/.test(agentTool)) throw new Error(`checkoutFixture needs an exact agent-tool version, not ${agentTool}`);

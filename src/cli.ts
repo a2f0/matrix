@@ -527,14 +527,14 @@ const COMMANDS = new Map<string, Handler>([
         screenshots: services.screenshotLinks(root),
         personalSkills: services.personalSkills(root),
         // Every checkout folder on disk, managed or not, since folder trust covers them all; the scan
-        // names one Git cannot list, as for a checkout whose status reports an error. Links are not
-        // followed, so health walks only the workspace's own tree; status and the unmanaged list name them.
+        // names one Git cannot list, as for a checkout whose status reports an error, or a link it
+        // does not follow. A file under checkouts/ is no folder a session starts in.
         geminiFiles: services.geminiFiles(
           root,
           [
             ...manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
             ...unmanaged.map(entry => path.join(root, entry)),
-          ].filter(ownFolder),
+          ].filter(entry => !lstatSync(entry, { throwIfNoEntry: false })?.isFile()),
         ),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
@@ -597,10 +597,4 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
   const handler = COMMANDS.get(command);
   if (!handler) throw new Error(`Unknown command '${command}'. Run matrix --help.`);
   return handler(args, { root, manifest, gh, services, output: value => json(services, value) });
-}
-
-/** A real folder under a real `checkouts/`, neither a link nor inside a linked folder. */
-function ownFolder(directory: string): boolean {
-  const real = (entry: string) => lstatSync(entry, { throwIfNoEntry: false })?.isDirectory() === true;
-  return real(path.dirname(directory)) && real(directory);
 }
