@@ -609,7 +609,8 @@ scripts are not classified, so `bun run` and `agent:run` keep the harness
 default. `bun run audit --rule harness-permissions` reports repositories that
 lack the files or the check, and, from a pin of agent-tool 0.1.78, a manifest
 whose scope covers Gemini without its committed, recorded policy; a scope that
-lists harnesses without Gemini is a repository's choice.
+lists harnesses without Gemini is a repository's choice, and any other scope is
+reported.
 
 ## Shared skills
 

@@ -56,11 +56,11 @@ test("finds the .env files Gemini's upward search reaches above the workspace, n
   mkdirSync(root, { recursive: true });
   symlinkSync(root, path.join(base, "link"));
   write(base, ["github/matrix/checkouts/.env", "github/.gemini/.env", "github/.env", ".env", "home/.gemini/.env", "home/.env", "github/matrix/.env"]);
-  const inFixture = (files: string[]) => files.filter(file => file.startsWith(base) || file.startsWith("~"));
+  const inFixture = (files: string[]) => files.filter(file => file.startsWith(base) || file.startsWith("~") || file.startsWith("checkouts/"));
   symlinkSync(home, path.join(base, "home-link"));
   expect(inFixture(envFilesAbove(path.join(base, "link"), path.join(base, "home-link")))).toEqual(inFixture(envFilesAbove(path.join(base, "link"), home)));
   expect(inFixture(envFilesAbove(path.join(base, "link"), home))).toEqual([
-    path.join(root, "checkouts", ".env"),
+    "checkouts/.env",
     path.join(base, "github", ".gemini", ".env"),
     path.join(base, "github", ".env"),
     path.join(base, ".env"),

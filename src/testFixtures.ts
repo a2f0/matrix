@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import path from "node:path";
+import { compareVersions, GEMINI_POLICY_RELEASE } from "./packageJson";
 
 const temporary: string[] = [];
 
@@ -87,9 +88,7 @@ export function gitInit(directory: string): void {
  */
 export function checkoutFixture(directory: string, agentTool: string, files: Record<string, string | null> = {}): void {
   const name = path.basename(directory);
-  // agent-tool 0.1.78 is the first release that generates a Gemini policy.
-  const [major = 0, minor = 0, patch = 0] = agentTool.split(".").map(Number);
-  const generatesGemini = major > 0 || minor > 1 || (minor === 1 && patch >= 78);
+  const generatesGemini = compareVersions(agentTool, GEMINI_POLICY_RELEASE) >= 0;
   const all: Record<string, string | null> = {
     "AGENTS.md": GUIDANCE,
     "README.md": README,

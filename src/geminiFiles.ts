@@ -14,7 +14,8 @@ import path from "node:path";
 /**
  * Installed and build trees, where no session starts and whose search would take a while in a
  * large checkout: packages, a Python `.venv`, Ruby's `vendor`, CocoaPods, Xcode's DerivedData,
- * Gradle, Cargo's `target`, Expo, and build, test-coverage, cache, and framework output.
+ * Gradle, Cargo's `target`, Expo, Dart, Terraform, Wrangler, Python caches, and build,
+ * test-coverage, cache, and framework output.
  */
 const BUILD_TREES = [
   "node_modules",
@@ -25,12 +26,18 @@ const BUILD_TREES = [
   ".gradle",
   "target",
   ".expo",
+  ".dart_tool",
+  ".terraform",
+  ".wrangler",
+  "__pycache__",
+  ".pytest_cache",
   "build",
   "dist",
   "out",
   "coverage",
   ".cache",
   ".next",
+  ".astro",
   ".svelte-kit",
   ".turbo",
 ];
@@ -57,9 +64,9 @@ export function untrackedGeminiFiles(directory: string, skip: string[] = []): st
 
 /**
  * `.gemini/.env` and `.env` files that Gemini's upward search reaches from a checkout before the
- * workspace's own: the checkouts folder, each parent of the workspace, and the home fallbacks,
- * nearest first, as `~/...` under the home directory. Gemini loads only the nearest one it finds,
- * but removing that one exposes the next.
+ * workspace's own: the checkouts folder, relative to the workspace, then each parent of the
+ * workspace and the home fallbacks, nearest first, as `~/...` under the home directory. Gemini
+ * loads only the nearest one it finds, but removing that one exposes the next.
  */
 export function envFilesAbove(root: string, homeDirectory = homedir()): string[] {
   // Gemini starts from process.cwd(), a real path; a linked home resolves too, so its files show once, as `~/...`.
@@ -72,7 +79,9 @@ export function envFilesAbove(root: string, homeDirectory = homedir()): string[]
   }
   directories.push(home);
   const files = [...new Set(directories.flatMap(directory => [path.join(directory, ".gemini", ".env"), path.join(directory, ".env")]))];
-  return files.filter(file => existsSync(file)).map(file => (file.startsWith(`${home}/`) ? `~${file.slice(home.length)}` : file));
+  const name = (file: string) =>
+    file.startsWith(`${workspace}/`) ? path.relative(workspace, file) : file.startsWith(`${home}/`) ? `~${file.slice(home.length)}` : file;
+  return files.filter(file => existsSync(file)).map(name);
 }
 
 /** What a scan found, and the checkouts, relative to the workspace, that Git could not list. */
