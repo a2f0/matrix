@@ -27,6 +27,16 @@ function recordedGeminiPolicy(checkout: Checkout): string | undefined {
   const recorded = object(parseObject(checkout.read(".agent-tool-permissions.json"))?.gemini)?.file;
   return recorded === GEMINI_POLICY ? GEMINI_POLICY : undefined;
 }
+
+/**
+ * Whether a permissions manifest's scope covers Gemini: `all`, a list naming it, or no scope, as
+ * before agent-tool 0.1.78, whose sync installed `all` and whose upgrade's install widens to it.
+ * A list without Gemini is a repository's recorded choice to keep only the other harnesses.
+ */
+function scopeCoversGemini(manifest: Record<string, unknown>): boolean {
+  const { scope } = manifest;
+  return !Array.isArray(scope) || scope.includes("gemini");
+}
 /**
  * How long a pin may trail a newer agent-tool release before the remote audit
  * fails. agent-tool can release several times a day, and each pin sweep runs
@@ -617,7 +627,9 @@ export const RULES: readonly Rule[] = [
       for (const file of [".agent-tool-permissions.json", ".claude/settings.json", ".codex/rules/agent-tool.rules"]) {
         if (!checkout.exists(file)) found.push(`no ${file}; run agent-tool permissions install --apply`);
       }
-      if (!recordedGeminiPolicy(checkout) || !checkout.exists(GEMINI_POLICY))
+      // A missing manifest is named above; one whose scope covers Gemini needs its recorded policy.
+      const manifest = parseObject(checkout.read(".agent-tool-permissions.json"));
+      if (manifest && scopeCoversGemini(manifest) && (!recordedGeminiPolicy(checkout) || !checkout.exists(GEMINI_POLICY)))
         found.push(`no ${GEMINI_POLICY} recorded in .agent-tool-permissions.json; run agent-tool permissions install --apply with agent-tool 0.1.78 or later`);
       const script = checkout.scripts["agents:check"];
       if (!(typeof script === "string" && script.includes("permissions check")) && !workflows(checkout).some(text => text.includes("permissions check"))) {

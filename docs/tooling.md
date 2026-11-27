@@ -508,7 +508,7 @@ pull, or `sync` has changed what it holds since Gemini last started there, run
 and every managed checkout (outside `node_modules` and other installed or
 build trees), the `.env` files above them, and any checkout Git could not
 list, and suggests reviewing them. The audit covers tracked `GEMINI.md` and
-`.gemini/` files, and pull request review a tracked `.env`.
+`.gemini/` files, and pull request review covers a tracked `.env`.
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
@@ -529,8 +529,7 @@ routine ones with variables, substitution, parentheses, or braces, still ask,
 so a scoped title such as `pr open "fix(api): x"` prompts. Gemini asks once,
 when a session starts, to accept a new or changed policy file. agent-tool has
 no Gemini reviewer adapter, so Gemini cannot be `ship-pr`'s independent
-reviewer. These details follow Gemini
-CLI 0.71.1.
+reviewer. These details follow Gemini CLI 0.71.1.
 
 ## State machines
 
@@ -601,12 +600,16 @@ describes. Every managed repository that pins agent-tool:
 Agents then run tests and classified executables through
 `agent-tool bun test|x`, and change dependencies through
 `agent-tool bun update|remove`. Adding a dependency, merges, and publishing
-prompt in Codex. For Claude Code and Gemini the generated rules only allow, because an
-explicit `ask` rule prompts even in `bypassPermissions` mode; those classes are
-left to the user's mode, and the guide's auto-mode block makes the classifier
-hold them until the user asks. Package scripts are not classified, so
-`bun run` and `agent:run` keep the harness default. `bun run audit --rule harness-permissions` reports
-repositories that lack the files or the check.
+prompt in Codex. For Claude Code and Gemini the generated rules only allow:
+an explicit Claude `ask` rule prompts even in `bypassPermissions` mode, and
+Gemini's rules apply in its `default` mode alone, leaving other modes to the
+user's own rules. Those classes are left to the user's mode, and the guide's
+auto-mode block makes the classifier hold them until the user asks. Package
+scripts are not classified, so `bun run` and `agent:run` keep the harness
+default. `bun run audit --rule harness-permissions` reports repositories that
+lack the files or the check, and a manifest whose scope covers Gemini without
+its recorded policy; a scope that lists harnesses without Gemini is a
+repository's choice.
 
 ## Shared skills
 

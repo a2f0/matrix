@@ -11,13 +11,29 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 /**
- * `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents,
- * and `.env` files at any depth, outside installed and build trees such as `node_modules`, a
- * Python `.venv`, CocoaPods, Xcode's DerivedData, Gradle, Cargo's `target`, and `build`, `dist`,
- * `.next`, and `.turbo` output, where no session starts and whose search would take a while in
- * a large checkout.
+ * Installed and build trees, where no session starts and whose search would take a while in a
+ * large checkout: packages, a Python `.venv`, Ruby's `vendor`, CocoaPods, Xcode's DerivedData,
+ * Gradle, Cargo's `target`, Expo, and build, test-coverage, cache, and framework output.
  */
-const BUILD_TREES = ["node_modules", ".venv", "Pods", "DerivedData", ".gradle", "target", "build", "dist", ".next", ".turbo"];
+const BUILD_TREES = [
+  "node_modules",
+  ".venv",
+  "vendor",
+  "Pods",
+  "DerivedData",
+  ".gradle",
+  "target",
+  ".expo",
+  "build",
+  "dist",
+  "out",
+  "coverage",
+  ".cache",
+  ".next",
+  ".svelte-kit",
+  ".turbo",
+];
+/** `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents, and `.env` files at any depth, outside BUILD_TREES. */
 const GEMINI_PATHSPECS = [
   ":(glob)**/GEMINI.md",
   ":(glob)**/.gemini/**",

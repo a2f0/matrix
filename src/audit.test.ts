@@ -214,8 +214,22 @@ describe("audit", () => {
     for (const [name, files] of [
       ["no-policy", { ".gemini/policies/agent-tool.toml": null }],
       ["no-record", { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }) }],
+      [
+        "other-path",
+        { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: "all", gemini: { file: ".gemini/settings.json", sha256: "x" } }) },
+      ],
+      ["listed", { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: ["claude", "gemini"] }) }],
     ] as const)
       expect(failures(checkout(name, files), ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
+    // A scope that leaves Gemini out is the repository's recorded choice, and a missing manifest is named once.
+    const chosen = checkout("chosen", {
+      ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: ["claude", "codex"] }),
+      ".gemini/policies/agent-tool.toml": null,
+    });
+    expect(failures(chosen, ["harness-permissions"])).toEqual({});
+    expect(failures(checkout("no-manifest", { ".agent-tool-permissions.json": null }), ["harness-permissions"])).toEqual({
+      "harness-permissions": "no .agent-tool-permissions.json; run agent-tool permissions install --apply",
+    });
     const workflow = checkout("workflow", {
       "package.json": JSON.stringify({ devDependencies: { "@a2f0/agent-tool": MINIMUM_AGENT_TOOL } }),
       ".github/workflows/ci.yml": "steps:\n  - run: bun run agent-tool permissions check\n",
