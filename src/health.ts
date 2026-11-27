@@ -156,7 +156,7 @@ function geminiSuggestions(scan: GeminiScan | undefined): string[] {
       : []),
     ...(unscanned.length > 0
       ? [
-          `Find out why Git could not list files in ${list(unscannedNames(unscanned))}, such as a broken repository or a large ignored folder that outlasted the minute each listing gets, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.`,
+          `Find out why Git could not list files in ${list(unscannedNames(unscanned))}, such as a broken repository or a large ignored folder that outlasted health's time limit, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.`,
         ]
       : []),
   ];

@@ -5,7 +5,7 @@ import { AGENT_TOOL_GRACE_DAYS, AGENTS_MD_MAX_CHARS, type AuditContext, audit, M
 import type { CheckoutStatus } from "./checkouts";
 import { GEMINI_POLICY_RELEASE } from "./packageJson";
 import type { PushGateResult } from "./pushGates";
-import { checkoutFixture, GUIDANCE, gitIn, README, SPAWNS, tempDir } from "./testFixtures";
+import { checkoutFixture, GEMINI_FIXTURE_RECORD, GUIDANCE, gitIn, README, SPAWNS, tempDir } from "./testFixtures";
 
 let root: string;
 const RELEASES = {
@@ -161,7 +161,7 @@ describe("audit", () => {
         ".agent-tool-permissions.json": JSON.stringify({
           schemaVersion: 1,
           scope,
-          gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) },
+          gemini: GEMINI_FIXTURE_RECORD,
         }),
       });
       expect(failures(repo, ["no-gemini-config"])).toEqual({ "no-gemini-config": "tracked .gemini/policies/agent-tool.toml" });
@@ -237,7 +237,7 @@ describe("audit", () => {
     );
     // From agent-tool 0.1.78, which generates it, a scope covering Gemini needs its committed, recorded policy.
     const manifest = (value: object) => ({ ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, ...value }) });
-    const recorded = { gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) } };
+    const recorded = { gemini: GEMINI_FIXTURE_RECORD };
     const gemini = "no committed .gemini/policies/agent-tool.toml recorded in .agent-tool-permissions.json; run agent-tool permissions install --apply";
     expect(failures(current("generated-rules"), ["harness-permissions"])).toEqual({});
     for (const [name, files] of [
@@ -253,6 +253,13 @@ describe("audit", () => {
     mkdirSync(policies, { recursive: true });
     writeFileSync(path.join(policies, "agent-tool.toml"), "x\n");
     expect(failures(untracked, ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
+    // A policy edited after agent-tool wrote it no longer matches its recorded sha256.
+    const edited = current("edited-policy", { ".gemini/policies/agent-tool.toml": '[[rule]]\ndecision = "allow"\n' });
+    expect(failures(edited, ["no-gemini-config", "harness-permissions"])).toEqual({
+      "no-gemini-config": "tracked .gemini/policies/agent-tool.toml",
+      "harness-permissions":
+        ".gemini/policies/agent-tool.toml differs from the sha256 .agent-tool-permissions.json records; move the edit aside and run agent-tool permissions install --apply",
+    });
     // An older pin has no Gemini policy to generate yet: agent-tool-latest moves it, after its grace period.
     expect(failures(checkout("older"), ["harness-permissions"])).toEqual({});
     // A list of harnesses without Gemini is the repository's choice, whatever harness a later release adds.

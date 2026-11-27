@@ -61,8 +61,9 @@ const BUILD_TREES = [
 /** `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents, and `.env` files at any depth. */
 const GEMINI_PATHSPECS = [":(glob)**/GEMINI.md", ":(glob)**/.gemini/**", ":(glob)**/.env"];
 
-/** How long one listing may take before its checkout is reported as unscanned. */
+/** How long one listing, and the whole scan, may take before what they did not list is reported as unscanned. */
 const LIST_TIMEOUT_MS = 60_000;
+const SCAN_BUDGET_MS = 180_000;
 
 /**
  * Untracked and ignored files under `directory` that Gemini CLI would load, relative to it, outside
@@ -71,9 +72,9 @@ const LIST_TIMEOUT_MS = 60_000;
  * outside BUILD_TREES. Both use `-x` patterns, which Git does not descend into, unlike exclude
  * pathspecs; without `--exclude-standard`, the second pass reads no `.gitignore`.
  */
-export function untrackedGeminiFiles(directory: string, skip: string[] = [], timeout = LIST_TIMEOUT_MS): string[] {
-  const unignored = listFiles(directory, ["--others", "--exclude-standard", ...excluding(skip)], timeout);
-  const outsideTrees = listFiles(directory, ["--others", ...excluding([...BUILD_TREES.map(tree => `${tree}/`), ...skip])], timeout);
+export function untrackedGeminiFiles(directory: string, skip: string[] = [], deadline = Date.now() + 2 * LIST_TIMEOUT_MS): string[] {
+  const unignored = listFiles(directory, ["--others", "--exclude-standard", ...excluding(skip)], deadline);
+  const outsideTrees = listFiles(directory, ["--others", ...excluding([...BUILD_TREES.map(tree => `${tree}/`), ...skip])], deadline);
   return [...new Set([...unignored, ...outsideTrees])].sort();
 }
 
@@ -81,9 +82,11 @@ function excluding(patterns: string[]): string[] {
   return patterns.flatMap(pattern => ["-x", pattern]);
 }
 
-/** One listing, through the hardened Git, so a scanned folder's fsmonitor and hooks never run. */
-function listFiles(directory: string, options: string[], timeout: number): string[] {
-  const result = gitUntrimmed(directory, ["ls-files", "-z", ...options, "--", ...GEMINI_PATHSPECS], timeout);
+/** One listing, through the hardened Git, so a scanned folder's fsmonitor and hooks never run, within a minute and `deadline`. */
+function listFiles(directory: string, options: string[], deadline: number): string[] {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error(`no time left to list ${directory}`);
+  const result = gitUntrimmed(directory, ["ls-files", "-z", ...options, "--", ...GEMINI_PATHSPECS], Math.min(LIST_TIMEOUT_MS, remaining));
   if (result.status !== 0) throw new Error(`git ls-files failed in ${directory}: ${result.stderr.trim()}`);
   return result.stdout.split("\0").filter(Boolean);
 }
@@ -120,14 +123,15 @@ export interface GeminiScan {
  * Every file Gemini CLI would load that no review sees: untracked and ignored ones in the
  * workspace (outside `checkouts/`) and in each checkout, relative to the workspace, then the
  * `.env` files above them. A folder Git cannot list, the workspace as `.`, is reported, not
- * allowed to hide the rest.
+ * allowed to hide the rest, and so is every folder the scan's `budget` in milliseconds leaves.
  */
-export function geminiFiles(root: string, checkouts: string[], home = homedir(), timeout = LIST_TIMEOUT_MS): GeminiScan {
+export function geminiFiles(root: string, checkouts: string[], home = homedir(), budget = SCAN_BUDGET_MS): GeminiScan {
+  const deadline = Date.now() + budget;
   const files: string[] = [];
   const unscanned: string[] = [];
   for (const [directory, skip] of [[root, ["/checkouts/"]] as const, ...checkouts.map(directory => [directory, []] as const)]) {
     try {
-      files.push(...untrackedGeminiFiles(directory, [...skip], timeout).map(file => path.relative(root, path.join(directory, file))));
+      files.push(...untrackedGeminiFiles(directory, [...skip], deadline).map(file => path.relative(root, path.join(directory, file))));
     } catch {
       unscanned.push(path.relative(root, directory) || ".");
     }

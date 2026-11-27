@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { type Checkout, excludeManaged, openCheckout, sourceGlobs, TEST_PATH, workflows } from "./auditCheckout";
@@ -28,13 +29,17 @@ function permissionsManifest(checkout: Checkout): Record<string, unknown> | unde
 }
 
 /**
- * The Gemini policy `manifest` records, so `permissions check` keeps it current: undefined without
- * one, below the release that generates it, or where the scope leaves Gemini out, since nothing
- * checks it there.
+ * The Gemini policy `manifest` records, as agent-tool wrote it, so `permissions check` keeps it
+ * current: undefined without one, below the release that generates it, where the scope leaves
+ * Gemini out, since nothing checks it there, or where its bytes no longer match the recorded
+ * sha256, agent-tool's hash of the file it wrote.
  */
 function recordedGeminiPolicy(checkout: Checkout, manifest: Record<string, unknown> | undefined): string | undefined {
   if (!manifest || !generatesGeminiPolicy(checkout) || geminiScope(manifest.scope) !== "covers") return undefined;
-  return object(manifest.gemini)?.file === GEMINI_POLICY ? GEMINI_POLICY : undefined;
+  const record = object(manifest.gemini);
+  const contents = checkout.read(GEMINI_POLICY);
+  if (record?.file !== GEMINI_POLICY || contents === undefined) return undefined;
+  return record.sha256 === createHash("sha256").update(contents).digest("hex") ? GEMINI_POLICY : undefined;
 }
 
 /** Whether the checkout pins an agent-tool release that generates the Gemini policy. */
@@ -71,8 +76,11 @@ function geminiPolicyProblem(checkout: Checkout): string | undefined {
   const scope = geminiScope(manifest.scope);
   if (scope === "invalid")
     return `${file} records scope ${JSON.stringify(manifest.scope)}, which is neither all nor a list of harnesses; run agent-tool permissions install --apply`;
-  if (scope === "covers" && (!recordedGeminiPolicy(checkout, manifest) || checkout.tracked(GEMINI_POLICY).length === 0))
+  if (scope === "excludes") return undefined;
+  if (object(manifest.gemini)?.file !== GEMINI_POLICY || checkout.tracked(GEMINI_POLICY).length === 0)
     return `no committed ${GEMINI_POLICY} recorded in ${file}; run agent-tool permissions install --apply`;
+  if (!recordedGeminiPolicy(checkout, manifest))
+    return `${GEMINI_POLICY} differs from the sha256 ${file} records; move the edit aside and run agent-tool permissions install --apply`;
   return undefined;
 }
 

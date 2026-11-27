@@ -241,7 +241,7 @@ test("health suggests reviewing files Gemini CLI would load that no review sees,
   expect(main(["health", "--markdown"], root, undefined, partial.services)).toBe(0);
   expect(partial.writes.join("")).toContain("- Gemini files: none outside review; could not scan the workspace, checkouts/good.");
   expect(partial.writes.join("")).toContain(
-    "Find out why Git could not list files in the workspace, checkouts/good, such as a broken repository or a large ignored folder that outlasted the minute each listing gets, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.",
+    "Find out why Git could not list files in the workspace, checkouts/good, such as a broken repository or a large ignored folder that outlasted health's time limit, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.",
   );
   // A scan that could not finish leaves the report without the field.
   const unread = fakeServices({ geminiFiles: () => undefined });
