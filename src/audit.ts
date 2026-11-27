@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { type Checkout, excludeManaged, openCheckout, sourceGlobs, TEST_PATH, workflows } from "./auditCheckout";
@@ -7,7 +8,7 @@ import { typescriptGuarded } from "./cycleGuards";
 import { git } from "./git";
 import { checkoutPath, isGitHubSsh } from "./manifest";
 import { hasLink, hasSection, headings, nonBlankLines, section } from "./markdown";
-import { AGENT_TOOL, dependency, object, parseObject } from "./packageJson";
+import { AGENT_TOOL, compareVersions, dependency, GEMINI_POLICY_RELEASE, object, parseObject } from "./packageJson";
 import { checkRunsOnPush, type PushGateResult, runsOnEveryPush, runsOnPushTo, ungatedCalls, ungatedShippingJobs, workflowName } from "./pushGates";
 import { supersededGuidance } from "./superseded";
 import { plural } from "./text";
@@ -18,6 +19,89 @@ import { plural } from "./text";
  * guidance no longer carries fallbacks for older pins.
  */
 export const MINIMUM_AGENT_TOOL = "0.1.21";
+
+/** Where `agent-tool permissions install` writes Gemini CLI rules, from agent-tool 0.1.78 on. */
+const GEMINI_POLICY = ".gemini/policies/agent-tool.toml";
+
+/** The checkout's permissions manifest, parsed once per question; undefined when it is missing or not a JSON object. */
+function permissionsManifest(checkout: Checkout): Record<string, unknown> | undefined {
+  return parseObject(checkout.read(".agent-tool-permissions.json"));
+}
+
+/**
+ * The Gemini policy `manifest` records, as agent-tool wrote it, so `permissions check` keeps it
+ * current: undefined without one, below the release that generates it, where the scope leaves
+ * Gemini out, since nothing checks it there, or where its bytes no longer match the recorded
+ * sha256, agent-tool's hash of the file it wrote.
+ */
+function recordedGeminiPolicy(checkout: Checkout, manifest: Record<string, unknown> | undefined): string | undefined {
+  if (!manifest || !generatesGeminiPolicy(checkout) || geminiScope(manifest.scope) !== "covers") return undefined;
+  const record = object(manifest.gemini);
+  const contents = checkout.read(GEMINI_POLICY);
+  if (record?.file !== GEMINI_POLICY || contents === undefined) return undefined;
+  return record.sha256 === createHash("sha256").update(contents).digest("hex") ? GEMINI_POLICY : undefined;
+}
+
+/**
+ * The Gemini policy path `no-gemini-config` allows: the recorded policy as agent-tool wrote it, or
+ * one recorded under a scope covering Gemini that is missing from the checkout, which loads nothing
+ * and which harness-permissions reports on its own.
+ */
+function exemptGeminiPolicy(checkout: Checkout): string | undefined {
+  const manifest = permissionsManifest(checkout);
+  if (recordedGeminiPolicy(checkout, manifest)) return GEMINI_POLICY;
+  const missing =
+    manifest !== undefined &&
+    generatesGeminiPolicy(checkout) &&
+    geminiScope(manifest.scope) === "covers" &&
+    object(manifest.gemini)?.file === GEMINI_POLICY &&
+    !checkout.exists(GEMINI_POLICY);
+  return missing ? GEMINI_POLICY : undefined;
+}
+
+/** Whether the checkout pins an agent-tool release that generates the Gemini policy. */
+function generatesGeminiPolicy(checkout: Checkout): boolean {
+  const pin = dependency(checkout.packageJson, AGENT_TOOL);
+  return pin !== undefined && EXACT_VERSION.test(pin) && compareVersions(pin, GEMINI_POLICY_RELEASE) >= 0;
+}
+
+/**
+ * How a permissions manifest's scope treats Gemini: no scope, as before agent-tool 0.1.78, whose
+ * sync installs `all`, `all`, and a non-empty list of harness names naming it cover it; a list
+ * without it is a repository's recorded choice, whatever other harnesses a later release names;
+ * any other value, which no release writes, is invalid.
+ */
+function geminiScope(scope: unknown): "covers" | "excludes" | "invalid" {
+  if (scope === undefined || scope === "all") return "covers";
+  const list: unknown[] | undefined = Array.isArray(scope) ? scope : undefined;
+  if (!list || list.length === 0 || !list.every(harness => typeof harness === "string")) return "invalid";
+  return list.includes("gemini") ? "covers" : "excludes";
+}
+
+/**
+ * What keeps a checkout's permissions manifest from carrying the Gemini policy its rules need. A
+ * missing manifest is named on its own and an unreadable one at any pin; from the release that
+ * generates it, a scope covering Gemini needs its committed, recorded policy, and an older pin
+ * reaches that release through agent-tool-latest.
+ */
+function geminiPolicyProblem(checkout: Checkout): string | undefined {
+  const file = ".agent-tool-permissions.json";
+  if (!checkout.exists(file)) return undefined;
+  const manifest = permissionsManifest(checkout);
+  if (!manifest) return `${file} is not a JSON object; run agent-tool permissions install --apply`;
+  if (!generatesGeminiPolicy(checkout)) return undefined;
+  const scope = geminiScope(manifest.scope);
+  if (scope === "invalid")
+    return `${file} records scope ${JSON.stringify(manifest.scope)}, which is neither all nor a list of harnesses; run agent-tool permissions install --apply`;
+  if (scope === "excludes") return undefined;
+  if (object(manifest.gemini)?.file !== GEMINI_POLICY || checkout.tracked(GEMINI_POLICY).length === 0)
+    return `no committed ${GEMINI_POLICY} recorded in ${file}; run agent-tool permissions install --apply`;
+  if (!checkout.exists(GEMINI_POLICY)) return `${GEMINI_POLICY} is committed but missing from the checkout; restore it with git restore`;
+  if (!recordedGeminiPolicy(checkout, manifest))
+    return `${GEMINI_POLICY} differs from the sha256 ${file} records; move the edit aside and run agent-tool permissions install --apply`;
+  return undefined;
+}
+
 /**
  * How long a pin may trail a newer agent-tool release before the remote audit
  * fails. agent-tool can release several times a day, and each pin sweep runs
@@ -74,13 +158,6 @@ const PROFILE_GUIDE = "docs/development.md";
 function isProfile(checkout: Checkout): boolean {
   const [owner, name] = checkout.repo.toLowerCase().split("/");
   return owner === name;
-}
-
-function compareVersions(left: string, right: string): number {
-  const a = left.split(".").map(Number);
-  const b = right.split(".").map(Number);
-  for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index]! - b[index]!;
-  return 0;
 }
 
 /** Where agent-tool's push gate lives; `push-gate check` reads only this path. */
@@ -429,11 +506,20 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "no-gemini-config",
-    summary: "No GEMINI.md or Gemini CLI files in .gemini/; Gemini CLI reads AGENTS.md through its user settings",
+    summary:
+      "No GEMINI.md or Gemini CLI files in .gemini/, in any case, beyond agent-tool's recorded policy; Gemini CLI reads AGENTS.md through its user settings",
     source: ONBOARDING,
     check: checkout => {
-      // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews.
-      const files = checkout.tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**").filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file));
+      // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews,
+      // and agent-tool's generated policy is allowed where its permissions manifest records it under a scope
+      // covering Gemini and its bytes still match the recorded sha256, or where it is missing from the checkout;
+      // harness-permissions names an edited or missing one. The manifest records that hash itself, so it
+      // catches a hand edit, not a forged pair: agent-tool permissions check, which harness-permissions
+      // looks for in the agents:check script or a workflow, is what regenerates and compares the content.
+      const generated = exemptGeminiPolicy(checkout);
+      const files = checkout
+        .tracked(":(glob,icase)**/GEMINI.md", ":(glob,icase)**/.gemini/**")
+        .filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file) && file !== generated);
       return files.length === 0 ? pass : fail(`tracked ${files.join(", ")}`);
     },
   },
@@ -603,6 +689,8 @@ export const RULES: readonly Rule[] = [
       for (const file of [".agent-tool-permissions.json", ".claude/settings.json", ".codex/rules/agent-tool.rules"]) {
         if (!checkout.exists(file)) found.push(`no ${file}; run agent-tool permissions install --apply`);
       }
+      const gemini = geminiPolicyProblem(checkout);
+      if (gemini) found.push(gemini);
       const script = checkout.scripts["agents:check"];
       if (!(typeof script === "string" && script.includes("permissions check")) && !workflows(checkout).some(text => text.includes("permissions check"))) {
         found.push("neither the agents:check script nor a workflow runs agent-tool permissions check");
