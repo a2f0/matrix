@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, statfsSync, writeSync } from "node:fs";
+import { existsSync, statfsSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
 import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
@@ -515,9 +515,10 @@ const COMMANDS = new Map<string, Handler>([
       usage(positional.length === 0, "Usage: matrix health [--remote] [--markdown]");
       const remote = booleans.has("remote");
       const statusOf = statusReader(root, manifest);
+      const unmanaged = unmanagedCheckouts(root, manifest.repos);
       const health = assessHealth({
         statuses: manifest.repos.map(statusOf),
-        unmanaged: unmanagedCheckouts(root, manifest.repos),
+        unmanaged,
         audit: audit(root, manifest.repos, selectRules([], remote), statusOf, auditContext(root, services)),
         retro: retro(root),
         disk: services.diskSpace(root),
@@ -525,11 +526,12 @@ const COMMANDS = new Map<string, Handler>([
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
         screenshots: services.screenshotLinks(root),
         personalSkills: services.personalSkills(root),
-        // Checkouts that status could not read are reported as not ready, and skipped here.
-        geminiFiles: services.geminiFiles(
-          root,
-          manifest.repos.filter(repo => statusOf(repo).present && statusOf(repo).error === undefined).map(repo => checkoutPath(root, repo)),
-        ),
+        // Every checkout folder on disk, managed or not, since folder trust covers them all; the scan
+        // names one Git cannot list, as for a checkout whose status reports an error.
+        geminiFiles: services.geminiFiles(root, [
+          ...manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
+          ...unmanaged.map(entry => path.join(root, entry)).filter(entry => statSync(entry, { throwIfNoEntry: false })?.isDirectory()),
+        ]),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
           defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),

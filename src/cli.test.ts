@@ -201,14 +201,16 @@ test("health suggests reviewing files Gemini CLI would load that no review sees,
   expect(main(["health"], root, undefined, services)).toBe(0);
   const report = JSON.parse(writes.join("")) as { geminiFiles: unknown; suggestions: string[] };
   expect(report.geminiFiles).toEqual({ files: gemini, unscanned: [] });
-  // Only checkouts on disk that status can read are scanned: a2f0/missing is not cloned.
+  // Only checkouts on disk are scanned: a2f0/missing is not cloned.
   expect(scanned).toEqual([[path.join(root, "checkouts", "good")]]);
-  // One on disk whose status reports an error is not scanned either.
+  // One whose status reports an error is scanned, so the scan can name it, and so is an unmanaged folder, but not a file.
   mkdirSync(path.join(root, "checkouts", "missing"), { recursive: true });
   writeFileSync(path.join(root, "checkouts", "missing", ".git"), "gitdir: /nonexistent\n");
+  mkdirSync(path.join(root, "checkouts", "extra"), { recursive: true });
+  writeFileSync(path.join(root, "checkouts", "notes.txt"), "x\n");
   scanned.length = 0;
   expect(main(["health"], root, undefined, services)).toBe(0);
-  expect(scanned).toEqual([[path.join(root, "checkouts", "good")]]);
+  expect(scanned).toEqual([["good", "missing", "extra"].map(name => path.join(root, "checkouts", name))]);
   expect(report.suggestions.slice(0, 2)).toEqual([
     "Remove 1 personal skill that overrides agent-tool's managed copies (~/.agents/skills/space-cleanup); see docs/tooling.md#shared-skills.",
     "Review 3 files Gemini CLI would load that no review sees (.gemini/settings.json, checkouts/demo/.env, ~/.env): keep secrets in `.secrets` and remove what nothing needs; see docs/tooling.md#gemini-cli.",

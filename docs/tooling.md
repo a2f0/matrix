@@ -505,10 +505,12 @@ folders, where Gemini runs untrusted and you read skills from
 pull, or `sync` has changed what it holds since Gemini last started there, run
 `bun run health`. It lists, by name only, the untracked and ignored
 `GEMINI.md`, `.gemini/`, and `.env` files Gemini would load from the workspace
-and every managed checkout (outside `node_modules` and other installed or
-build trees), the `.env` files above them, and any checkout Git could not
-list, and suggests reviewing them. The audit covers tracked `GEMINI.md` and
-`.gemini/` files, and pull request review covers a tracked `.env`.
+and every checkout folder, managed or not (outside `node_modules` and other
+installed or build trees), the `.env` files above them, and any checkout Git
+could not list, and suggests reviewing them. Tracked files reach a checkout
+only through a reviewed pull request: the audit flags a tracked `GEMINI.md` or
+`.gemini/` file, and that review covers a tracked `.env`, which Gemini loads
+into every shell command it runs.
 
 Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
 directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
@@ -610,7 +612,7 @@ default. `bun run audit --rule harness-permissions` reports repositories that
 lack the files or the check, and, from a pin of agent-tool 0.1.78, a manifest
 whose scope covers Gemini without its committed, recorded policy; a scope that
 lists harnesses without Gemini is a repository's choice, and any other scope is
-reported.
+reported, as is a manifest that is not a JSON object at any pin.
 
 ## Shared skills
 

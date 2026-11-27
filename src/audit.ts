@@ -48,7 +48,8 @@ function generatesGeminiPolicy(checkout: Checkout): boolean {
  */
 function scopeCoversGemini(scope: unknown): boolean | undefined {
   if (scope === undefined || scope === "all") return true;
-  if (Array.isArray(scope) && scope.length > 0 && scope.every(harness => PERMISSION_HARNESSES.includes(harness))) return scope.includes("gemini");
+  const list: unknown[] | undefined = Array.isArray(scope) ? scope : undefined;
+  if (list && list.length > 0 && list.every(harness => typeof harness === "string" && PERMISSION_HARNESSES.includes(harness))) return list.includes("gemini");
   return undefined;
 }
 
