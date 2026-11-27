@@ -42,6 +42,23 @@ function recordedGeminiPolicy(checkout: Checkout, manifest: Record<string, unkno
   return record.sha256 === createHash("sha256").update(contents).digest("hex") ? GEMINI_POLICY : undefined;
 }
 
+/**
+ * The Gemini policy path `no-gemini-config` allows: the recorded policy as agent-tool wrote it, or
+ * one recorded under a scope covering Gemini that is missing from the checkout, which loads nothing
+ * and which harness-permissions reports on its own.
+ */
+function exemptGeminiPolicy(checkout: Checkout): string | undefined {
+  const manifest = permissionsManifest(checkout);
+  if (recordedGeminiPolicy(checkout, manifest)) return GEMINI_POLICY;
+  const missing =
+    manifest !== undefined &&
+    generatesGeminiPolicy(checkout) &&
+    geminiScope(manifest.scope) === "covers" &&
+    object(manifest.gemini)?.file === GEMINI_POLICY &&
+    !checkout.exists(GEMINI_POLICY);
+  return missing ? GEMINI_POLICY : undefined;
+}
+
 /** Whether the checkout pins an agent-tool release that generates the Gemini policy. */
 function generatesGeminiPolicy(checkout: Checkout): boolean {
   const pin = dependency(checkout.packageJson, AGENT_TOOL);
@@ -489,14 +506,17 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "no-gemini-config",
-    summary: "No GEMINI.md or Gemini CLI files in .gemini/ beyond agent-tool's recorded policy; Gemini CLI reads AGENTS.md through its user settings",
+    summary:
+      "No GEMINI.md or Gemini CLI files in .gemini/, in any case, beyond agent-tool's recorded policy; Gemini CLI reads AGENTS.md through its user settings",
     source: ONBOARDING,
     check: checkout => {
       // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews,
       // and agent-tool's generated policy is allowed where its permissions manifest records it under a scope
-      // covering Gemini and its bytes still match the recorded sha256; harness-permissions names an edited one,
-      // and agent-tool permissions check, which it requires CI to run, keeps the content current.
-      const generated = recordedGeminiPolicy(checkout, permissionsManifest(checkout));
+      // covering Gemini and its bytes still match the recorded sha256, or where it is missing from the checkout;
+      // harness-permissions names an edited or missing one. The manifest records that hash itself, so it
+      // catches a hand edit, not a forged pair: agent-tool permissions check, which harness-permissions
+      // looks for in the agents:check script or a workflow, is what regenerates and compares the content.
+      const generated = exemptGeminiPolicy(checkout);
       const files = checkout
         .tracked(":(glob,icase)**/GEMINI.md", ":(glob,icase)**/.gemini/**")
         .filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file) && file !== generated);

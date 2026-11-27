@@ -168,8 +168,14 @@ export function geminiFiles(root: string, folders: CheckoutFolders, home = homed
   return { files: [...files, ...envFilesAbove(root, home)], unscanned };
 }
 
-/** A real folder in a real parent, neither a link nor inside a linked folder such as a linked `checkouts/`. */
+/** A real folder in a real parent, neither a link nor inside a linked folder such as a linked `checkouts/`, nor one `lstat` cannot read. */
 function ownFolder(directory: string): boolean {
-  const real = (entry: string) => lstatSync(entry, { throwIfNoEntry: false })?.isDirectory() === true;
+  const real = (entry: string) => {
+    try {
+      return lstatSync(entry, { throwIfNoEntry: false })?.isDirectory() === true;
+    } catch {
+      return false;
+    }
+  };
   return real(path.dirname(directory)) && real(directory);
 }

@@ -18,8 +18,8 @@ ways Git or gh can leave SSH for GitHub ([below](#github-over-ssh)),
 personal skills that override agent-tool's managed copies
 ([shared skills](tooling.md#shared-skills)), files Gemini CLI can load that
 no review sees ([Gemini CLI](tooling.md#gemini-cli)), checkouts that are not
-ready, red
-default branches ([base freshness](tooling.md#base-freshness)), stale installs,
+ready, red default branches ([base freshness](tooling.md#base-freshness)),
+stale installs,
 clones not linked to the [screenshot store](artifacts.md),
 repositories to onboard or that discovery lost, failing audit rules, recurring
 sweep friction without a recorded resolution, unfinished sweep entries, and

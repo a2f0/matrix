@@ -528,11 +528,10 @@ const COMMANDS = new Map<string, Handler>([
         personalSkills: services.personalSkills(root),
         // Every checkout folder on disk, managed or not, since folder trust covers them all; the scan
         // names one Git cannot list, as for a checkout whose status reports an error, or a link it
-        // does not follow. A file under checkouts/ is no folder a session starts in.
+        // does not follow. A file, or a link to one, is no folder a session starts in.
         geminiFiles: services.geminiFiles(root, {
           managed: manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
-          // A file, or a link to one, is no folder a session starts in; a link to a folder is named by the scan.
-          unmanaged: unmanaged.map(entry => path.join(root, entry)).filter(entry => !statSync(entry, { throwIfNoEntry: false })?.isFile()),
+          unmanaged: unmanaged.map(entry => path.join(root, entry)).filter(entry => !isFile(entry)),
         }),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
@@ -595,4 +594,13 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
   const handler = COMMANDS.get(command);
   if (!handler) throw new Error(`Unknown command '${command}'. Run matrix --help.`);
   return handler(args, { root, manifest, gh, services, output: value => json(services, value) });
+}
+
+/** Whether `entry` is a file or a link to one; an entry `stat` cannot read, such as a link loop, is left for the scan to name. */
+function isFile(entry: string): boolean {
+  try {
+    return statSync(entry, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
 }

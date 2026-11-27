@@ -217,10 +217,11 @@ test(
     mkdirSync(path.join(root, "checkouts", "extra"), { recursive: true });
     writeFileSync(path.join(root, "checkouts", "notes.txt"), "x\n");
     symlinkSync(path.join(root, "checkouts", "notes.txt"), path.join(root, "checkouts", "notes-link"));
+    symlinkSync(path.join(root, "checkouts", "loop"), path.join(root, "checkouts", "loop"));
     symlinkSync(tempDir("matrix-elsewhere"), path.join(root, "checkouts", "linked"));
     scanned.length = 0;
     expect(main(["health"], root, undefined, services)).toBe(0);
-    expect(scanned).toEqual([{ managed: at("good", "missing"), unmanaged: at("extra", "linked") }]);
+    expect(scanned).toEqual([{ managed: at("good", "missing"), unmanaged: at("extra", "linked", "loop") }]);
     // A managed checkout that is a link goes to the scan too, which names it without following it.
     rmSync(path.join(root, "checkouts", "missing"), { recursive: true });
     const elsewhere = tempDir("matrix-linked-checkout");
@@ -228,7 +229,7 @@ test(
     symlinkSync(elsewhere, path.join(root, "checkouts", "missing"));
     scanned.length = 0;
     expect(main(["health"], root, undefined, services)).toBe(0);
-    expect(scanned).toEqual([{ managed: at("good", "missing"), unmanaged: at("extra", "linked") }]);
+    expect(scanned).toEqual([{ managed: at("good", "missing"), unmanaged: at("extra", "linked", "loop") }]);
     const markdown = fakeServices({ geminiFiles: () => ({ files: gemini, unscanned: [] }) });
     expect(main(["health", "--markdown"], root, undefined, markdown.services)).toBe(0);
     expect(markdown.writes.join("")).toContain("- Gemini files: .gemini/settings.json, checkouts/demo/.env, ~/.env outside review.");

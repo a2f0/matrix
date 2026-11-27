@@ -260,7 +260,7 @@ describe("audit", () => {
     // A committed policy deleted from the checkout is named as missing, not edited.
     const deleted = current("deleted-policy");
     rmSync(path.join(root, "checkouts", "deleted-policy", ".gemini", "policies", "agent-tool.toml"));
-    expect(failures(deleted, ["harness-permissions"])).toEqual({
+    expect(failures(deleted, ["no-gemini-config", "harness-permissions"])).toEqual({
       "harness-permissions": ".gemini/policies/agent-tool.toml is committed but missing from the checkout; restore it with git restore",
     });
     // A policy edited after agent-tool wrote it no longer matches its recorded sha256.

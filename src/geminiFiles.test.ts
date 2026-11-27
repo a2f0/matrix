@@ -146,6 +146,10 @@ test(
     expect(geminiFiles(root, { managed: [], unmanaged: [path.join(root, "checkouts", "link")] }, path.join(base, "home")).unscanned).toEqual([
       "checkouts/link",
     ]);
+    // A link loop is named too, not allowed to stop the scan.
+    const loop = path.join(root, "checkouts", "loop");
+    symlinkSync(loop, loop);
+    expect(geminiFiles(root, { managed: [], unmanaged: [loop] }, path.join(base, "home")).unscanned).toEqual(["checkouts/loop"]);
     expect(geminiFiles(linked, { managed: [path.join(linked, "checkouts", "demo")], unmanaged: [] }, path.join(base, "home")).unscanned).toEqual([
       "checkouts/demo",
     ]);
