@@ -140,6 +140,11 @@ function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string
   return [...suggestions, ...geminiSuggestions(inputs.geminiFiles)];
 }
 
+/** The folders a Gemini scan could not list, with the workspace's `.` by name. */
+function unscannedNames(unscanned: readonly string[]): string[] {
+  return unscanned.map(folder => (folder === "." ? "the workspace" : folder));
+}
+
 /** Files Gemini CLI would load that no review sees, then checkouts Git could not list for them. */
 function geminiSuggestions(scan: GeminiScan | undefined): string[] {
   const { files = [], unscanned = [] } = scan ?? {};
@@ -151,7 +156,7 @@ function geminiSuggestions(scan: GeminiScan | undefined): string[] {
       : []),
     ...(unscanned.length > 0
       ? [
-          `Find out why Git could not list files in ${list(unscanned)}, such as a broken repository or a large ignored folder that outlasted the minute each listing gets, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.`,
+          `Find out why Git could not list files in ${list(unscannedNames(unscanned))}, such as a broken repository or a large ignored folder that outlasted the minute each listing gets, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.`,
         ]
       : []),
   ];
@@ -326,7 +331,7 @@ function personalSkillsLine(paths: string[]): string {
 
 function geminiFilesLine({ files, unscanned }: GeminiScan): string {
   const found = files.length === 0 ? "none outside review" : `${list(files)} outside review`;
-  return `- Gemini files: ${found}${unscanned.length === 0 ? "" : `; could not scan ${list(unscanned)}`}.`;
+  return `- Gemini files: ${found}${unscanned.length === 0 ? "" : `; could not scan ${list(unscannedNames(unscanned))}`}.`;
 }
 
 function sweepsLine(sweeps: Health["sweeps"]): string {

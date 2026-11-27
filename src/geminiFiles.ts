@@ -19,6 +19,7 @@ import { gitUntrimmed } from "./git";
  */
 const BUILD_TREES = [
   "node_modules",
+  ".yarn",
   ".venv",
   "venv",
   "env",
@@ -26,6 +27,8 @@ const BUILD_TREES = [
   "vendor",
   "Pods",
   "DerivedData",
+  ".build",
+  ".cxx",
   ".gradle",
   "target",
   ".expo",
@@ -42,6 +45,7 @@ const BUILD_TREES = [
   "out",
   "coverage",
   "playwright-report",
+  "storybook-static",
   "test-results",
   ".cache",
   ".parcel-cache",
@@ -49,6 +53,7 @@ const BUILD_TREES = [
   ".next",
   ".astro",
   ".nuxt",
+  ".vercel",
   ".output",
   ".svelte-kit",
   ".turbo",

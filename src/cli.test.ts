@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { MINIMUM_AGENT_TOOL, RULES } from "./audit";
 import { main, parseBaseHealthReport, parsePushGateReport, parseScreenshotLinks, type Services } from "./cli";
@@ -212,6 +212,14 @@ test("health suggests reviewing files Gemini CLI would load that no review sees,
   scanned.length = 0;
   expect(main(["health"], root, undefined, services)).toBe(0);
   expect(scanned).toEqual([["good", "missing", "extra"].map(name => path.join(root, "checkouts", name))]);
+  // A managed checkout that is a link is not followed either; status reports it.
+  rmSync(path.join(root, "checkouts", "missing"), { recursive: true });
+  const elsewhere = tempDir("matrix-linked-checkout");
+  gitInit(elsewhere);
+  symlinkSync(elsewhere, path.join(root, "checkouts", "missing"));
+  scanned.length = 0;
+  expect(main(["health"], root, undefined, services)).toBe(0);
+  expect(scanned).toEqual([["good", "extra"].map(name => path.join(root, "checkouts", name))]);
   expect(report.suggestions.slice(0, 2)).toEqual([
     "Remove 1 personal skill that overrides agent-tool's managed copies (~/.agents/skills/space-cleanup); see docs/tooling.md#shared-skills.",
     "Review 3 files Gemini CLI would load that no review sees (.gemini/settings.json, checkouts/demo/.env, ~/.env): keep secrets in `.secrets` and remove what nothing needs; see docs/tooling.md#gemini-cli.",
@@ -229,11 +237,11 @@ test("health suggests reviewing files Gemini CLI would load that no review sees,
   expect(none.writes.join("")).toContain("- Gemini files: none outside review.");
   expect(none.writes.join("")).not.toContain("Review ");
   // A checkout Git could not list is named, beside whatever the others hold.
-  const partial = fakeServices({ geminiFiles: () => ({ files: [], unscanned: ["checkouts/good"] }) });
+  const partial = fakeServices({ geminiFiles: () => ({ files: [], unscanned: [".", "checkouts/good"] }) });
   expect(main(["health", "--markdown"], root, undefined, partial.services)).toBe(0);
-  expect(partial.writes.join("")).toContain("- Gemini files: none outside review; could not scan checkouts/good.");
+  expect(partial.writes.join("")).toContain("- Gemini files: none outside review; could not scan the workspace, checkouts/good.");
   expect(partial.writes.join("")).toContain(
-    "Find out why Git could not list files in checkouts/good, such as a broken repository or a large ignored folder that outlasted the minute each listing gets, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.",
+    "Find out why Git could not list files in the workspace, checkouts/good, such as a broken repository or a large ignored folder that outlasted the minute each listing gets, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.",
   );
   // A scan that could not finish leaves the report without the field.
   const unread = fakeServices({ geminiFiles: () => undefined });
