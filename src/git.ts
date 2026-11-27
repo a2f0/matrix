@@ -38,15 +38,6 @@ export function gitEnvironment(): NodeJS.ProcessEnv {
  * they must for a correct checkout.
  */
 export function git(cwd: string, args: string[]): GitResult {
-  const result = gitUntrimmed(cwd, args);
-  return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
-}
-
-/**
- * `git` with its output as Git wrote it, as a `-z` listing whose names can begin or end with
- * spaces needs, and an optional limit in milliseconds, past which it throws.
- */
-export function gitUntrimmed(cwd: string, args: string[], timeout?: number): GitResult {
   const result = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], {
     cwd,
     encoding: "utf8",
@@ -54,10 +45,9 @@ export function gitUntrimmed(cwd: string, args: string[], timeout?: number): Git
     // Listings such as `ls-files -v` exceed the 1 MiB default in large repositories.
     maxBuffer: 256 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
-    ...(timeout !== undefined && { timeout }),
   });
   if (result.error) throw new Error(`Could not run git: ${result.error.message}`);
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
 }
 
 export function gitOutput(cwd: string, args: string[]): string {

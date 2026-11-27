@@ -2,9 +2,6 @@
 
 export const AGENT_TOOL = "@a2f0/agent-tool";
 
-/** The first agent-tool release that generates the Gemini policy; older pins reach it through agent-tool-latest's grace period. */
-export const GEMINI_POLICY_RELEASE = "0.1.78";
-
 /** Orders two `major.minor.patch` versions, negative when `left` is older. */
 export function compareVersions(left: string, right: string): number {
   const a = left.split(".").map(Number);

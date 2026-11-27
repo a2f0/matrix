@@ -440,7 +440,7 @@ and refactors; it does not replace the repository's validation.
 ### Review, approvals, and optional services
 
 omp can coordinate `ship-pr`; the pinned agent-tool's independent reviewer
-adapters remain Claude Code, Codex, and OpenCode. Choose a different
+adapters are Antigravity CLI (`agy`), Claude Code, Codex, and OpenCode. Choose a different
 model/provider from the author where possible. No omp reviewer adapter is
 required to author or ship from omp.
 
@@ -456,85 +456,36 @@ These discovery and LSP details follow omp 18.17.0's
 [LSP](https://github.com/can1357/oh-my-pi/blob/75e7801e247d4e3263439d4cc08ccad60dc64bdd/docs/lsp-config.md) contracts.
 They are runtime checks, not a requirement to add `.omp` files to every checkout.
 
-## Gemini CLI
+## Antigravity CLI (agy)
 
-Install Gemini CLI with Homebrew, `brew install gemini-cli`, which brings its
-own Node. Do not install it with `npm install -g` under mise: the global lands
-in one Node version's prefix, so its mise shim fails with "not provided by the
-active node" wherever another version is active, as in every checkout that
-pins a different one. Remove such a copy with
-`mise exec node@<version> -- npm uninstall -g @google/gemini-cli`, then
-`mise reshim`, so the stale shim stops shadowing Homebrew's binary.
+Install Antigravity CLI (`agy`) with the official shell script from
+[antigravity.google](https://antigravity.google/)
+(`curl -fsSL https://antigravity.google/cli/install.sh | bash`, which installs
+to `~/.local/bin/agy`) and update it with `agy update`.
 
-Gemini reads `GEMINI.md` by default, so set its
-[context file names](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/gemini-md.md)
-once in `~/.gemini/settings.json`, keeping `GEMINI.md` first so global
-memories stay in `~/.gemini/GEMINI.md`, and turn folder trust on explicitly,
-since older releases left it off:
+Start the coordinator with `agy` from the matrix root after the README's Quick
+start. No user configuration is needed to read repository guidance or skills:
+`agy` loads `AGENTS.md` natively (up to 24 KB per file, above matrix's
+20,000-character limit) and discovers the managed `.agents/skills` directory.
+Matrix's `.agents/skills.json` adds `skills/` so repository-owned skills such
+as `merged-commits` load from this checkout rather than personal copies.
 
-```json
-{
-  "context": { "fileName": ["GEMINI.md", "AGENTS.md"] },
-  "security": { "folderTrust": { "enabled": true } }
-}
-```
+Managed repositories carry no `GEMINI.md` and no `.gemini/` files beyond the
+Gemini Code Assist review bot's root `.gemini/config.yaml` and
+`.gemini/styleguide.md`, which configure GitHub reviews rather than a CLI; the
+audit's `no-gemini-config` rule checks this. Unlike the legacy Gemini CLI,
+`agy` does not read `.gemini/policies/*.toml` or load `.env` files into shell
+commands; it runs with its own native terminal sandbox and user-global
+`/permissions` rules in `~/.gemini/antigravity-cli/settings.json` rather than
+committed repository permission files. Global memories in `~/.gemini/GEMINI.md`
+still load in every repository, so keep project facts out of it.
 
-Managed repositories carry no `GEMINI.md` and no Gemini CLI files in
-`.gemini/`, such as settings, `.env`, commands, or skills, which the audit's
-`no-gemini-config` rule checks. The one exception is agent-tool's generated
-`.gemini/policies/agent-tool.toml` ([harness permissions](#harness-permissions)),
-which the permissions manifest records. The Gemini Code Assist review bot's root
-`.gemini/config.yaml` and `.gemini/styleguide.md` configure GitHub reviews,
-not the CLI, and stay allowed.
-
-It discovers the managed `.agents/skills` as workspace
-[skills](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/skills.md),
-which it loads only in a
-[trusted folder](https://github.com/google-gemini/gemini-cli/blob/v0.71.1/docs/cli/trusted-folders.md).
-An untrusted workspace also skips project settings and MCP servers.
-Trust each matrix clone with `TRUST_FOLDER` in `~/.gemini/trustedFolders.json`
-or the first-run dialog; the rule covers every checkout below it, whatever
-branch or local edits it holds.
-
-The audit sees only tracked files, and only when someone runs it. A PR
-branch's `.gemini/settings.json`, or an untracked one, can still run MCP
-servers, hooks, or discovery commands when Gemini starts in its directory.
-Review a branch you did not write in a separate clone outside the trusted
-folders, where Gemini runs untrusted and you read skills from
-`.agents/skills/<name>/SKILL.md`. In a trusted checkout, whenever a checkout,
-pull, or `sync` has changed what it holds since Gemini last started there, run
-`bun run health`. It lists, by name only and in any case, the untracked and
-ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini can load from the
-workspace and every checkout folder, managed or not (outside ignored
-`node_modules` and other installed or build trees), the tracked ones in an
-unmanaged folder, the `.env` files above them (absolute outside the home
-directory), and any folder it could not list, did not follow because it is a
-link, or did not reach within its one-minute limit, and suggests reviewing
-them. In a managed checkout, tracked files arrive only through a reviewed pull
-request: the audit flags a tracked `GEMINI.md` or `.gemini/` file, and that
-review covers a tracked `.env`, which Gemini loads into every shell command it
-runs.
-
-Gemini also loads the first `.gemini/.env` or `.env` it finds from the working
-directory upward, falling back to `~/.gemini/.env` or `~/.env`, into the
-environment every shell command it runs inherits, so a secret in any of them
-can be printed. A trusted folder loads every variable, an untrusted one only
-Gemini's authentication variables. Keep secret values in the `.secrets` link that
-[secrets](secrets.md) describes, never in a `.env` Gemini can find.
-
-`gemini skills list` from a checkout confirms the managed skills, and
-`/memory show` in a session confirms `AGENTS.md` loaded. Global memories in
-`~/.gemini/GEMINI.md` apply to every repository, so keep project facts out of
-it.
-
-agent-tool generates Gemini rules that allow its routine commands in the
-`default` approval mode when their arguments hold no shell syntax
-([harness permissions](#harness-permissions)); other shell commands, and
-routine ones with variables, substitution, parentheses, or braces, still ask,
-so a scoped title such as `pr open "fix(api): x"` prompts. Gemini asks once,
-when a session starts, to accept a new or changed policy file. agent-tool has
-no Gemini reviewer adapter, so Gemini cannot be `ship-pr`'s independent
-reviewer. These details follow Gemini CLI 0.71.1.
+`agy` is also a first-class independent review adapter
+(`agent-tool review agy [effort]`) and part of the `cross-agent-review`
+fallback chain; set `review.agyModel` in `agent-tool.json` (or `--config`) to
+pick a model from another provider when authoring in `agy`. For optional Sentry
+access, register the shared launcher once in user scope as
+[secrets](secrets.md#sentry-mcp) describes.
 
 ## State machines
 
@@ -546,8 +497,8 @@ code explicit: one closed state type that carries each state's data, typed
 events, and one pure transition function, with async work tagged so only the
 current request can finish.
 
-Three pieces carry the standard, and all of them work in Claude Code, Codex,
-OpenCode, Hermes, and omp:
+Three pieces carry the standard, and all of them work in Antigravity CLI
+(`agy`), Claude Code, Codex, OpenCode, Hermes, and omp:
 
 - The `explicit-state-machines` skill, which agent-tool ships as a managed
   skill from 0.1.51 (`agent-tool skills install --apply` puts it in
@@ -586,15 +537,16 @@ lists leads. Reviews flag new implicit machines.
 
 Agents can work without blanket approval when routine commands run freely and
 consequential ones ask. agent-tool assigns each of its commands a permission
-class and generates Claude Code, Codex, and Gemini CLI rules from them, as its
-[permissions guide](https://github.com/a2f0/agent-tool/blob/6e5b75cc5a15164be0e6ebf0cdcfc3c3a03d301f/docs/permissions.md)
-describes. Every managed repository that pins agent-tool:
+class and generates Claude Code and Codex rules from them, as its
+[permissions guide](https://github.com/a2f0/agent-tool/blob/main/docs/permissions.md)
+describes. Antigravity CLI (`agy`) uses its own native terminal sandbox and
+user-global `/permissions` rules rather than committed repository permission
+files. Every managed repository that pins agent-tool:
 
 - commits the generated `.claude/settings.json`, `.codex/rules/agent-tool.rules`,
-  `.gemini/policies/agent-tool.toml`, and `.agent-tool-permissions.json`,
-  written by
+  and `.agent-tool-permissions.json`, written by
   `agent-tool permissions install --apply`, which `agents:sync` runs after
-  installing skills;
+  installing skills (and which removes any retired `.gemini/policies/agent-tool.toml`);
 - runs `agent-tool permissions check` wherever it checks managed skills,
   usually in the `agents:check` script, so a stale rule fails CI;
 - classifies, in the `permissions.executables` section of `agent-tool.json`,
@@ -605,25 +557,13 @@ describes. Every managed repository that pins agent-tool:
 Agents then run tests and classified executables through
 `agent-tool bun test|x`, and change dependencies through
 `agent-tool bun update|remove`. Adding a dependency, merges, and publishing
-prompt in Codex. For Claude Code and Gemini the generated rules only allow:
-an explicit Claude `ask` rule prompts even in `bypassPermissions` mode, and
-Gemini's rules apply in its `default` mode alone, leaving other modes to the
-user's own rules. Those classes are left to the user's mode, and the guide's
-auto-mode block makes the classifier hold them until the user asks. Package
-scripts are not classified, so `bun run` and `agent:run` keep the harness
-default. `bun run audit --rule harness-permissions` reports repositories that
-lack the files or the check. It also reports a manifest that is not a JSON
-object, at any pin, and, from a pin of agent-tool 0.1.78, which generates the
-Gemini policy:
-
-- a scope that is neither `all` nor a list of harness names;
-- a scope covering Gemini (`all`, a list naming it, or none) without a
-  committed `.gemini/policies/agent-tool.toml` the manifest records;
-- that policy edited after agent-tool wrote it, so its bytes no longer match
-  the recorded sha256.
-
-A scope that lists harnesses without Gemini is a repository's choice.
-`no-gemini-config` allows the policy only where none of these applies.
+prompt in Codex. For Claude Code the generated rules only allow: an explicit
+Claude `ask` rule prompts even in `bypassPermissions` mode, so asking classes
+are left to the user's mode, and the guide's auto-mode block makes the
+classifier hold them until the user asks. Package scripts are not classified,
+so `bun run` and `agent:run` keep the harness default.
+`bun run audit --rule harness-permissions` reports repositories that lack the
+files, have an unreadable manifest, or omit the check.
 
 ## Shared skills
 
@@ -637,13 +577,13 @@ checkout's pin. A skill only one repository uses
 stays in that repository's skill folders.
 
 Install them only through a repository's pin, never by linking a clone's copy
-into `~/.agents/skills` or a Claude Code configuration directory's `skills/`.
-Claude Code prefers a personal skill to the project's managed copy of the same
-name, and reads personal skills only from the configuration directory it runs
-with, so a link would override every repository's pin and reach only one of
-`~/.claude` and dotfiles' `~/.claude2`. `bun run health` lists each personal
-skill named like one the workspace's agent-tool manages, link or not, in
-`~/.agents/skills` and every configuration directory agent-tool would find.
-Login, folder trust, plugins, and
-user-scope MCP servers such as [Sentry](secrets.md#sentry-mcp) stay per
-configuration directory.
+into `~/.agents/skills`, `~/.gemini/antigravity-cli/skills`, `~/.gemini/skills`,
+or a Claude Code configuration directory's `skills/`. Claude Code and
+Antigravity CLI (`agy`) prefer a personal skill to the project's managed copy
+of the same name, so a personal copy or link overrides every repository's pin.
+`bun run health` lists each personal skill named like one the workspace's
+agent-tool manages, link or not, across `~/.agents/skills`,
+`~/.gemini/antigravity-cli/skills`, `~/.gemini/skills`, and every Claude Code
+configuration directory agent-tool would find. Login, folder trust, plugins,
+and user-scope MCP servers such as [Sentry](secrets.md#sentry-mcp) stay per
+harness configuration directory.

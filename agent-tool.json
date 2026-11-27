@@ -20,7 +20,6 @@
       {
         "name": "primitives",
         "include": [
-          "src/geminiFiles.ts",
           "src/gh.ts",
           "src/git.ts",
           "src/manifest.ts",

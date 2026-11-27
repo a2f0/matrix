@@ -186,9 +186,9 @@ live in each repository's maintenance docs.
 
 The shared skills come from the exact-pinned
 [`@a2f0/agent-tool`](https://www.npmjs.com/package/@a2f0/agent-tool) package,
-which installs matching copies for Claude in `.claude/skills` and Codex in
-`.agents/skills`; OpenCode and omp discover these existing skill layouts too,
-and Gemini CLI reads `.agents/skills` in a trusted folder.
+which installs matching copies for Claude in `.claude/skills` and
+Antigravity CLI (`agy`), Codex, OpenCode, and Hermes in `.agents/skills`;
+OpenCode and omp discover both layouts too.
 
 [Tooling and layout](docs/tooling.md) defines shared command ownership, script
 locations, and documentation structure across the matrix. Repository-specific

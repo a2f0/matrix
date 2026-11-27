@@ -1,11 +1,9 @@
 // Fixtures shared by matrix tests: temporary directories that clean up after
 // each test, Git with a fixed identity, and file trees.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import path from "node:path";
-import { compareVersions, GEMINI_POLICY_RELEASE } from "./packageJson";
 
 const temporary: string[] = [];
 
@@ -82,10 +80,6 @@ export function gitInit(directory: string): void {
   cpSync(template, path.join(directory, ".git"), { recursive: true });
 }
 
-/** The Gemini policy a fixture pinned at agent-tool 0.1.78 or later commits, and the manifest entry recording it. */
-const GEMINI_FIXTURE_POLICY = '[[rule]]\ntoolName = "run_shell_command"\ncommandRegex = \'agent-tool doctor( |")\'\ndecision = "allow"\npriority = 0\n';
-export const GEMINI_FIXTURE_RECORD = { file: ".gemini/policies/agent-tool.toml", sha256: createHash("sha256").update(GEMINI_FIXTURE_POLICY).digest("hex") };
-
 /**
  * A checkout meeting every audit standard, pinned to `agentTool`, at
  * `directory` with an SSH origin named after it. `files` override or, with
@@ -94,7 +88,6 @@ export const GEMINI_FIXTURE_RECORD = { file: ".gemini/policies/agent-tool.toml",
 export function checkoutFixture(directory: string, agentTool: string, files: Record<string, string | null> = {}): void {
   const name = path.basename(directory);
   if (!/^\d+\.\d+\.\d+$/.test(agentTool)) throw new Error(`checkoutFixture needs an exact agent-tool version, not ${agentTool}`);
-  const generatesGemini = compareVersions(agentTool, GEMINI_POLICY_RELEASE) >= 0;
   const all: Record<string, string | null> = {
     "AGENTS.md": GUIDANCE,
     "README.md": README,
@@ -104,11 +97,9 @@ export function checkoutFixture(directory: string, agentTool: string, files: Rec
       scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", "agents:check": "agent-tool skills check && agent-tool permissions check" },
       devDependencies: { "@a2f0/agent-tool": agentTool },
     }),
-    // A pin that generates Gemini rules records its policy, as its sync writes it.
-    ".agent-tool-permissions.json": JSON.stringify(generatesGemini ? { schemaVersion: 1, gemini: GEMINI_FIXTURE_RECORD } : { schemaVersion: 1 }),
+    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1 }),
     ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
     ".codex/rules/agent-tool.rules": 'prefix_rule(pattern=["agent-tool", "doctor"], decision="allow")\n',
-    ".gemini/policies/agent-tool.toml": generatesGemini ? GEMINI_FIXTURE_POLICY : null,
     "agent-tool.json": JSON.stringify({ schemaVersion: 1 }),
     ".agent-tool-skills.json": JSON.stringify({
       schemaVersion: 1,

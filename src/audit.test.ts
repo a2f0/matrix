@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
 import path from "node:path";
 import { AGENT_TOOL_GRACE_DAYS, AGENTS_MD_MAX_CHARS, type AuditContext, audit, MINIMUM_AGENT_TOOL, RULES, selectRules } from "./audit";
 import type { CheckoutStatus } from "./checkouts";
-import { GEMINI_POLICY_RELEASE } from "./packageJson";
 import type { PushGateResult } from "./pushGates";
-import { checkoutFixture, GEMINI_FIXTURE_RECORD, GUIDANCE, gitIn, README, SPAWNS, tempDir } from "./testFixtures";
+import { checkoutFixture, GUIDANCE, gitIn, README, SPAWNS, tempDir } from "./testFixtures";
 
 let root: string;
 const RELEASES = {
@@ -24,12 +23,6 @@ const context: AuditContext = {
 /** A checkout that meets every standard, with overrides; a null value deletes the file. */
 function checkout(name: string, files: Record<string, string | null> = {}): string {
   checkoutFixture(path.join(root, "checkouts", name), MINIMUM_AGENT_TOOL, files);
-  return `a2f0/${name}`;
-}
-
-/** The same at the first pin that generates and records a Gemini policy. */
-function current(name: string, files: Record<string, string | null> = {}): string {
-  checkoutFixture(path.join(root, "checkouts", name), GEMINI_POLICY_RELEASE, files);
   return `a2f0/${name}`;
 }
 
@@ -144,41 +137,17 @@ describe("audit", () => {
     });
   });
 
-  test("allows agent-tool's Gemini policy only where the permissions manifest records it", () => {
-    expect(failures(current("generated"), ["no-gemini-config", "harness-permissions"])).toEqual({});
-    // Below the release that generates it, nothing checks a recorded policy's content, so it is hand-written.
-    const older = checkout("older-policy", {
+  test("rejects retired Gemini CLI policy files and other-case Gemini config", () => {
+    const retired = checkout("retired-policy", {
       ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) } }),
       ".gemini/policies/agent-tool.toml": "x\n",
     });
-    expect(failures(older, ["no-gemini-config"])).toEqual({ "no-gemini-config": "tracked .gemini/policies/agent-tool.toml" });
-    // So is one recorded under a scope that leaves Gemini out, or one no release writes.
-    for (const [name, scope] of [
-      ["excluded-policy", ["claude", "codex"]],
-      ["invalid-policy", "al"],
-    ] as const) {
-      const repo = current(name, {
-        ".agent-tool-permissions.json": JSON.stringify({
-          schemaVersion: 1,
-          scope,
-          gemini: GEMINI_FIXTURE_RECORD,
-        }),
-      });
-      expect(failures(repo, ["no-gemini-config"])).toEqual({ "no-gemini-config": "tracked .gemini/policies/agent-tool.toml" });
-    }
-    // Without the record, or with one naming another file, it is a hand-written policy.
-    for (const manifest of [{ schemaVersion: 1 }, { schemaVersion: 1, gemini: { file: ".gemini/settings.json", sha256: "0".repeat(64) } }]) {
-      const repo = current(`unrecorded-${Object.keys(manifest).length}`, {
-        ".agent-tool-permissions.json": JSON.stringify(manifest),
-        ".gemini/settings.json": "{}\n",
-      });
-      expect(failures(repo, ["no-gemini-config"])["no-gemini-config"]).toBe("tracked .gemini/policies/agent-tool.toml, .gemini/settings.json");
-    }
-    expect(failures(current("nested-policy", { "packages/web/.gemini/policies/agent-tool.toml": "x\n" }), ["no-gemini-config"])).toEqual({
+    expect(failures(retired, ["no-gemini-config"])).toEqual({ "no-gemini-config": "tracked .gemini/policies/agent-tool.toml" });
+    expect(failures(checkout("nested-policy", { "packages/web/.gemini/policies/agent-tool.toml": "x\n" }), ["no-gemini-config"])).toEqual({
       "no-gemini-config": "tracked packages/web/.gemini/policies/agent-tool.toml",
     });
-    // Gemini opens these by name, so on macOS's default file system a name in another case loads too.
-    expect(failures(current("other-case", { "docs/gemini.md": "x\n", "packages/api/.Gemini/settings.json": "{}\n" }), ["no-gemini-config"])).toEqual({
+    // macOS's default file system is case-insensitive, so other-case names load too.
+    expect(failures(checkout("other-case", { "docs/gemini.md": "x\n", "packages/api/.Gemini/settings.json": "{}\n" }), ["no-gemini-config"])).toEqual({
       "no-gemini-config": "tracked docs/gemini.md, packages/api/.Gemini/settings.json",
     });
   });
@@ -239,57 +208,7 @@ describe("audit", () => {
     expect(failures(missing, ["harness-permissions"])["harness-permissions"]).toBe(
       "no .codex/rules/agent-tool.rules; run agent-tool permissions install --apply; neither the agents:check script nor a workflow runs agent-tool permissions check",
     );
-    // From agent-tool 0.1.78, which generates it, a scope covering Gemini needs its committed, recorded policy.
-    const manifest = (value: object) => ({ ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, ...value }) });
-    const recorded = { gemini: GEMINI_FIXTURE_RECORD };
-    const gemini = "no committed .gemini/policies/agent-tool.toml recorded in .agent-tool-permissions.json; run agent-tool permissions install --apply";
-    expect(failures(current("generated-rules"), ["harness-permissions"])).toEqual({});
-    for (const [name, files] of [
-      ["no-policy", { ".gemini/policies/agent-tool.toml": null }],
-      ["no-record", manifest({})],
-      ["other-path", manifest({ scope: "all", gemini: { file: ".gemini/settings.json", sha256: "x" } })],
-      ["listed", manifest({ scope: ["claude", "gemini"] })],
-    ] as const)
-      expect(failures(current(name, files), ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
-    // A recorded policy on disk that is not committed reaches no review.
-    const untracked = current("untracked-policy", { ".gemini/policies/agent-tool.toml": null });
-    const policies = path.join(root, "checkouts", "untracked-policy", ".gemini", "policies");
-    mkdirSync(policies, { recursive: true });
-    writeFileSync(path.join(policies, "agent-tool.toml"), "x\n");
-    expect(failures(untracked, ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
-    // A committed policy deleted from the checkout is named as missing, not edited.
-    const deleted = current("deleted-policy");
-    rmSync(path.join(root, "checkouts", "deleted-policy", ".gemini", "policies", "agent-tool.toml"));
-    expect(failures(deleted, ["no-gemini-config", "harness-permissions"])).toEqual({
-      "harness-permissions": ".gemini/policies/agent-tool.toml is committed but missing from the checkout; restore it with git restore",
-    });
-    // A policy edited after agent-tool wrote it no longer matches its recorded sha256.
-    const edited = current("edited-policy", { ".gemini/policies/agent-tool.toml": '[[rule]]\ndecision = "allow"\n' });
-    expect(failures(edited, ["no-gemini-config", "harness-permissions"])).toEqual({
-      "no-gemini-config": "tracked .gemini/policies/agent-tool.toml",
-      "harness-permissions":
-        ".gemini/policies/agent-tool.toml differs from the sha256 .agent-tool-permissions.json records; move the edit aside and run agent-tool permissions install --apply",
-    });
-    // An older pin has no Gemini policy to generate yet: agent-tool-latest moves it, after its grace period.
-    expect(failures(checkout("older"), ["harness-permissions"])).toEqual({});
-    // A list of harnesses without Gemini is the repository's choice, whatever harness a later release adds.
-    for (const [name, scope] of [
-      ["chosen", ["claude", "codex"]],
-      ["later", ["claude", "opencode"]],
-    ] as const)
-      expect(failures(current(name, { ...manifest({ scope }), ".gemini/policies/agent-tool.toml": null }), ["harness-permissions"])).toEqual({});
-    // Any other scope, which no release writes, and an unreadable manifest at any pin, are named.
-    for (const [name, scope] of [
-      ["typo", "al"],
-      ["single", "gemini"],
-      ["empty", []],
-      ["numbers", [1]],
-      ["object", {}],
-    ] as const)
-      expect(failures(current(name, manifest({ ...recorded, scope })), ["harness-permissions"])).toEqual({
-        "harness-permissions": `.agent-tool-permissions.json records scope ${JSON.stringify(scope)}, which is neither all nor a list of harnesses; run agent-tool permissions install --apply`,
-      });
-    for (const repo of [current("broken", { ".agent-tool-permissions.json": "{" }), checkout("broken-older", { ".agent-tool-permissions.json": "[]" })])
+    for (const repo of [checkout("broken", { ".agent-tool-permissions.json": "{" }), checkout("broken-array", { ".agent-tool-permissions.json": "[]" })])
       expect(failures(repo, ["harness-permissions"])).toEqual({
         "harness-permissions": ".agent-tool-permissions.json is not a JSON object; run agent-tool permissions install --apply",
       });

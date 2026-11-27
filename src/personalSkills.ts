@@ -1,8 +1,9 @@
 // Personal skills that override managed ones. agent-tool installs the shared skills into each
-// repository, and Claude Code prefers a personal skill (~/.claude/skills, or the skills/ of the
-// configuration directory it runs with) to a project skill of the same name, so a personal copy
-// or a link to another clone's copy silently replaces every repository's pinned one. Health
-// reports any that remain; removing one stays a person's decision.
+// repository, and Claude Code (~/.claude/skills, or the skills/ of its config directory) and
+// Antigravity CLI (~/.gemini/antigravity-cli/skills and ~/.gemini/skills) prefer a personal skill
+// to a project skill of the same name, so a personal copy or a link to another clone's copy
+// silently replaces every repository's pinned one. Health reports any that remain; removing one
+// stays a person's decision.
 
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -55,11 +56,17 @@ export function managedSkillNames(root: string): string[] | undefined {
 }
 
 /**
- * Entries in `~/.agents/skills` and each configuration directory's `skills/` named like a managed
- * skill: links (dangling or not), directories, or files, as `~/...` paths.
+ * Entries in `~/.agents/skills`, Antigravity CLI's `~/.gemini/antigravity-cli/skills` and
+ * `~/.gemini/skills`, and each Claude Code configuration directory's `skills/` named like a
+ * managed skill: links (dangling or not), directories, or files, as `~/...` paths.
  */
 export function shadowingSkills(managed: string[], home = homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
-  const directories = [path.join(home, ".agents", "skills"), ...claudeConfigDirs(home, env).map(directory => path.join(directory, "skills"))];
+  const directories = [
+    path.join(home, ".agents", "skills"),
+    path.join(home, ".gemini", "antigravity-cli", "skills"),
+    path.join(home, ".gemini", "skills"),
+    ...claudeConfigDirs(home, env).map(directory => path.join(directory, "skills")),
+  ];
   return directories.flatMap(directory =>
     managed
       .map(name => path.join(directory, name))

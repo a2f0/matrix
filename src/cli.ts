@@ -1,10 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, statfsSync, statSync, writeSync } from "node:fs";
+import { existsSync, statfsSync, writeSync } from "node:fs";
 import path from "node:path";
 import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
-import { type CheckoutFolders, type GeminiScan, geminiFiles } from "./geminiFiles";
 import { type Gh, runGh } from "./gh";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DefaultBranchHealth, type DiskSpace, markdownHealth, type ScreenshotLinks } from "./health";
@@ -83,8 +82,6 @@ export interface Services {
   screenshotLinks(root: string): ScreenshotLinks | undefined;
   /** Personal skills on this machine named like a skill the workspace's agent-tool manages; undefined when unreadable. */
   personalSkills(root: string): string[] | undefined;
-  /** Untracked or ignored files Gemini CLI can load from the workspace and these checkouts, tracked ones in the unmanaged checkouts, `.env` files above them, and the folders the scan could not list; undefined when the scan itself fails. */
-  geminiFiles(root: string, folders: CheckoutFolders): GeminiScan | undefined;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {
@@ -274,14 +271,6 @@ const SERVICES: Services = {
     try {
       const managed = managedSkillNames(root);
       return managed && shadowingSkills(managed);
-    } catch {
-      return undefined;
-    }
-  },
-  geminiFiles: (root, folders) => {
-    // A scan Git cannot finish leaves the field out rather than claiming nothing is there.
-    try {
-      return geminiFiles(root, folders);
     } catch {
       return undefined;
     }
@@ -526,13 +515,6 @@ const COMMANDS = new Map<string, Handler>([
         running: teardownAll(workspaceTargets(root, manifest, []), directory => services.teardown(root, directory, false), false),
         screenshots: services.screenshotLinks(root),
         personalSkills: services.personalSkills(root),
-        // Every checkout folder on disk, managed or not, since folder trust covers them all; the scan
-        // names one Git cannot list, as for a checkout whose status reports an error, or a link it
-        // does not follow. A file, or a link to one, is no folder a session starts in.
-        geminiFiles: services.geminiFiles(root, {
-          managed: manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
-          unmanaged: unmanaged.map(entry => path.join(root, entry)).filter(entry => !isFile(entry)),
-        }),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
           defaultBranches: manifest.repos.filter(repo => statusOf(repo).present).map(repo => services.baseHealth(root, repo, checkoutPath(root, repo))),
@@ -594,13 +576,4 @@ export function main(argv = process.argv.slice(2), root = ROOT, gh: Gh = runGh, 
   const handler = COMMANDS.get(command);
   if (!handler) throw new Error(`Unknown command '${command}'. Run matrix --help.`);
   return handler(args, { root, manifest, gh, services, output: value => json(services, value) });
-}
-
-/** Whether `entry` is a file or a link to one; an entry `stat` cannot read, such as a link loop, is left for the scan to name. */
-function isFile(entry: string): boolean {
-  try {
-    return statSync(entry, { throwIfNoEntry: false })?.isFile() === true;
-  } catch {
-    return false;
-  }
 }
