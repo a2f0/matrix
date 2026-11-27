@@ -138,7 +138,7 @@ export interface GeminiScan {
 }
 
 /**
- * Every file Gemini CLI would load that no review sees: untracked and ignored ones in the
+ * Every file Gemini CLI can load that no review sees: untracked and ignored ones in the
  * workspace (outside `checkouts/`) and in each checkout, and tracked ones in an unmanaged
  * checkout, which no audit covers, relative to the workspace, then the `.env` files above them. A folder Git cannot list, the workspace as `.`, is reported, not
  * allowed to hide the rest, and so is every folder the scan's `budget` in milliseconds leaves and

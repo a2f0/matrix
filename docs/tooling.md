@@ -504,7 +504,7 @@ folders, where Gemini runs untrusted and you read skills from
 `.agents/skills/<name>/SKILL.md`. In a trusted checkout, whenever a checkout,
 pull, or `sync` has changed what it holds since Gemini last started there, run
 `bun run health`. It lists, by name only and in any case, the untracked and
-ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini would load from the
+ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini can load from the
 workspace and every checkout folder, managed or not (outside ignored
 `node_modules` and other installed or build trees), the tracked ones in an
 unmanaged folder, the `.env` files above them (absolute outside the home

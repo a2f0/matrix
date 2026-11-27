@@ -58,9 +58,10 @@ export interface HealthInputs {
   /** Personal skills named like a skill agent-tool manages here, which override that managed copy; `~/...` under the home directory. */
   readonly personalSkills?: string[];
   /**
-   * Untracked or ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini CLI would load from the workspace and
-   * its checkouts, relative to the workspace, then `.env` files above them, and the checkouts Git
-   * could not list; absent when the workspace is unreadable.
+   * Untracked or ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini CLI can load from the
+   * workspace and its checkouts, and tracked ones in an unmanaged checkout, relative to the
+   * workspace, then `.env` files above them, and the folders the scan could not list; absent when
+   * the scan itself fails.
    */
   readonly geminiFiles?: GeminiScan;
 }
@@ -119,7 +120,7 @@ function gib(bytes: number): string {
 
 /**
  * Suggestions about this machine: disk space, leftover processes, Git transport, personal skills
- * that override managed ones, and files Gemini CLI would load that no review sees.
+ * that override managed ones, and files Gemini CLI can load that no review sees.
  */
 function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string[]): string[] {
   const suggestions: string[] = [];
@@ -145,13 +146,13 @@ function unscannedNames(unscanned: readonly string[]): string[] {
   return unscanned.map(folder => (folder === "." ? "the workspace" : folder));
 }
 
-/** Files Gemini CLI would load that no review sees, then checkouts Git could not list for them. */
+/** Files Gemini CLI can load that no review sees, from a session started at or below them, then folders the scan could not list. */
 function geminiSuggestions(scan: GeminiScan | undefined): string[] {
   const { files = [], unscanned = [] } = scan ?? {};
   return [
     ...(files.length > 0
       ? [
-          `Review ${plural(files.length, "file")} Gemini CLI would load that no review sees (${list(files)}): keep secrets in \`.secrets\` and remove what nothing needs; see docs/tooling.md#gemini-cli.`,
+          `Review ${plural(files.length, "file")} Gemini CLI can load that no review sees (${list(files)}): keep secrets in \`.secrets\` and remove what nothing needs; see docs/tooling.md#gemini-cli.`,
         ]
       : []),
     ...(unscanned.length > 0

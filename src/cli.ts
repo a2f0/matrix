@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, statfsSync, writeSync } from "node:fs";
+import { existsSync, statfsSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
 import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
@@ -83,7 +83,7 @@ export interface Services {
   screenshotLinks(root: string): ScreenshotLinks | undefined;
   /** Personal skills on this machine named like a skill the workspace's agent-tool manages; undefined when unreadable. */
   personalSkills(root: string): string[] | undefined;
-  /** Untracked or ignored files Gemini CLI would load from the workspace and these checkouts, `.env` files above them, and the checkouts Git could not list; undefined when the workspace is unreadable. */
+  /** Untracked or ignored files Gemini CLI can load from the workspace and these checkouts, tracked ones in the unmanaged checkouts, `.env` files above them, and the folders the scan could not list; undefined when the scan itself fails. */
   geminiFiles(root: string, folders: CheckoutFolders): GeminiScan | undefined;
 }
 
@@ -531,7 +531,8 @@ const COMMANDS = new Map<string, Handler>([
         // does not follow. A file under checkouts/ is no folder a session starts in.
         geminiFiles: services.geminiFiles(root, {
           managed: manifest.repos.filter(repo => statusOf(repo).present).map(repo => checkoutPath(root, repo)),
-          unmanaged: unmanaged.map(entry => path.join(root, entry)).filter(entry => !lstatSync(entry, { throwIfNoEntry: false })?.isFile()),
+          // A file, or a link to one, is no folder a session starts in; a link to a folder is named by the scan.
+          unmanaged: unmanaged.map(entry => path.join(root, entry)).filter(entry => !statSync(entry, { throwIfNoEntry: false })?.isFile()),
         }),
         ...(remote && {
           discovery: planDiscovery(manifest, services.listOwnerRepos(manifest.discover)),
