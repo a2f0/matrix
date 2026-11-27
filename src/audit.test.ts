@@ -152,6 +152,20 @@ describe("audit", () => {
       ".gemini/policies/agent-tool.toml": "x\n",
     });
     expect(failures(older, ["no-gemini-config"])).toEqual({ "no-gemini-config": "tracked .gemini/policies/agent-tool.toml" });
+    // So is one recorded under a scope that leaves Gemini out, or one no release writes.
+    for (const [name, scope] of [
+      ["excluded-policy", ["claude", "codex"]],
+      ["invalid-policy", "al"],
+    ] as const) {
+      const repo = current(name, {
+        ".agent-tool-permissions.json": JSON.stringify({
+          schemaVersion: 1,
+          scope,
+          gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) },
+        }),
+      });
+      expect(failures(repo, ["no-gemini-config"])).toEqual({ "no-gemini-config": "tracked .gemini/policies/agent-tool.toml" });
+    }
     // Without the record, or with one naming another file, it is a hand-written policy.
     for (const manifest of [{ schemaVersion: 1 }, { schemaVersion: 1, gemini: { file: ".gemini/settings.json", sha256: "0".repeat(64) } }]) {
       const repo = current(`unrecorded-${Object.keys(manifest).length}`, {

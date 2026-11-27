@@ -22,14 +22,19 @@ export const MINIMUM_AGENT_TOOL = "0.1.21";
 /** Where `agent-tool permissions install` writes Gemini CLI rules, from agent-tool 0.1.78 on. */
 const GEMINI_POLICY = ".gemini/policies/agent-tool.toml";
 
+/** The checkout's permissions manifest, parsed once per question; undefined when it is missing or not a JSON object. */
+function permissionsManifest(checkout: Checkout): Record<string, unknown> | undefined {
+  return parseObject(checkout.read(".agent-tool-permissions.json"));
+}
+
 /**
- * The Gemini policy the checkout's permissions manifest records, so `permissions check` keeps it
- * current; undefined without one, or below the release that generates it, where nothing checks it.
+ * The Gemini policy `manifest` records, so `permissions check` keeps it current: undefined without
+ * one, below the release that generates it, or where the scope leaves Gemini out, since nothing
+ * checks it there.
  */
-function recordedGeminiPolicy(checkout: Checkout): string | undefined {
-  if (!generatesGeminiPolicy(checkout)) return undefined;
-  const recorded = object(parseObject(checkout.read(".agent-tool-permissions.json"))?.gemini)?.file;
-  return recorded === GEMINI_POLICY ? GEMINI_POLICY : undefined;
+function recordedGeminiPolicy(checkout: Checkout, manifest: Record<string, unknown> | undefined): string | undefined {
+  if (!manifest || !generatesGeminiPolicy(checkout) || geminiScope(manifest.scope) !== "covers") return undefined;
+  return object(manifest.gemini)?.file === GEMINI_POLICY ? GEMINI_POLICY : undefined;
 }
 
 /** Whether the checkout pins an agent-tool release that generates the Gemini policy. */
@@ -60,13 +65,13 @@ function geminiScope(scope: unknown): "covers" | "excludes" | "invalid" {
 function geminiPolicyProblem(checkout: Checkout): string | undefined {
   const file = ".agent-tool-permissions.json";
   if (!checkout.exists(file)) return undefined;
-  const manifest = parseObject(checkout.read(file));
+  const manifest = permissionsManifest(checkout);
   if (!manifest) return `${file} is not a JSON object; run agent-tool permissions install --apply`;
   if (!generatesGeminiPolicy(checkout)) return undefined;
   const scope = geminiScope(manifest.scope);
   if (scope === "invalid")
     return `${file} records scope ${JSON.stringify(manifest.scope)}, which is neither all nor a list of harnesses; run agent-tool permissions install --apply`;
-  if (scope === "covers" && (!recordedGeminiPolicy(checkout) || checkout.tracked(GEMINI_POLICY).length === 0))
+  if (scope === "covers" && (!recordedGeminiPolicy(checkout, manifest) || checkout.tracked(GEMINI_POLICY).length === 0))
     return `no committed ${GEMINI_POLICY} recorded in ${file}; run agent-tool permissions install --apply`;
   return undefined;
 }
@@ -479,9 +484,10 @@ export const RULES: readonly Rule[] = [
     source: ONBOARDING,
     check: checkout => {
       // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews,
-      // and agent-tool's generated policy is allowed where its permissions manifest records it. Its content is
-      // agent-tool permissions check's to verify, which harness-permissions requires CI to run.
-      const generated = recordedGeminiPolicy(checkout);
+      // and agent-tool's generated policy is allowed where its permissions manifest records it under a scope
+      // covering Gemini. Its content is agent-tool permissions check's to verify, which harness-permissions
+      // requires CI to run.
+      const generated = recordedGeminiPolicy(checkout, permissionsManifest(checkout));
       const files = checkout
         .tracked(":(glob)**/GEMINI.md", ":(glob)**/.gemini/**")
         .filter(file => !/^\.gemini\/(config\.yaml|styleguide\.md)$/.test(file) && file !== generated);
