@@ -4,7 +4,7 @@ import path from "node:path";
 import { type AuditContext, audit, registryReleases, selectRules } from "./audit";
 import { type CheckoutStatus, checkoutStatus, staleInstalls, syncRepo, unmanagedCheckouts } from "./checkouts";
 import { byName, listOwnerRepos, planDiscovery } from "./discover";
-import { geminiFiles } from "./geminiFiles";
+import { type GeminiScan, geminiFiles } from "./geminiFiles";
 import { type Gh, runGh } from "./gh";
 import { type GitTransport, inspectGitTransport } from "./gitTransport";
 import { assessHealth, type DefaultBranchHealth, type DiskSpace, markdownHealth, type ScreenshotLinks } from "./health";
@@ -83,8 +83,8 @@ export interface Services {
   screenshotLinks(root: string): ScreenshotLinks | undefined;
   /** Personal skills on this machine named like a skill the workspace's agent-tool manages; undefined when unreadable. */
   personalSkills(root: string): string[] | undefined;
-  /** Untracked or ignored files Gemini CLI would load from the workspace and these checkouts, and `.env` files above them; undefined when unreadable. */
-  geminiFiles(root: string, checkouts: string[]): string[] | undefined;
+  /** Untracked or ignored files Gemini CLI would load from the workspace and these checkouts, `.env` files above them, and the checkouts Git could not list; undefined when the workspace is unreadable. */
+  geminiFiles(root: string, checkouts: string[]): GeminiScan | undefined;
 }
 
 function teardown(root: string, directory: string, apply: boolean): AgentToolTeardown {

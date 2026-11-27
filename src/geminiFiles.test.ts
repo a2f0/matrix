@@ -40,6 +40,7 @@ test(
 );
 
 test("finds the .env files Gemini's upward search reaches above the workspace, nearest first, by home-relative name", () => {
+  // A linked home resolves too, so files under it show once, as \`~/...\`.
   // A link to the workspace resolves first, as Gemini starts from its real working directory.
   const base = realpathSync(tempDir("matrix-above"));
   const root = path.join(base, "github", "matrix"),
@@ -48,6 +49,8 @@ test("finds the .env files Gemini's upward search reaches above the workspace, n
   symlinkSync(root, path.join(base, "link"));
   write(base, ["github/matrix/checkouts/.env", "github/.gemini/.env", "github/.env", ".env", "home/.gemini/.env", "home/.env", "github/matrix/.env"]);
   const inFixture = (files: string[]) => files.filter(file => file.startsWith(base) || file.startsWith("~"));
+  symlinkSync(home, path.join(base, "home-link"));
+  expect(inFixture(envFilesAbove(path.join(base, "link"), path.join(base, "home-link")))).toEqual(inFixture(envFilesAbove(path.join(base, "link"), home)));
   expect(inFixture(envFilesAbove(path.join(base, "link"), home))).toEqual([
     path.join(root, "checkouts", ".env"),
     path.join(base, "github", ".gemini", ".env"),
@@ -67,15 +70,20 @@ test(
     mkdirSync(checkout, { recursive: true });
     gitInit(root);
     gitInit(checkout);
-    write(root, [".gemini/settings.json", "checkouts/demo/.env", "checkouts/demo/app/.gemini/.env"]);
+    write(root, [".gemini/settings.json", "checkouts/demo/.env", "checkouts/demo/app/.gemini/.env", "checkouts/demo/.venv/lib/pkg/.env"]);
     write(base, [".env"]);
-    const files = geminiFiles(root, [checkout], path.join(base, "home"));
+    // A checkout Git cannot list is reported on its own, and the others are still scanned.
+    const broken = path.join(root, "checkouts", "broken");
+    mkdirSync(broken, { recursive: true });
+    writeFileSync(path.join(broken, ".git"), "gitdir: /nonexistent\n");
+    const { files, unscanned } = geminiFiles(root, [broken, checkout], path.join(base, "home"));
     expect(files.filter(file => !file.startsWith("/") || file.startsWith(base))).toEqual([
       ".gemini/settings.json",
       "checkouts/demo/.env",
       "checkouts/demo/app/.gemini/.env",
       path.join(base, ".env"),
     ]);
+    expect(unscanned).toEqual(["checkouts/broken"]);
   },
   SPAWNS,
 );

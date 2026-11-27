@@ -11,10 +11,15 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 /**
- * `.gemini/` contents and `.env` files at any depth, outside `node_modules`, where no session
- * starts and whose search would take a while in a large checkout.
+ * `.gemini/` contents and `.env` files at any depth, outside installed and generated trees such as
+ * `node_modules`, a Python `.venv`, CocoaPods, Xcode's DerivedData, and Next.js output, where no
+ * session starts and whose search would take a while in a large checkout.
  */
-const GEMINI_PATHSPECS = [":(glob)**/.gemini/**", ":(glob)**/.env", ":(exclude,glob)**/node_modules/**"];
+const GEMINI_PATHSPECS = [
+  ":(glob)**/.gemini/**",
+  ":(glob)**/.env",
+  ...["node_modules", ".venv", "Pods", "DerivedData", ".next"].map(directory => `:(exclude,glob)**/${directory}/**`),
+];
 
 /** Untracked and ignored files under `directory` that Gemini CLI would load, relative to it; `exclude` names more pathspecs to skip. */
 export function untrackedGeminiFiles(directory: string, exclude: string[] = []): string[] {
@@ -34,9 +39,10 @@ export function untrackedGeminiFiles(directory: string, exclude: string[] = []):
  * nearest first, as `~/...` under the home directory. Gemini loads only the nearest one it finds,
  * but removing that one exposes the next.
  */
-export function envFilesAbove(root: string, home = homedir()): string[] {
-  // Gemini starts from process.cwd(), a real path.
+export function envFilesAbove(root: string, homeDirectory = homedir()): string[] {
+  // Gemini starts from process.cwd(), a real path; a linked home resolves too, so its files show once, as `~/...`.
   const workspace = realpathSync(root);
+  const home = existsSync(homeDirectory) ? realpathSync(homeDirectory) : homeDirectory;
   const directories = [path.join(workspace, "checkouts")];
   for (let directory = path.dirname(workspace); ; directory = path.dirname(directory)) {
     directories.push(directory);
@@ -47,13 +53,26 @@ export function envFilesAbove(root: string, home = homedir()): string[] {
   return files.filter(file => existsSync(file)).map(file => (file.startsWith(`${home}/`) ? `~${file.slice(home.length)}` : file));
 }
 
+/** What a scan found, and the checkouts, relative to the workspace, that Git could not list. */
+export interface GeminiScan {
+  readonly files: string[];
+  readonly unscanned: string[];
+}
+
 /**
  * Every file Gemini CLI would load that no review sees: untracked and ignored ones in the
  * workspace (outside `checkouts/`) and in each checkout, relative to the workspace, then the
- * `.env` files above them.
+ * `.env` files above them. A checkout Git cannot list is reported, not allowed to hide the rest.
  */
-export function geminiFiles(root: string, checkouts: string[], home = homedir()): string[] {
-  const workspace = untrackedGeminiFiles(root, ["checkouts/**"]);
-  const inside = checkouts.flatMap(directory => untrackedGeminiFiles(directory).map(file => path.relative(root, path.join(directory, file))));
-  return [...workspace, ...inside, ...envFilesAbove(root, home)];
+export function geminiFiles(root: string, checkouts: string[], home = homedir()): GeminiScan {
+  const files = untrackedGeminiFiles(root, ["checkouts/**"]);
+  const unscanned: string[] = [];
+  for (const directory of checkouts) {
+    try {
+      files.push(...untrackedGeminiFiles(directory).map(file => path.relative(root, path.join(directory, file))));
+    } catch {
+      unscanned.push(path.relative(root, directory));
+    }
+  }
+  return { files: [...files, ...envFilesAbove(root, home)], unscanned };
 }

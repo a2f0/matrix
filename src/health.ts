@@ -1,5 +1,6 @@
 import type { Audit } from "./audit";
 import { type CheckoutStatus, notReady, staleInstalls } from "./checkouts";
+import type { GeminiScan } from "./geminiFiles";
 import type { GitTransport } from "./gitTransport";
 import type { Recurrence, Retro } from "./sweepRetro";
 import { leftoverRepos, type Teardown } from "./teardown";
@@ -58,9 +59,10 @@ export interface HealthInputs {
   readonly personalSkills?: string[];
   /**
    * Untracked or ignored `.gemini/` and `.env` files Gemini CLI would load from the workspace and
-   * its checkouts, relative to the workspace, then `.env` files above them; absent when unreadable.
+   * its checkouts, relative to the workspace, then `.env` files above them, and the checkouts Git
+   * could not list; absent when the workspace is unreadable.
    */
-  readonly geminiFiles?: string[];
+  readonly geminiFiles?: GeminiScan;
 }
 
 export interface Health {
@@ -95,7 +97,7 @@ export interface Health {
   };
   readonly screenshots?: ScreenshotLinks;
   readonly personalSkills?: string[];
-  readonly geminiFiles?: string[];
+  readonly geminiFiles?: GeminiScan;
   readonly sweeps: {
     readonly read: string[];
     readonly recurring: Array<Pick<Recurrence, "kind" | "cause" | "repos" | "sweeps">>;
@@ -135,12 +137,22 @@ function machineSuggestions(inputs: HealthInputs, low: boolean, leftover: string
     suggestions.push(
       `Remove ${plural(personal.length, "personal skill")} that ${personal.length === 1 ? "overrides" : "override"} agent-tool's managed copies (${list(personal)}); see docs/tooling.md#shared-skills.`,
     );
-  const gemini = inputs.geminiFiles ?? [];
-  if (gemini.length > 0)
-    suggestions.push(
-      `Review ${plural(gemini.length, "file")} Gemini CLI would load that no review sees (${list(gemini)}): keep secrets in \`.secrets\` and remove what nothing needs; see docs/tooling.md#gemini-cli.`,
-    );
-  return suggestions;
+  return [...suggestions, ...geminiSuggestions(inputs.geminiFiles)];
+}
+
+/** Files Gemini CLI would load that no review sees, then checkouts Git could not list for them. */
+function geminiSuggestions(scan: GeminiScan | undefined): string[] {
+  const { files = [], unscanned = [] } = scan ?? {};
+  return [
+    ...(files.length > 0
+      ? [
+          `Review ${plural(files.length, "file")} Gemini CLI would load that no review sees (${list(files)}): keep secrets in \`.secrets\` and remove what nothing needs; see docs/tooling.md#gemini-cli.`,
+        ]
+      : []),
+    ...(unscanned.length > 0
+      ? [`Find out why Git could not list files in ${list(unscanned)}, so health can see what Gemini CLI would load there; see docs/tooling.md#gemini-cli.`]
+      : []),
+  ];
 }
 
 /** A red default branch blocks shipping there, so its repair comes with the checkout's state. */
@@ -310,8 +322,9 @@ function personalSkillsLine(paths: string[]): string {
   return `- Personal skills: ${list(paths)} ${paths.length === 1 ? "overrides a managed skill" : "override managed skills"}.`;
 }
 
-function geminiFilesLine(files: string[]): string {
-  return `- Gemini files: ${files.length === 0 ? "none outside review" : `${list(files)} outside review`}.`;
+function geminiFilesLine({ files, unscanned }: GeminiScan): string {
+  const found = files.length === 0 ? "none outside review" : `${list(files)} outside review`;
+  return `- Gemini files: ${found}${unscanned.length === 0 ? "" : `; could not scan ${list(unscanned)}`}.`;
 }
 
 function sweepsLine(sweeps: Health["sweeps"]): string {
