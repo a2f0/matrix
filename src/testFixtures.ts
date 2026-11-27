@@ -87,6 +87,9 @@ export function gitInit(directory: string): void {
  */
 export function checkoutFixture(directory: string, agentTool: string, files: Record<string, string | null> = {}): void {
   const name = path.basename(directory);
+  // agent-tool 0.1.78 is the first release that generates a Gemini policy.
+  const [major = 0, minor = 0, patch = 0] = agentTool.split(".").map(Number);
+  const generatesGemini = major > 0 || minor > 1 || (minor === 1 && patch >= 78);
   const all: Record<string, string | null> = {
     "AGENTS.md": GUIDANCE,
     "README.md": README,
@@ -96,11 +99,15 @@ export function checkoutFixture(directory: string, agentTool: string, files: Rec
       scripts: { "agent:run": "agent-tool run", "agent:logs": "agent-tool logs", "agents:check": "agent-tool skills check && agent-tool permissions check" },
       devDependencies: { "@a2f0/agent-tool": agentTool },
     }),
-    ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) } }),
+    // A pin that generates Gemini rules records its policy, as its sync writes it.
+    ".agent-tool-permissions.json": JSON.stringify(
+      generatesGemini ? { schemaVersion: 1, gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) } } : { schemaVersion: 1 },
+    ),
     ".claude/settings.json": JSON.stringify({ permissions: { allow: [], ask: [] } }),
     ".codex/rules/agent-tool.rules": 'prefix_rule(pattern=["agent-tool", "doctor"], decision="allow")\n',
-    ".gemini/policies/agent-tool.toml":
-      '[[rule]]\ntoolName = "run_shell_command"\ncommandRegex = \'agent-tool doctor(?: |")\'\ndecision = "allow"\npriority = 0\n',
+    ".gemini/policies/agent-tool.toml": generatesGemini
+      ? '[[rule]]\ntoolName = "run_shell_command"\ncommandRegex = \'agent-tool doctor( |")\'\ndecision = "allow"\npriority = 0\n'
+      : null,
     "agent-tool.json": JSON.stringify({ schemaVersion: 1 }),
     ".agent-tool-skills.json": JSON.stringify({
       schemaVersion: 1,

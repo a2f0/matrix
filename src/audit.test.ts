@@ -138,16 +138,26 @@ describe("audit", () => {
   });
 
   test("allows agent-tool's Gemini policy only where the permissions manifest records it", () => {
-    expect(failures(checkout("generated"), ["no-gemini-config"])).toEqual({});
+    const current = (name: string, files: Record<string, string | null> = {}) => {
+      checkoutFixture(path.join(root, "checkouts", name), "0.1.78", files);
+      return `a2f0/${name}`;
+    };
+    expect(failures(current("generated"), ["no-gemini-config", "harness-permissions"])).toEqual({});
+    // Below the release that generates it, nothing checks a recorded policy's content, so it is hand-written.
+    const older = checkout("older-policy", {
+      ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, gemini: { file: ".gemini/policies/agent-tool.toml", sha256: "0".repeat(64) } }),
+      ".gemini/policies/agent-tool.toml": "x\n",
+    });
+    expect(failures(older, ["no-gemini-config"])).toEqual({ "no-gemini-config": "tracked .gemini/policies/agent-tool.toml" });
     // Without the record, or with one naming another file, it is a hand-written policy.
     for (const manifest of [{ schemaVersion: 1 }, { schemaVersion: 1, gemini: { file: ".gemini/settings.json", sha256: "0".repeat(64) } }]) {
-      const repo = checkout(`unrecorded-${Object.keys(manifest).length}`, {
+      const repo = current(`unrecorded-${Object.keys(manifest).length}`, {
         ".agent-tool-permissions.json": JSON.stringify(manifest),
         ".gemini/settings.json": "{}\n",
       });
       expect(failures(repo, ["no-gemini-config"])["no-gemini-config"]).toBe("tracked .gemini/policies/agent-tool.toml, .gemini/settings.json");
     }
-    expect(failures(checkout("nested-policy", { "packages/web/.gemini/policies/agent-tool.toml": "x\n" }), ["no-gemini-config"])).toEqual({
+    expect(failures(current("nested-policy", { "packages/web/.gemini/policies/agent-tool.toml": "x\n" }), ["no-gemini-config"])).toEqual({
       "no-gemini-config": "tracked packages/web/.gemini/policies/agent-tool.toml",
     });
   });
@@ -224,6 +234,7 @@ describe("audit", () => {
         { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: "all", gemini: { file: ".gemini/settings.json", sha256: "x" } }) },
       ],
       ["listed", { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: ["claude", "gemini"] }) }],
+      ["gemini-only", { ".agent-tool-permissions.json": JSON.stringify({ schemaVersion: 1, scope: "gemini" }) }],
     ] as const)
       expect(failures(checkout(name, { ...current, ...files }), ["harness-permissions"])).toEqual({ "harness-permissions": gemini });
     // An older pin has no Gemini policy to generate yet: agent-tool-latest moves it, after its grace period.

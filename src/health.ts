@@ -58,7 +58,7 @@ export interface HealthInputs {
   /** Personal skills named like a skill agent-tool manages here, which override that managed copy; `~/...` under the home directory. */
   readonly personalSkills?: string[];
   /**
-   * Untracked or ignored `.gemini/` and `.env` files Gemini CLI would load from the workspace and
+   * Untracked or ignored `GEMINI.md`, `.gemini/`, and `.env` files Gemini CLI would load from the workspace and
    * its checkouts, relative to the workspace, then `.env` files above them, and the checkouts Git
    * could not list; absent when the workspace is unreadable.
    */

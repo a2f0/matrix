@@ -1,5 +1,6 @@
-// Files Gemini CLI loads that no review sees. Gemini reads settings, policies, commands, and skills
-// from `.gemini/` in the directory a session starts in, and the nearest `.gemini/.env` (in a
+// Files Gemini CLI loads that no review sees. Gemini reads `GEMINI.md` beside `AGENTS.md` under the
+// documented user settings, settings, policies, commands, and skills from `.gemini/` in the
+// directory a session starts in, and the nearest `.gemini/.env` (in a
 // trusted folder) or `.env` from there upward, then `~/.gemini/.env` or `~/.env`, into the
 // environment of every shell command it runs (Gemini CLI 0.71.1, `findEnvFile`). The audit reads
 // only tracked files, so health lists the untracked and ignored ones in the workspace and each

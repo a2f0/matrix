@@ -22,10 +22,20 @@ export const MINIMUM_AGENT_TOOL = "0.1.21";
 /** Where `agent-tool permissions install` writes Gemini CLI rules, from agent-tool 0.1.78 on. */
 const GEMINI_POLICY = ".gemini/policies/agent-tool.toml";
 
-/** The Gemini policy the checkout's permissions manifest records, so `permissions check` keeps it current; undefined without one. */
+/**
+ * The Gemini policy the checkout's permissions manifest records, so `permissions check` keeps it
+ * current; undefined without one, or below the release that generates it, where nothing checks it.
+ */
 function recordedGeminiPolicy(checkout: Checkout): string | undefined {
+  if (!generatesGeminiPolicy(checkout)) return undefined;
   const recorded = object(parseObject(checkout.read(".agent-tool-permissions.json"))?.gemini)?.file;
   return recorded === GEMINI_POLICY ? GEMINI_POLICY : undefined;
+}
+
+/** Whether the checkout pins an agent-tool release that generates the Gemini policy. */
+function generatesGeminiPolicy(checkout: Checkout): boolean {
+  const pin = dependency(checkout.packageJson, AGENT_TOOL);
+  return pin !== undefined && EXACT_VERSION.test(pin) && compareVersions(pin, GEMINI_POLICY_RELEASE) >= 0;
 }
 
 /** The first agent-tool release that generates the Gemini policy; older pins reach it through agent-tool-latest's grace period. */
@@ -39,7 +49,7 @@ const GEMINI_POLICY_RELEASE = "0.1.78";
  */
 function scopeCoversGemini(manifest: Record<string, unknown>): boolean {
   const { scope } = manifest;
-  return scope === undefined || scope === "all" || (Array.isArray(scope) && scope.includes("gemini"));
+  return scope === undefined || scope === "all" || scope === "gemini" || (Array.isArray(scope) && scope.includes("gemini"));
 }
 
 /**
@@ -49,8 +59,7 @@ function scopeCoversGemini(manifest: Record<string, unknown>): boolean {
  */
 function missingGeminiPolicy(checkout: Checkout): boolean {
   const manifest = parseObject(checkout.read(".agent-tool-permissions.json"));
-  const pin = dependency(checkout.packageJson, AGENT_TOOL);
-  if (!manifest || pin === undefined || !EXACT_VERSION.test(pin) || compareVersions(pin, GEMINI_POLICY_RELEASE) < 0) return false;
+  if (!manifest || !generatesGeminiPolicy(checkout)) return false;
   return scopeCoversGemini(manifest) && (!recordedGeminiPolicy(checkout) || checkout.tracked(GEMINI_POLICY).length === 0);
 }
 /**
@@ -464,7 +473,7 @@ export const RULES: readonly Rule[] = [
   },
   {
     id: "no-gemini-config",
-    summary: "No GEMINI.md or Gemini CLI files in .gemini/; Gemini CLI reads AGENTS.md through its user settings",
+    summary: "No GEMINI.md or Gemini CLI files in .gemini/ beyond agent-tool's recorded policy; Gemini CLI reads AGENTS.md through its user settings",
     source: ONBOARDING,
     check: checkout => {
       // Gemini Code Assist reads only the root .gemini/config.yaml and styleguide.md, to configure GitHub reviews,
