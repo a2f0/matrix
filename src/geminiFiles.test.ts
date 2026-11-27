@@ -29,19 +29,23 @@ test(
       "notes.env",
       "GEMINI.md",
       "packages/web/build/.env",
+      "scripts/build/GEMINI.md",
+      "dist/GEMINI.md",
     ]);
-    writeFileSync(path.join(repo, ".gitignore"), ".env\nnode_modules/\n");
+    writeFileSync(path.join(repo, ".gitignore"), ".env\nnode_modules/\ndist/\n");
     gitIn(repo, "add", ".gitignore", ".gemini/policies/agent-tool.toml");
     gitIn(repo, "commit", "-q", "-m", "init");
     // `.env` and `packages/web/.env` are ignored, the rest untracked; the committed policy is tracked.
+    // A build tree's ignored files are skipped, but one Git does not ignore can hold source.
     expect(untrackedGeminiFiles(repo)).toEqual([
       ".env",
       ".gemini/settings.json",
       "GEMINI.md",
       "packages/web/.env",
       "packages/web/.gemini/commands/deploy.toml",
+      "scripts/build/GEMINI.md",
     ]);
-    expect(untrackedGeminiFiles(repo, ["/packages/"])).toEqual([".env", ".gemini/settings.json", "GEMINI.md"]);
+    expect(untrackedGeminiFiles(repo, ["/packages/"])).toEqual([".env", ".gemini/settings.json", "GEMINI.md", "scripts/build/GEMINI.md"]);
     expect(() => untrackedGeminiFiles(tempDir("matrix-not-git"))).toThrow(/git ls-files failed/);
   },
   SPAWNS,
@@ -79,6 +83,7 @@ test(
     gitInit(root);
     gitInit(checkout);
     write(root, [".gemini/settings.json", "checkouts/demo/.env", "checkouts/demo/app/.gemini/.env", "checkouts/demo/.venv/lib/pkg/.env"]);
+    writeFileSync(path.join(checkout, ".gitignore"), ".venv/\n");
     write(base, [".env"]);
     // A checkout Git cannot list is reported on its own, and the others are still scanned.
     const broken = path.join(root, "checkouts", "broken");

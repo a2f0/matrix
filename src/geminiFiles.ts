@@ -12,8 +12,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 /**
- * Installed and build trees, where no session starts and whose search would take a while in a
- * large checkout: packages, a Python `.venv`, Ruby's `vendor`, CocoaPods, Xcode's DerivedData,
+ * Installed and build trees, whose ignored files are skipped, since no session starts there and
+ * their search would take a while in a large checkout: packages, a Python `.venv`, Ruby's `vendor`, CocoaPods, Xcode's DerivedData,
  * Gradle, Cargo's `target`, Expo, Dart, Terraform, Wrangler, Python caches, and build,
  * test-coverage, cache, and framework output.
  */
@@ -44,22 +44,36 @@ const BUILD_TREES = [
 /** `GEMINI.md`, which the documented user settings load beside `AGENTS.md`, `.gemini/` contents, and `.env` files at any depth. */
 const GEMINI_PATHSPECS = [":(glob)**/GEMINI.md", ":(glob)**/.gemini/**", ":(glob)**/.env"];
 
+/** How long one listing may take before its checkout is reported as unscanned. */
+const LIST_TIMEOUT_MS = 60_000;
+
 /**
  * Untracked and ignored files under `directory` that Gemini CLI would load, relative to it, outside
- * BUILD_TREES and the directories `skip` names as gitignore patterns, such as `/checkouts/`. These
- * are `-x` patterns, which Git does not descend into, unlike exclude pathspecs; without
- * `--exclude-standard` Git reads no `.gitignore`, so ignored files are still listed.
+ * the directories `skip` names as gitignore patterns, such as `/checkouts/`. Untracked files Git
+ * does not ignore are listed everywhere, since a folder named `build` can hold source; ignored ones
+ * outside BUILD_TREES. Both use `-x` patterns, which Git does not descend into, unlike exclude
+ * pathspecs; without `--exclude-standard`, the second pass reads no `.gitignore`.
  */
 export function untrackedGeminiFiles(directory: string, skip: string[] = []): string[] {
-  const patterns = [...BUILD_TREES.map(tree => `${tree}/`), ...skip].flatMap(pattern => ["-x", pattern]);
-  const result = spawnSync("git", ["ls-files", "--others", "-z", ...patterns, "--", ...GEMINI_PATHSPECS], {
+  const unignored = listFiles(directory, ["--others", "--exclude-standard", ...excluding(skip)]);
+  const outsideTrees = listFiles(directory, ["--others", ...excluding([...BUILD_TREES.map(tree => `${tree}/`), ...skip])]);
+  return [...new Set([...unignored, ...outsideTrees])].sort();
+}
+
+function excluding(patterns: string[]): string[] {
+  return patterns.flatMap(pattern => ["-x", pattern]);
+}
+
+function listFiles(directory: string, options: string[]): string[] {
+  const result = spawnSync("git", ["ls-files", "-z", ...options, "--", ...GEMINI_PATHSPECS], {
     cwd: directory,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    timeout: LIST_TIMEOUT_MS,
   });
   if (result.error) throw new Error(`git ls-files could not run in ${directory}: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`git ls-files failed in ${directory}: ${result.stderr.trim()}`);
-  return result.stdout.split("\0").filter(Boolean).sort();
+  return result.stdout.split("\0").filter(Boolean);
 }
 
 /**

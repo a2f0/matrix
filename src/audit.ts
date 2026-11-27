@@ -42,15 +42,15 @@ function generatesGeminiPolicy(checkout: Checkout): boolean {
 }
 
 /**
- * Whether a permissions manifest's scope covers Gemini: no scope, as before agent-tool 0.1.78,
- * whose sync installs `all`; `all`; or a non-empty list of harnesses naming it. A list without
- * Gemini is a repository's recorded choice. Undefined for any other value, which no release writes.
+ * How a permissions manifest's scope treats Gemini: no scope, as before agent-tool 0.1.78, whose
+ * sync installs `all`, `all`, and a non-empty list of harnesses naming it cover it; a list without
+ * it is a repository's recorded choice; any other value, which no release writes, is invalid.
  */
-function scopeCoversGemini(scope: unknown): boolean | undefined {
-  if (scope === undefined || scope === "all") return true;
+function geminiScope(scope: unknown): "covers" | "excludes" | "invalid" {
+  if (scope === undefined || scope === "all") return "covers";
   const list: unknown[] | undefined = Array.isArray(scope) ? scope : undefined;
-  if (list && list.length > 0 && list.every(harness => typeof harness === "string" && PERMISSION_HARNESSES.includes(harness))) return list.includes("gemini");
-  return undefined;
+  if (!list || list.length === 0 || !list.every(harness => typeof harness === "string" && PERMISSION_HARNESSES.includes(harness))) return "invalid";
+  return list.includes("gemini") ? "covers" : "excludes";
 }
 
 /**
@@ -65,10 +65,10 @@ function geminiPolicyProblem(checkout: Checkout): string | undefined {
   const manifest = parseObject(checkout.read(file));
   if (!manifest) return `${file} is not a JSON object; run agent-tool permissions install --apply`;
   if (!generatesGeminiPolicy(checkout)) return undefined;
-  const covers = scopeCoversGemini(manifest.scope);
-  if (covers === undefined)
+  const scope = geminiScope(manifest.scope);
+  if (scope === "invalid")
     return `${file} records scope ${JSON.stringify(manifest.scope)}, which names no known harnesses; run agent-tool permissions install --apply`;
-  if (covers && (!recordedGeminiPolicy(checkout) || checkout.tracked(GEMINI_POLICY).length === 0))
+  if (scope === "covers" && (!recordedGeminiPolicy(checkout) || checkout.tracked(GEMINI_POLICY).length === 0))
     return `no committed ${GEMINI_POLICY} recorded in ${file}; run agent-tool permissions install --apply`;
   return undefined;
 }
