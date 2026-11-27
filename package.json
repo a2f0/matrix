@@ -39,7 +39,7 @@
     "lint:branch-name": "agent-tool branch check"
   },
   "devDependencies": {
-    "@a2f0/agent-tool": "0.1.76",
+    "@a2f0/agent-tool": "0.1.78",
     "@biomejs/biome": "2.6.4",
     "@types/bun": "1.4.4",
     "knip": "6.44.1",

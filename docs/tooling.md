@@ -521,8 +521,10 @@ Gemini's authentication variables. Keep secret values in the `.secrets` link tha
 it.
 
 agent-tool generates Gemini rules that allow its routine commands in the
-`default` approval mode ([harness permissions](#harness-permissions)); other
-shell commands still ask. Gemini asks once, when a session starts, to accept a
+`default` approval mode when their arguments hold no shell syntax
+([harness permissions](#harness-permissions)); other shell commands, and
+routine ones with variables, substitution, parentheses, or braces, still ask,
+so a scoped title such as `pr open "fix(api): x"` prompts. Gemini asks once, when a session starts, to accept a
 new or changed policy file. agent-tool has no Gemini reviewer adapter, so
 Gemini cannot be `ship-pr`'s independent reviewer. These details follow Gemini
 CLI 0.71.1.
@@ -578,7 +580,7 @@ lists leads. Reviews flag new implicit machines.
 Agents can work without blanket approval when routine commands run freely and
 consequential ones ask. agent-tool assigns each of its commands a permission
 class and generates Claude Code, Codex, and Gemini CLI rules from them, as its
-[permissions guide](https://github.com/a2f0/agent-tool/blob/b1b9d0419233082bb5f4946566c2e84605ae42f3/docs/permissions.md)
+[permissions guide](https://github.com/a2f0/agent-tool/blob/6e5b75cc5a15164be0e6ebf0cdcfc3c3a03d301f/docs/permissions.md)
 describes. Every managed repository that pins agent-tool:
 
 - commits the generated `.claude/settings.json`, `.codex/rules/agent-tool.rules`,
